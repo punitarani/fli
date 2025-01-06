@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Optional, Union
 
-from pydantic import BaseModel, PositiveInt
+from pydantic import BaseModel, NonNegativeInt, PositiveInt
 
 from .airline import Airline
 from .airport import Airport
@@ -47,27 +47,27 @@ class Currency(Enum):
 
 
 class TimeRestrictions(BaseModel):
-    earliest_departure: Optional[int]
-    latest_departure: Optional[int]
-    earliest_arrival: Optional[int]
-    latest_arrival: Optional[int]
+    earliest_departure: Optional[NonNegativeInt]
+    latest_departure: Optional[PositiveInt]
+    earliest_arrival: Optional[NonNegativeInt]
+    latest_arrival: Optional[PositiveInt]
 
 
 class PassengerInfo(BaseModel):
-    adults: int
-    children: int
-    infants_in_seat: int
-    infants_on_lap: int
+    adults: NonNegativeInt
+    children: NonNegativeInt
+    infants_in_seat: NonNegativeInt
+    infants_on_lap: NonNegativeInt
 
 
 class PriceLimit(BaseModel):
-    max_price: int
+    max_price: PositiveInt
     currency: Optional[Currency] = Currency.USD
 
 
 class LayoverRestrictions(BaseModel):
     airports: Optional[List[Airport]]
-    max_duration: Optional[int]
+    max_duration: Optional[PositiveInt]
 
 
 class FlightSegment(BaseModel):
@@ -84,14 +84,14 @@ class FlightLeg(BaseModel):
     arrival_airport: Airport
     departure_datetime: datetime
     arrival_datetime: datetime
-    duration: int
+    duration: PositiveInt
 
 
 class FlightResult(BaseModel):
     legs: List[FlightLeg]
     price: float
-    duration: int
-    stops: int
+    duration: PositiveInt
+    stops: NonNegativeInt
 
 
 class FlightSearchFilters(BaseModel):
@@ -102,7 +102,7 @@ class FlightSearchFilters(BaseModel):
     seat_type: SeatType = SeatType.ECONOMY
     price_limit: Optional[PriceLimit] = None
     airlines: Optional[List[Airline]] = None
-    max_duration: Optional[int] = None
+    max_duration: Optional[PositiveInt] = None
     layover_restrictions: Optional[LayoverRestrictions] = None
     sort_by: SortBy = SortBy.NONE
 
