@@ -1,12 +1,9 @@
 """Tests for Search class."""
 
-import itertools
 from datetime import datetime, timedelta
-from typing import List
 
 import pytest
 
-from fli import Search, SearchFilters
 from fli.models import (
     Airport,
     MaxStops,
@@ -14,6 +11,7 @@ from fli.models import (
     SeatType,
     SortBy,
 )
+from fli.search import Search, SearchFilters
 
 
 @pytest.fixture
