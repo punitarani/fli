@@ -53,17 +53,16 @@ You can also use the package programmatically:
 from datetime import datetime, timedelta
 from fli.models import (
     Airport,
-    FlightSearchFilters,
     FlightSegment,
     MaxStops,
     PassengerInfo,
     SeatType,
     SortBy,
 )
-from fli.search import Search
+from fli.search import Search, SearchFilters
 
 # Create search filters
-filters = FlightSearchFilters(
+filters = SearchFilters(
     departure_airport=Airport.JFK,
     arrival_airport=Airport.LAX,
     departure_date=(datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
