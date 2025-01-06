@@ -9,7 +9,46 @@ comprehensive filtering options.
 pip install git+https://github.com/punitarani/fli.git
 ```
 
-## Quick Example
+## CLI Usage
+
+[![CLI Demo](data/cli-demo.png)](data/cli-demo.png)
+
+The package provides a command-line interface for quick flight searches:
+
+```bash
+# Basic search
+fli search JFK LHR 2025-10-25
+
+# Search with time range
+fli search JFK LHR 2025-10-25 -t 6-20
+
+# Search with specific airlines
+fli search JFK LHR 2025-10-25 --airlines BA KL
+
+# Full example with all options
+fli search JFK LHR 2025-10-25 -t 6-20 -a BA KL -s BUSINESS -x NON_STOP -o DURATION
+```
+
+### CLI Options
+
+- `-t, --time`: Time range in 24h format (e.g., 6-20)
+- `-a, --airlines`: List of airline codes (e.g., BA KL)
+- `-s, --seat`: Seat type (ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST)
+- `-x, --stops`: Maximum stops (ANY, NON_STOP, ONE_STOP, TWO_PLUS_STOPS)
+- `-o, --sort`: Sort results by (CHEAPEST, DURATION, DEPARTURE_TIME, ARRIVAL_TIME)
+
+### Help
+
+Get detailed help with:
+
+```bash
+fli --help
+fli search --help
+```
+
+## Python API Usage
+
+You can also use the package programmatically:
 
 ```python
 from datetime import datetime, timedelta
@@ -21,28 +60,17 @@ from fli.models import (
     PassengerInfo,
     SeatType,
     SortBy,
-    TripType,
 )
 from fli.search import Search
 
 # Create search filters
 filters = FlightSearchFilters(
-    trip_type=TripType.ONE_WAY,
-    passenger_info=PassengerInfo(
-        adults=1,
-        children=0,
-        infants_in_seat=0,
-        infants_on_lap=0,
-    ),
-    flight_segments=[
-        FlightSegment(
-            departure_airport=[[Airport.JFK, 0]],
-            arrival_airport=[[Airport.LAX, 0]],
-            travel_date=(datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
-        ),
-    ],
-    stops=MaxStops.NON_STOP,
+    departure_airport=Airport.JFK,
+    arrival_airport=Airport.LAX,
+    departure_date=(datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
+    passenger_info=PassengerInfo(adults=1),
     seat_type=SeatType.ECONOMY,
+    stops=MaxStops.NON_STOP,
     sort_by=SortBy.CHEAPEST,
 )
 
@@ -62,45 +90,53 @@ for flight in flights:
         print(f"To: {leg.arrival_airport.value} at {leg.arrival_datetime}")
 ```
 
-## Key Features
+## Features
 
-- Search flights with flexible filters
-- Support for one-way trips
-- Filter by stops, airlines, seat types
-- Sort by price, duration, departure/arrival times
-- Built-in rate limiting and retry mechanisms
+- **Search Options**:
+    - One-way flights
+    - Flexible departure times
+    - Multiple airlines
+    - Various cabin classes
+    - Stop preferences
+    - Custom sorting
 
-## Search Options
+- **Cabin Classes**:
+    - Economy
+    - Premium Economy
+    - Business
+    - First
 
-- **Trip Types**: One-way trips
-- **Passengers**: Adults, children, infants (lap/seat)
-- **Cabin Classes**: Economy, Premium Economy, Business, First
-- **Stops**: Non-stop, 1 stop, 2+ stops
-- **Sort Options**: Price, Duration, Departure/Arrival time
-- **Additional Filters**: Airlines, layover airports, price limits
+- **Sort Options**:
+    - Price
+    - Duration
+    - Departure Time
+    - Arrival Time
 
-## Models
-
-The package provides several data models for structuring flight searches:
-
-### Core Models
-
-- `FlightSearchFilters`: Main search parameters
-- `FlightSegment`: Individual flight segment details
-- `PassengerInfo`: Passenger counts and types
-- `FlightResult`: Search result containing flight details
-
-### Enums
-
-- `Airport`: Available airports
-- `Airline`: Supported airlines
-- `SeatType`: Cabin classes
-- `MaxStops`: Stop restrictions
-- `SortBy`: Result sorting options
+- **Built-in Features**:
+    - Rate limiting
+    - Automatic retries
+    - Error handling
+    - Beautiful CLI output
 
 ## Error Handling
 
-The search engine includes:
+The package includes comprehensive error handling:
 
+- Input validation
+- Rate limiting
 - Automatic retries for failed requests
-- Rate limiting to prevent API throttling
+- Clear error messages
+
+## Development
+
+```bash
+# Install development dependencies
+poetry install
+
+# Run tests
+poetry run pytest
+
+# Run linting
+poetry run ruff check .
+poetry run ruff format .
+```
