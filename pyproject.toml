@@ -1,0 +1,45 @@
+[tool.poetry]
+name = "fli"
+version = "0.1.0"
+description = "Fli"
+authors = ["Punit Arani <punit@joinslash.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.13"
+curl-cffi = "^0.7.4"
+httpx = "^0.28.1"
+free-proxy = "^1.1.3"
+pydantic = "^2.10.4"
+ratelimit = "^2.2.1"
+requests = "^2.32.3"
+tenacity = "^9.0.0"
+
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.4"
+pytest-xdist = "^3.6.1"
+ruff = "^0.8.4"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+
+[tool.pytest.ini_options]
+markers = [
+    "parallel: marks tests that can run in parallel"
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+indent-width = 4
+
+[tool.ruff.lint]
+select = ["I"]
+
+[tool.ruff.format]
+indent-style = "space"
+quote-style = "double"
+skip-magic-trailing-comma = false
