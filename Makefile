@@ -17,7 +17,11 @@ lint-fix:
 
 # Run tests
 test:
-	poetry run pytest -vv -n 8 -m parallel
+	poetry run pytest -vv
+test-fuzz:
+	poetry run pytest -vv --fuzz
+test-all:
+	poetry run pytest -vv --all
 
 # Run the app
 run:

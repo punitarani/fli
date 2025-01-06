@@ -80,6 +80,7 @@ def generate_random_test_cases(num_tests: int) -> List[Tuple]:
     return test_cases
 
 
+@pytest.mark.fuzz
 @pytest.mark.parallel
 @pytest.mark.parametrize(
     "dep_airport, arr_airport, dep_date, adults, children, infants_on_lap, infants_in_seat, seat_type, stops, sort_by",
@@ -98,7 +99,6 @@ def test_search_fuzz(
     seat_type: SeatType,
     stops: MaxStops,
     sort_by: SortBy,
-    capfd,
 ):
     """
     Parameterized fuzz test for flight search with various filter combinations.
