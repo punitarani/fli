@@ -6,7 +6,7 @@ from typing import List
 
 import pytest
 
-from fli import Search
+from fli import Search, SearchFilters
 from fli.models import (
     Airport,
     MaxStops,
@@ -14,7 +14,6 @@ from fli.models import (
     SeatType,
     SortBy,
 )
-from fli.search import SearchFilters
 
 
 @pytest.fixture
