@@ -1,7 +1,14 @@
 # fli
 
-A Python package for searching flights using Google Flights data. Provides a clean interface for flight searches with
-comprehensive filtering options.
+A Python package for searching flights using Google Flights data.
+Provides a clean interface for flight searches with comprehensive filtering options.
+
+Simply get started with the CLI by running:
+
+```bash
+pipx install git+https://github.com/punitarani/fli.git
+fli --help
+```
 
 ## Installation
 
