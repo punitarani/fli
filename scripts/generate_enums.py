@@ -30,7 +30,7 @@ def generate_airport_enum():
         output_file.write("from enum import Enum\n\n")
         output_file.write("class Airport(Enum):\n")
 
-        for code, name in sorted(entries):
+        for code, name in entries:
             # Sanitize enum key to ensure valid Python identifier
             sanitized_code = "".join(c if c.isalnum() else "_" for c in code)
             output_file.write(f'    {sanitized_code} = "{name}"\n')
@@ -62,7 +62,7 @@ def generate_airline_enum():
         output_file.write("from enum import Enum\n\n")
         output_file.write("class Airline(Enum):\n")
 
-        for code, name in sorted(entries):
+        for code, name in entries:
             # Sanitize enum key to ensure valid Python identifier
             sanitized_code = "".join(c if c.isalnum() else "_" for c in code)
             if sanitized_code[0].isdigit():
