@@ -230,3 +230,142 @@ class FlightSearchFilters(BaseModel):
         wrapped_filters = [None, formatted_json]
         # Finally, encode the whole thing
         return urllib.parse.quote(json.dumps(wrapped_filters, separators=(",", ":")))
+
+
+class DateSearchFilters(BaseModel):
+    trip_type: TripType = TripType.ONE_WAY
+    passenger_info: PassengerInfo
+    flight_segments: List[FlightSegment]
+    stops: MaxStops = MaxStops.ANY
+    seat_type: SeatType = SeatType.ECONOMY
+    price_limit: Optional[PriceLimit] = None
+    airlines: Optional[List[Airline]] = None
+    max_duration: Optional[PositiveInt] = None
+    layover_restrictions: Optional[LayoverRestrictions] = None
+    from_date: str
+    to_date: str
+
+    def format(self) -> list:
+        def serialize(obj):
+            if isinstance(obj, Airport) or isinstance(obj, Airline):
+                return obj.name
+            if isinstance(obj, Enum):
+                return obj.value
+            if isinstance(obj, list):
+                return [serialize(item) for item in obj]
+            if isinstance(obj, dict):
+                return {key: serialize(value) for key, value in obj.items()}
+            if isinstance(obj, BaseModel):
+                return serialize(obj.dict(exclude_none=True))
+            return obj
+
+        # Format flight segments
+        formatted_segments = []
+        for segment in self.flight_segments:
+            # Format airport codes with correct nesting
+            segment_filters = [
+                [
+                    [
+                        [serialize(airport[0]), serialize(airport[1])]
+                        for airport in segment.departure_airport
+                    ]
+                ],
+                [
+                    [
+                        [serialize(airport[0]), serialize(airport[1])]
+                        for airport in segment.arrival_airport
+                    ]
+                ],
+            ]
+
+            # Time restrictions
+            if segment.time_restrictions:
+                time_filters = [
+                    segment.time_restrictions.earliest_departure,
+                    segment.time_restrictions.latest_departure,
+                    segment.time_restrictions.earliest_arrival,
+                    segment.time_restrictions.latest_arrival,
+                ]
+            else:
+                time_filters = None
+
+            # Airlines
+            airlines_filters = None
+            if self.airlines:
+                sorted_airlines = sorted(self.airlines, key=lambda x: x.value)
+                airlines_filters = [serialize(airline) for airline in sorted_airlines]
+
+            # Layover restrictions
+            layover_airports = (
+                [serialize(a) for a in self.layover_restrictions.airports]
+                if self.layover_restrictions and self.layover_restrictions.airports
+                else None
+            )
+            layover_duration = (
+                self.layover_restrictions.max_duration if self.layover_restrictions else None
+            )
+
+            segment_formatted = [
+                segment_filters[0],  # departure airport
+                segment_filters[1],  # arrival airport
+                time_filters,  # time restrictions
+                serialize(self.stops.value),  # stops
+                airlines_filters,  # airlines
+                None,  # placeholder
+                segment.travel_date,  # travel date
+                [self.max_duration] if self.max_duration else None,  # max duration
+                None,  # placeholder
+                layover_airports,  # layover airports
+                None,  # placeholder
+                None,  # placeholder
+                layover_duration,  # layover duration
+                None,  # emissions
+                3,  # constant value
+            ]
+            formatted_segments.append(segment_formatted)
+
+        # Create the main filters structure
+        filters = [
+            None,  # placeholder
+            [
+                None,  # placeholder
+                None,  # placeholder
+                serialize(self.trip_type.value),
+                None,  # placeholder
+                [],  # empty array
+                serialize(self.seat_type.value),
+                [
+                    self.passenger_info.adults,
+                    self.passenger_info.children,
+                    self.passenger_info.infants_on_lap,
+                    self.passenger_info.infants_in_seat,
+                ],
+                [None, self.price_limit.max_price] if self.price_limit else None,
+                None,  # placeholder
+                None,  # placeholder
+                None,  # placeholder
+                None,  # placeholder
+                None,  # placeholder
+                formatted_segments,
+                None,  # placeholder
+                None,  # placeholder
+                None,  # placeholder
+                1,  # placeholder (hardcoded to 1)
+            ],
+            [
+                serialize(self.from_date),
+                serialize(self.to_date),
+            ],
+        ]
+
+        return filters
+
+    def encode(self) -> str:
+        """Format and URL encode the filters."""
+        formatted_filters = self.format()
+        # First convert the formatted filters to a JSON string
+        formatted_json = json.dumps(formatted_filters, separators=(",", ":"))
+        # Then wrap it in a list with null
+        wrapped_filters = [None, formatted_json]
+        # Finally, encode the whole thing
+        return urllib.parse.quote(json.dumps(wrapped_filters, separators=(",", ":")))
