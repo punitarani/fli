@@ -54,10 +54,10 @@ class TimeRestrictions(BaseModel):
 
 
 class PassengerInfo(BaseModel):
-    adults: NonNegativeInt
-    children: NonNegativeInt
-    infants_in_seat: NonNegativeInt
-    infants_on_lap: NonNegativeInt
+    adults: NonNegativeInt = 1
+    children: NonNegativeInt = 0
+    infants_in_seat: NonNegativeInt = 0
+    infants_on_lap: NonNegativeInt = 0
 
 
 class PriceLimit(BaseModel):
