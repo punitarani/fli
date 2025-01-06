@@ -191,9 +191,9 @@ def search(
     """
     Search for flights with flexible filtering options.
 
-    Examples:
-        fli search JFK LHR 2025-10-25 --time 6-20 --airlines BA KL
-        fli search SFO NYC 2025-11-01 -t 9-17 --stops NON_STOP --sort DURATION
+    Examples:\n
+        fli search JFK LHR 2025-10-25 --time 6-20 --airlines BA KL\n
+        fli search SFO NYC 2025-11-01 -t 9-17 --stops NON_STOP --sort DURATION\n
         fli search LAX MIA 2025-12-25 --seat BUSINESS
     """
     with console.status("[bold green]Searching for flights...") as status:
