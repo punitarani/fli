@@ -49,24 +49,6 @@ class Search:
         if hasattr(self, "_client"):
             self._client.close()
 
-    def _create_flight_search_data(self, params: SearchFilters) -> FlightSearchFilters:
-        """
-        Helper function to convert from our simpler param model to the existing FlightSearchFilters model.
-        """
-        return FlightSearchFilters(
-            passenger_info=params.passenger_info,
-            flight_segments=[
-                FlightSegment(
-                    departure_airport=[[params.departure_airport, 0]],
-                    arrival_airport=[[params.arrival_airport, 0]],
-                    travel_date=params.departure_date,
-                )
-            ],
-            stops=params.stops,
-            seat_type=params.seat_type,
-            sort_by=params.sort_by,
-        )
-
     @sleep_and_retry
     @limits(calls=10, period=1)
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(), reraise=True)
@@ -102,6 +84,25 @@ class Search:
 
         except Exception as e:
             raise Exception(f"Search failed: {str(e)}") from e
+
+    @staticmethod
+    def _create_flight_search_data(params: SearchFilters) -> FlightSearchFilters:
+        """
+        Helper function to convert from our simpler param model to the existing FlightSearchFilters model.
+        """
+        return FlightSearchFilters(
+            passenger_info=params.passenger_info,
+            flight_segments=[
+                FlightSegment(
+                    departure_airport=[[params.departure_airport, 0]],
+                    arrival_airport=[[params.arrival_airport, 0]],
+                    travel_date=params.departure_date,
+                )
+            ],
+            stops=params.stops,
+            seat_type=params.seat_type,
+            sort_by=params.sort_by,
+        )
 
     @staticmethod
     def _parse_flights_data(data: List) -> FlightResult:
