@@ -17,16 +17,16 @@ The package provides a command-line interface for quick flight searches:
 
 ```bash
 # Basic search
-fli search JFK LHR 2025-10-25
+fli JFK LHR 2025-10-25
 
 # Search with time range
-fli search JFK LHR 2025-10-25 -t 6-20
+fli JFK LHR 2025-10-25 -t 6-20
 
 # Search with specific airlines
-fli search JFK LHR 2025-10-25 --airlines BA KL
+fli JFK LHR 2025-10-25 --airlines BA KL
 
 # Full example with all options
-fli search JFK LHR 2025-10-25 -t 6-20 -a BA KL -s BUSINESS -x NON_STOP -o DURATION
+fli JFK LHR 2025-10-25 -t 6-20 -a BA KL -s BUSINESS -x NON_STOP -o DURATION
 ```
 
 ### CLI Options
@@ -43,7 +43,6 @@ Get detailed help with:
 
 ```bash
 fli --help
-fli search --help
 ```
 
 ## Python API Usage
