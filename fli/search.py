@@ -113,10 +113,10 @@ class Search:
             stops=len(data[0][2]) - 1,
             legs=[
                 FlightLeg(
-                    airline=getattr(Airline, fl[22][0]),
+                    airline=Search._parse_airline(fl[22][0]),
                     flight_number=fl[22][1],
-                    departure_airport=getattr(Airport, fl[3]),
-                    arrival_airport=getattr(Airport, fl[6]),
+                    departure_airport=Search._parse_airport(fl[3]),
+                    arrival_airport=Search._parse_airport(fl[6]),
                     departure_datetime=Search._parse_datetime(fl[20], fl[8]),
                     arrival_datetime=Search._parse_datetime(fl[21], fl[10]),
                     duration=fl[11],
@@ -146,3 +146,19 @@ class Search:
             raise ValueError("Date and time arrays must contain at least one non-None value")
 
         return datetime(*(x or 0 for x in date_arr), *(x or 0 for x in time_arr))
+
+    @staticmethod
+    def _parse_airline(airline_code: str) -> Airline:
+        """
+        Parse the airline code to the corresponding Airline enum.
+        """
+        if airline_code[0].isdigit():
+            airline_code = f"_{airline_code}"
+        return getattr(Airline, airline_code)
+
+    @staticmethod
+    def _parse_airport(airport_code: str) -> Airport:
+        """
+        Parse the airport code to the corresponding Airport enum.
+        """
+        return getattr(Airport, airport_code)
