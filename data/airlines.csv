@@ -1,0 +1,615 @@
+IATA,Airline
+0A,Amber Air
+0B,Blue Air
+0C,IBL Aviation
+0D,Darwin Airline
+0J,Jetclub
+0V,Vietnam Air Services Company (VASCO)
+1C,Electronic Data Systems
+1D,Radixx
+1J,"Axess international network, Inc."
+1L,Open Skies Consultative Commission
+1N,Navitaire
+1Q,Sirena
+1R,Hainan Phoenix Information Systems
+1Y,Electronic Data Systems
+1Z,Sabre Pacific
+2A,Deutsche Bahn
+2B,Albawings
+2D,Aero VIP
+2F,Frontier Flying Service
+2G,Cargoitalia
+2H,Thalys
+2J,Air Burkina
+2L,Helvetic Airways
+2M,Moldavian Airlines
+2O,Air Salone
+2P,Air Philippines
+2Q,Air Cargo Carriers
+2R,Via Rail Canada
+2U,Air Guinee Express
+2W,Welcome Air
+2Y,Air Andaman
+2Z,Chang An Airlines
+3F,FlyOne Armenia
+3G,Atlant-Soyuz Airlines
+3K,Jetstar Asia Airways
+3M,Silver Airways
+3N,Air Urga
+3O,Air Arabia Maroc
+3P,Tiara Air
+3R,Moskovia Airlines
+3T,Turan Air
+3U,Sichuan Airlines
+3V,TNT Airways
+3W,Euromanx Airways
+3X,Japan Air Commuter
+3Z,Smartwings Poland
+4B,Boutique Air
+4F,Air City
+4G,Gazpromavia
+4H,United Airways
+4I,Knighthawk Air Express
+4M,LATAM Argentina
+4N,Air North Charter - Canada
+4S,Finalair Congo
+4T,Belair Airlines
+4U,Germanwings
+4Z,Airlink
+5A,Alpine Air Express
+5C,Challenge Airlines IL
+5G,Skyservice Airlines
+5J,Cebu Pacific
+5K,Hi Fly
+5L,AeroSur
+5N,Nordavia
+5O,Europe Airpost
+5P,Small Planet Airlines
+5R,Rutaca
+5V,Lviv Airlines
+5X,United Parcel Service
+5Y,Atlas Air
+6B,TUI fly Nordic
+6D,Smartwings Slovakia
+6E,IndiGo
+6H,Israir
+6K,Asian Spirit
+6Q,Slovak Airlines
+6W,Saratov Airlines Joint Stock Company
+6Y,Smartlynx Airlines
+6Z,Ukrainian Cargo Airways
+7E,Sylt Air GmbH
+7G,Star Flyer
+7K,Kogalymavia Air Company
+7M,Mayair
+7N,PAWA Dominicana
+7R,BRA-Transportes Aéreos
+7S,Ryan Air Services
+7W,Windrose Air
+8A,Atlas Blue
+8B,Caribbean Star Airlines
+8E,Bering Air
+8F,Fischer Air
+8H,BH Air
+8I,Myway Airlines
+8J,Komiinteravia
+8K,Exploits Valley Air Services
+8N,Barents AirLink
+8O,West Coast Air
+8P,Pacific Coastal Airlines
+8S,Scorpio Aviation
+8T,Air Tindi
+8U,Afriqiyah Airways
+8Z,Wizz Air Bulgaria
+9A,Eagle Express Air Charter
+9C,Spring Airlines
+9D,Aero Continente Dominicana
+9K,Cape Air
+9M,Central Mountain Air
+9O,National Airways Cameroon
+9P,Fly Jinnah
+9Q,PB Air
+9R,Phuket Air
+9U,Air Moldova
+9V,Vipair Airlines
+9W,Jet Airways
+9X,Southern Airways
+A0,Avianca Argentina
+A3,Aegean Airlines
+A4,Southern Winds Airlines
+A7,Air Plus Comet
+A9,Georgian Airways
+AA,American Airlines
+AC,Air Canada
+AF,Air France
+AH,Air Algérie
+AI,Air India Limited
+AJ,Aero Contractors
+AK,AirAsia
+AM,Aeroméxico
+AO,Australian Airlines
+AP,AlbaStar
+AR,Aerolíneas Argentinas
+AS,"Alaska Airlines, Inc."
+AT,Royal Air Maroc
+AU,Austral Líneas Aéreas
+AV,Avianca
+AY,Finnair
+B2,Belavia Belarusian Airlines
+B5,Flightline
+B6,JetBlue Airways
+B7,UNI Air
+B8,Eritrean Airlines
+BA,British Airways
+BB,Seaborne Airlines
+BC,Skymark Airlines
+BD,BMI
+BE,Flybe
+BG,Biman Bangladesh Airlines
+BH,Hawkair
+BI,Royal Brunei Airlines
+BK,Potomac Air
+BL,Pacific Airlines
+BP,Air Botswana
+BR,EVA Air
+BT,Air Baltic
+BU,Buryat Airlines Aircompany
+BV,Blue Panorama Airlines
+BW,Caribbean Airlines
+BY,TUI Airways
+C3,Independent Carrier (ICAR)
+C4,Zimex Aviation
+C5,CommutAir
+C6,CanJet
+C9,Cirrus Airlines
+CD,Corendon Dutch Airlines
+CE,Nationwide Airlines
+CG,Airlines PNG
+CH,Bemidji Airlines
+CI,China Airlines
+CK,China Cargo Airlines
+CL,Lufthansa CityLine
+CM,Copa Airlines
+CT,Civil Air Transport
+CU,Cubana de Aviación
+CW,Air Marshall Islands
+CX,Cathay Pacific
+CY,Cyprus Airways
+CZ,China Southern Airlines
+D0,DHL Air Limited
+D2,Severstal Air Company
+D3,Daallo Airlines
+D4,Alidaunia
+D5,Dauair
+D6,Interair South Africa
+D8,Norwegian Air Sweden
+D9,Donavia
+DA,Air Georgia
+DC,Golden Air
+DE,Condor Flugdienst
+DG,Cebgo
+DK,Eastland Air
+DM,Maersk Air
+DN,Norwegian Air Argentina
+DO,Dominicana de Aviación
+DQ,Coastal Air
+DS,easyJet Switzerland
+DT,TAAG Angola Airlines
+DU,Norwegian Long Haul
+DW,Aero-Charter Ukraine
+DX,DAT Danish Air Transport
+DY,Norwegian Air Shuttle
+DZ,Donghai Airlines
+E0,Eos Airlines
+E1,Everbread
+E2/E6,Eurowings Europe
+E4,Aero Asia International
+E8,Alpi Eagles
+ED,AirExplore
+EE,Aero Airlines
+EI,Aer Lingus
+EJ,New England Airlines
+EK,Emirates Airlines
+EM,Empire Airlines
+EN,Air Dolomiti
+EP,Iran Aseman Airlines
+EQ,TAME
+ER,Astar Air Cargo
+ES,DHL International
+ET,Ethiopian Airlines
+EU,Empresa Ecuatoriana De Aviación
+EW,Eurowings
+EY,Etihad Airways
+F2,Fly Air
+F3,Faso Airways
+F4,Albarka Air
+F5,Cosmic Air
+F7,Flybaboo
+F8,Flair Airlines
+F9,Frontier Airlines
+FA,Safair
+FB,Bulgaria Air
+FC,Finncomm Airlines
+FF,Airshop
+FG,Ariana Afghan Airlines
+FI,Icelandair
+FJ,Fiji Airways
+FM,Shanghai Airlines
+FN,Regional Air Lines
+FR,Ryanair
+FW,Ibex Airlines
+FX,FedEx Express
+FZ,Flydubai
+G0,Ghana International Airlines
+G1,Gorkha Airlines
+G2,Avirex
+G4,Allegiant Air
+G5,China Express Airlines
+G9,Air Arabia
+GA,Garuda Indonesia
+GC,Gambia International Airlines
+GD,Air Alpha Greenland
+GE,TransAsia Airways
+GF,Gulf Air
+GL,Air Greenland
+GN,Air Gabon
+GO,Kuzu Airlines Cargo
+GQ,Big Sky Airlines
+GT,GB Airways
+GZ,Air Rarotonga
+H2,Sky Airline
+H6,Hageland Aviation Services
+H8,Dalavia
+HA,Hawaiian Airlines
+HE,German Airways
+HF,Hapagfly
+HG,Niki
+HH,Hope Air
+HK,Four Star Aviation / Four Star Cargo
+HM,Air Seychelles
+HN,Heavylift Cargo Airlines
+HR,Hahn Air
+HT,Aeromist-Kharkiv
+HU,Hainan Airlines
+HV,Transavia Holland
+HX,Hong Kong Airlines
+HY,Uzbekistan Airways
+I2,Iberia Express
+I5,AirAsia India
+I6,Sky Eyes
+I9,Indigo Airlines
+IA,Iraqi Airways
+IB,Iberia Airlines
+IC,Indian Airlines
+IE,Solomon Airlines
+IF,Islas Airways
+II,IBC Airways
+IM,Menajet
+IO,Indonesian Airlines
+IQ,Augsburg Airways
+IR,Iran Air
+IV,Wind Jet
+IX,Air India Express
+IY,Yemenia
+IZ,Arkia Israel Airlines
+J2,Azerbaijan Airlines
+J3,Northwestern Air
+J6,AVCOM
+J8,Berjaya Air
+JB,Helijet
+JC,JAL Express
+JD,Beijing Capital Airlines
+JE,Mango
+JK,Spanair
+JN,Excel Airways
+JP,Adria Airways
+JQ,Jetstar
+JR,Aero California
+JT,Lion Air
+JV,Bearskin Lake Air Service
+K2,Eurolot
+K3,Taquan Air Services
+K4,Kalitta Air
+K5,SeaPort Airlines
+K8,Airlink Zambia
+KA,Cathay Dragon
+KB,Druk Air
+KC,Air Astana
+KE,Korean Air
+KF,Blue1
+KH,Aloha Air Cargo
+KK,Atlasjet
+KL,KLM
+KM,Air Malta
+KN,China United Airlines
+KO,Alaska Central Express
+KP,Kiwi International Air Lines
+KQ,Kenya Airways
+KS,Peninsula Airways
+KU,Kuwait Airways
+KX,Cayman Airways
+KZ,Nippon Cargo Airlines
+L1,Lufthansa Systems
+L2,Lynden Air Cargo
+L4,Lynx Aviation
+L8,Air Luxor GB
+LA,LATAM Chile
+LC,Varig Logística
+LD,Air Hong Kong
+LG,Luxair
+LI,Leeward Islands Air Transport
+LK,Air Luxor
+LN,Libyan Arab Airlines
+LO,LOT Polish Airlines
+LP,LATAM Peru
+LQ,Lebanese Air Transport
+LR,LACSA
+LS,Jet2.com
+LU,LATAM Express
+LV,Albanian Airlines
+LX,Swiss International Air Lines
+LY,El Al Israel Airlines
+LZ,Balkan Bulgarian Airlines
+M5,Kenmore Air
+M6,Amerijet International
+M8,Mekong Airlines
+M9,Motor Sich Airlines
+MA,Malév Hungarian Airlines
+MC,Air Mobility Command
+MD,Air Madagascar
+ME,Middle East Airlines
+MF,Xiamen Airlines
+MG,Champion Air
+MH,Malaysia Airlines
+MI,SilkAir
+MK,Air Mauritius
+MN,Comair
+MP,Martinair
+MS,Egyptair
+MU,China Eastern Airlines
+MV,Air Mediterranean
+MX,Breeze Airways
+MZ,Merpati Nusantara Airlines
+N0,Norse Atlantic Airways
+N7,National Airlines
+NB,Sterling Airlines
+NF,Air Vanuatu
+NG,Lauda Air
+NH,All Nippon Airways
+NK,Spirit Airlines
+NL,Shaheen Air
+NN,VIM Airlines
+NP,Nile Air
+NQ,Air Japan
+NR,Pamir Airways
+NS,Hebei Airlines
+NT,Binter Canarias
+NU,Japan Transocean Air
+NV,Air Central
+NW,Northwest Airlines
+NX,Air Macau
+NY,Air Iceland
+O3,SF Airlines
+O4,Antrak Air
+O6,Avianca Brasil
+O7,OzJet
+O8,Oasis Hong Kong Airlines
+O9,Nova Airways
+OD,Malindo Airways
+OE,Asia Overnight Express
+OG,Play
+OK,Czech Airlines
+OM,MIAT Mongolian Airlines
+ON,Our Airline
+OO,SkyWest Airlines
+OP,Chalk's International Airlines
+OQ,Chongqing Airlines
+OR,TUI fly Netherlands
+OS,Austrian Airlines
+OT,Aeropelican Air Services
+OU,Croatia Airlines
+OW,Executive Airlines
+OX,Orient Thai Airlines
+P0,Proflight Zambia
+P2,Small Planet Airlines
+P5,AeroRepública
+P6,Privilege Style Líneas Aéreas
+PB,Provincial Airlines
+PD,Porter Airlines
+PF,Palestinian Airlines
+PG,Bangkok Airways
+PH,Polynesian Airlines
+PJ,Air Saint Pierre
+PK,Pakistan International Airlines
+PM,Tropic Air
+PO,Polar Air Cargo
+PP,Jet Aviation
+PQ,SkyUp
+PS,Ukraine International Airlines
+PT,Capital Cargo International Airlines
+PU,PLUNA
+PW,Precision Air
+PX,Air Niugini
+PY,Surinam Airways
+Q2,Maldivian (airline)
+Q3,Zambian Airways
+Q5,40-Mile Air
+Q6,Aero Condor Peru
+Q7,SkyBahamas
+Q8,Pacific East Asia Cargo Airlines
+Q9,Afrinat International Airlines
+QD,Air Class Líneas Aéreas
+QE,Crossair Europe
+QI,Cimber Sterling
+QJ,Jet Airways
+QK,Air Canada Jazz
+QM,Air Malawi
+QN,Air Armenia
+QP,Akasa Air
+QR,Qatar Airways
+QT,TAMPA
+QV,Lao Airlines
+QX,Horizon Air
+QY,European Air Transport
+QZ,Indonesia AirAsia
+R0,Royal Airlines
+R1,Sirin
+R2,Orenburg Airlines
+R6,RACSA
+R7,Aserca Airlines
+R8,Kyrgyzstan Airlines
+R9,Camai Air
+RA,Nepal Airlines
+RD,Ryan International Airlines
+REB,REBUS
+RG,Varig
+RI,Mandala Airlines
+RJ,Royal Jordanian
+RO,Tarom
+RQ,Kam Air
+RT,UVT Aero
+RW,Republic Airways
+RZ,Euro Exec Express
+S0,Slok Air Gambia
+S2,Air Sahara
+S3,Santa Barbara Airlines
+S4,SATA International
+S7,S7 Airlines
+S9,East African Safari Air
+SA,South African Airways
+SB,Air Caledonie International
+SC,Shandong Airlines
+SD,Sudan Airways
+SE,XL Airways France
+SF,Tassili Airlines
+SJ,Freedom Air
+SP,SATA Air Acores
+SS,Corsairfly
+ST,Germania
+SU,Aeroflot
+SV,Saudia
+SW,Air Namibia
+SY,Sun Country Airlines
+SZ,Air Southwest
+T3,Eastern Airways
+T4,TRIP Linhas Aéreas
+T5,Turkmenistan Airlines
+T6,Tavrey Airlines
+T7,Twin Jet
+TB,TUI fly Belgium
+TF,Malmö Aviation
+TG,Thai Airways International
+TJ,Tradewind Aviation
+TK,Turkish Airlines
+TM,Linhas Aéreas de Moçambique
+TN,Air Tahiti Nui
+TP,TAP Portugal
+TQ,Tandem Aero
+TS,Air Transat
+TU,Tunisair
+TV,Virgin Express
+TXZ,Thai Express Air
+U2,easyJet UK
+U3,Avies
+U5,SkyUp MT
+U6,Ural Airlines
+UA,United Airlines
+UB,Myanma Airways
+UC,LATAM Cargo Chile
+UD,Hex'Air
+UF,UM Airlines
+UJ,AlMasria Universal Airlines
+UK,Vistara
+UL,SriLankan Airlines
+UM,Air Zimbabwe
+UN,Transaero Airlines
+UO,Hong Kong Express Airways
+UP,Bahamasair
+UQ,O'Connor Airlines
+UR,Uganda Airlines
+UT,UTair Aviation
+UU,Air Austral
+UX,Air Europa
+UY,Cameroon Airlines
+UZ,El-Buraq Air Transport
+V0,Conviasa
+V3,Carpatair
+VG,VLM Airlines
+VI,Volga-Dnepr Airlines
+VN,Vietnam Airlines
+VNX,flyADVANCED
+VO,Tyrolean Airways
+VQ,Novo Air
+VR,TACV
+VS,Virgin Atlantic
+VT,Air Tahiti
+VV,Aerosvit Airlines
+VW,Aeromar
+W2,Canadian Western Airlines
+W5,Mahan Air
+W6,Wizz Air
+W8,Cargojet Airways
+WB,Rwandair Express
+WF,Widerøe
+WG,Sunwing Airlines
+WI,Aero Air
+WJ,JetSMART Argentina
+WN,Southwest Airlines
+WP,Air Antwerp
+WQ,Swift Air (Interstate Equipment Leasing)
+WS,WestJet
+WT,Wasaya Airways
+WV,Swe Fly
+WY,Oman Air
+WZ,West African Airlines
+X7,Chitaavia
+X9,Avion Express
+X9 KO,Khors Aircompany
+XC,Corendon Airlines
+XE,JSX (airline)
+XF,Vladivostok Air
+XL,Aerolane
+XN,XpressAir
+XP,Avelo Airlines
+XQ,SunExpress
+XS,SITA
+XV,Mississippi Valley Airlines
+XY,Flynas
+Y0,Yellow Air Taxi/Friendship Airways
+Y4,Volaris
+Y6,Batavia Air
+Y7,NordStar
+Y8,Suparna Airlines
+YB,Borajet
+YD,Cologne Air Transport GmbH
+YE,Aryan Cargo Express
+YH,West Caribbean Airways
+YI,Air Sunshine
+YJ,AMC Airlines
+YK,Cyprus Turkish Airlines
+YM,Montenegro Airlines
+YP,Air Premia
+YQ,TAR Aerolineas
+YS,Régional
+YU,Dominair
+YV,Mesa Airlines
+YW,Air Nostrum
+YX,Midwest Airlines
+Z0,Norse Atlantic UK
+Z2,Philippines AirAsia
+Z3,Avient Aviation
+Z4,Zoom Airlines
+Z5,GMG Airlines
+Z6,Dniproavia
+Z8,Línea Aérea Amaszonas
+Z9,MYAirline
+ZD,Ewa Air
+ZH,Shenzhen Airlines
+ZI,Aigle Azur
+ZK,Great Lakes Airlines
+ZL,Regional Express
+ZN,Key Airlines
+ZT,Titan Airways
+ZU,Helios Airways
+ZW,Air Wisconsin
+ZY,Sky Airlines
