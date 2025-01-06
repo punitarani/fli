@@ -488,6 +488,7 @@ class Airline(Enum):
     SF = "Tassili Airlines"
     SJ = "Freedom Air"
     SP = "SATA Air Acores"
+    SQ = "Singapore Airlines"
     SS = "Corsairfly"
     ST = "Germania"
     SU = "Aeroflot"
