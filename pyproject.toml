@@ -6,7 +6,7 @@ authors = ["Punit Arani <punit@joinslash.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.13"
+python = "^3.12"
 curl-cffi = "^0.7.4"
 httpx = "^0.28.1"
 free-proxy = "^1.1.3"
