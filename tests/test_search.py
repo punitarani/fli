@@ -11,13 +11,13 @@ from fli.models import (
     SeatType,
     SortBy,
 )
-from fli.search import Search, SearchFilters
+from fli.search import SearchFlights, SearchFlightsFilters
 
 
 @pytest.fixture
 def search():
     """Create a reusable Search instance."""
-    return Search()
+    return SearchFlights()
 
 
 @pytest.fixture
@@ -25,7 +25,7 @@ def basic_search_params():
     """Create basic search params for testing."""
     today = datetime.now()
     future_date = today + timedelta(days=30)
-    return SearchFilters(
+    return SearchFlightsFilters(
         departure_airport=Airport.PHX,
         arrival_airport=Airport.SFO,
         departure_date=future_date.strftime("%Y-%m-%d"),
@@ -45,7 +45,7 @@ def complex_search_params():
     """Create more complex search params for testing."""
     today = datetime.now()
     future_date = today + timedelta(days=60)
-    return SearchFilters(
+    return SearchFlightsFilters(
         departure_airport=Airport.JFK,
         arrival_airport=Airport.LAX,
         departure_date=future_date.strftime("%Y-%m-%d"),

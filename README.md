@@ -59,40 +59,40 @@ You can also use the package programmatically:
 ```python
 from datetime import datetime, timedelta
 from fli.models import (
-    Airport,
-    FlightSegment,
-    MaxStops,
-    PassengerInfo,
-    SeatType,
-    SortBy,
+  Airport,
+  FlightSegment,
+  MaxStops,
+  PassengerInfo,
+  SeatType,
+  SortBy,
 )
-from fli.search import Search, SearchFilters
+from fli.search import SearchFlights, SearchFlightsFilters
 
 # Create search filters
-filters = SearchFilters(
-    departure_airport=Airport.JFK,
-    arrival_airport=Airport.LAX,
-    departure_date=(datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
-    passenger_info=PassengerInfo(adults=1),
-    seat_type=SeatType.ECONOMY,
-    stops=MaxStops.NON_STOP,
-    sort_by=SortBy.CHEAPEST,
+filters = SearchFlightsFilters(
+  departure_airport=Airport.JFK,
+  arrival_airport=Airport.LAX,
+  departure_date=(datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
+  passenger_info=PassengerInfo(adults=1),
+  seat_type=SeatType.ECONOMY,
+  stops=MaxStops.NON_STOP,
+  sort_by=SortBy.CHEAPEST,
 )
 
 # Search flights
-search = Search()
+search = SearchFlights()
 flights = search.search(filters)
 
 # Process results
 for flight in flights:
-    print(f"Price: ${flight.price}")
-    print(f"Duration: {flight.duration} minutes")
-    print(f"Stops: {flight.stops}")
+  print(f"Price: ${flight.price}")
+  print(f"Duration: {flight.duration} minutes")
+  print(f"Stops: {flight.stops}")
 
-    for leg in flight.legs:
-        print(f"\nFlight: {leg.airline.value} {leg.flight_number}")
-        print(f"From: {leg.departure_airport.value} at {leg.departure_datetime}")
-        print(f"To: {leg.arrival_airport.value} at {leg.arrival_datetime}")
+  for leg in flight.legs:
+    print(f"\nFlight: {leg.airline.value} {leg.flight_number}")
+    print(f"From: {leg.departure_airport.value} at {leg.departure_datetime}")
+    print(f"To: {leg.arrival_airport.value} at {leg.arrival_datetime}")
 ```
 
 ## Features

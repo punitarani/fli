@@ -21,7 +21,7 @@ from fli.models import (
 )
 
 
-class SearchFilters(BaseModel):
+class SearchFlightsFilters(BaseModel):
     departure_airport: Airport
     arrival_airport: Airport
     departure_date: str
@@ -31,7 +31,7 @@ class SearchFilters(BaseModel):
     sort_by: SortBy = SortBy.CHEAPEST
 
 
-class Search:
+class SearchFlights:
     """Flight search implementation."""
 
     BASE_URL = "https://www.google.com/_/FlightsFrontendUi/data/travel.frontend.flights.FlightsFrontendService/GetShoppingResults"
@@ -52,7 +52,7 @@ class Search:
     @sleep_and_retry
     @limits(calls=10, period=1)
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(), reraise=True)
-    def search(self, filters: SearchFilters) -> List[FlightResult] | None:
+    def search(self, filters: SearchFlightsFilters) -> List[FlightResult] | None:
         """
         Perform the flight search using the new simplified parameters.
         """
@@ -86,7 +86,7 @@ class Search:
             raise Exception(f"Search failed: {str(e)}") from e
 
     @staticmethod
-    def _create_flight_search_data(params: SearchFilters) -> FlightSearchFilters:
+    def _create_flight_search_data(params: SearchFlightsFilters) -> FlightSearchFilters:
         """
         Helper function to convert from our simpler param model to the existing FlightSearchFilters model.
         """
@@ -112,12 +112,12 @@ class Search:
             stops=len(data[0][2]) - 1,
             legs=[
                 FlightLeg(
-                    airline=Search._parse_airline(fl[22][0]),
+                    airline=SearchFlights._parse_airline(fl[22][0]),
                     flight_number=fl[22][1],
-                    departure_airport=Search._parse_airport(fl[3]),
-                    arrival_airport=Search._parse_airport(fl[6]),
-                    departure_datetime=Search._parse_datetime(fl[20], fl[8]),
-                    arrival_datetime=Search._parse_datetime(fl[21], fl[10]),
+                    departure_airport=SearchFlights._parse_airport(fl[3]),
+                    arrival_airport=SearchFlights._parse_airport(fl[6]),
+                    departure_datetime=SearchFlights._parse_datetime(fl[20], fl[8]),
+                    arrival_datetime=SearchFlights._parse_datetime(fl[21], fl[10]),
                     duration=fl[11],
                 )
                 for fl in data[0][2]

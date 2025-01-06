@@ -13,7 +13,7 @@ from rich.text import Text
 from typing_extensions import Annotated
 
 from fli.models import Airline, Airport, MaxStops, PassengerInfo, SeatType, SortBy
-from fli.search import Search, SearchFilters
+from fli.search import SearchFlights, SearchFlightsFilters
 
 app = typer.Typer(
     help="Search for flights using Google Flights data",
@@ -206,7 +206,7 @@ def search(
             sort_by = getattr(SortBy, sort.upper())
 
             # Create search filters
-            filters = SearchFilters(
+            filters = SearchFlightsFilters(
                 departure_airport=departure_airport,
                 arrival_airport=arrival_airport,
                 departure_date=date,
@@ -217,7 +217,7 @@ def search(
             )
 
             # Perform search
-            search_client = Search()
+            search_client = SearchFlights()
             flights = search_client.search(filters)
 
             if not flights:

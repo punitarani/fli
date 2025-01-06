@@ -13,13 +13,13 @@ from fli.models import (
     SeatType,
     SortBy,
 )
-from fli.search import Search, SearchFilters
+from fli.search import SearchFlights, SearchFlightsFilters
 
 
 @pytest.fixture
 def search():
     """Create a reusable Search instance."""
-    return Search()
+    return SearchFlights()
 
 
 def generate_test_id(val, argname=None, idx=None) -> str:
@@ -87,7 +87,7 @@ def generate_random_test_cases(num_tests: int) -> List[Tuple]:
     ids=generate_test_id,
 )
 def test_search_fuzz(
-    search: Search,
+    search: SearchFlights,
     dep_airport: Airport,
     arr_airport: Airport,
     dep_date: datetime,
@@ -110,7 +110,7 @@ def test_search_fuzz(
         infants_in_seat=infants_in_seat,
     )
 
-    search_filters = SearchFilters(
+    search_filters = SearchFlightsFilters(
         departure_airport=dep_airport,
         arrival_airport=arr_airport,
         departure_date=dep_date.strftime("%Y-%m-%d"),

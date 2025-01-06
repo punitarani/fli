@@ -1,6 +1,6 @@
-from .search import Search, SearchFilters
+from .flights import SearchFlights, SearchFlightsFilters
 
 __all__ = [
-    "Search",
-    "SearchFilters",
+    "SearchFlights",
+    "SearchFlightsFilters",
 ]
