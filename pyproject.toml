@@ -14,9 +14,10 @@ pydantic = "^2.10.4"
 ratelimit = "^2.2.1"
 requests = "^2.32.3"
 tenacity = "^9.0.0"
+typer = "^0.15.1"
 
 [tool.poetry.scripts]
-fli = "fli.cli:main"
+fli = "fli.cli:app"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.4"
