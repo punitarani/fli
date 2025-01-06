@@ -25,9 +25,7 @@ class SearchFilters(BaseModel):
     departure_airport: Airport
     arrival_airport: Airport
     departure_date: str
-    passenger_info: PassengerInfo = PassengerInfo(
-        adults=1, children=0, infants_in_seat=0, infants_on_lap=0
-    )
+    passenger_info: PassengerInfo = PassengerInfo(adults=1)
     seat_type: SeatType = SeatType.ECONOMY
     stops: MaxStops = MaxStops.ANY
     sort_by: SortBy = SortBy.CHEAPEST
