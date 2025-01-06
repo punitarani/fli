@@ -71,7 +71,7 @@ class Search:
 
     @sleep_and_retry
     @limits(calls=10, period=1)
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=10, max=60), reraise=True)
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(), reraise=True)
     def search(self, filters: SearchFilters) -> List[FlightResult] | None:
         """
         Perform the flight search using the new simplified parameters.
@@ -113,15 +113,15 @@ class Search:
             stops=len(data[0][2]) - 1,
             legs=[
                 FlightLeg(
-                    airline=Airline[flight[22][0]],
-                    flight_number=flight[22][1],
-                    departure_airport=Airport[flight[3]],
-                    arrival_airport=Airport[flight[6]],
-                    departure_datetime=Search._parse_datetime(flight[20], flight[8]),
-                    arrival_datetime=Search._parse_datetime(flight[21], flight[10]),
-                    duration=flight[11],
+                    airline=getattr(Airline, fl[22][0]),
+                    flight_number=fl[22][1],
+                    departure_airport=getattr(Airport, fl[3]),
+                    arrival_airport=getattr(Airport, fl[6]),
+                    departure_datetime=Search._parse_datetime(fl[20], fl[8]),
+                    arrival_datetime=Search._parse_datetime(fl[21], fl[10]),
+                    duration=fl[11],
                 )
-                for flight in data[0][2]
+                for fl in data[0][2]
             ],
         )
         return flight
