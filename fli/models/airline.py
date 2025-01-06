@@ -192,6 +192,7 @@ class Airline(Enum):
     DE = "Condor Flugdienst"
     DG = "Cebgo"
     DK = "Eastland Air"
+    DL = "Delta Air Lines"
     DM = "Maersk Air"
     DN = "Norwegian Air Argentina"
     DO = "Dominicana de Aviación"
