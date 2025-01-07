@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
-from datetime import datetime
+from datetime import datetime, timedelta
+from enum import Enum
 from typing import List, Optional
 
 import typer
@@ -12,14 +13,35 @@ from rich.table import Table
 from rich.text import Text
 from typing_extensions import Annotated
 
-from fli.models import Airline, Airport, MaxStops, PassengerInfo, SeatType, SortBy
-from fli.search import SearchFlights, SearchFlightsFilters
+from fli.models import (
+    Airline,
+    Airport,
+    DateSearchFilters,
+    FlightSegment,
+    MaxStops,
+    PassengerInfo,
+    SeatType,
+    SortBy,
+)
+from fli.search import SearchDates, SearchFlights, SearchFlightsFilters
 
 app = typer.Typer(
     help="Search for flights using Google Flights data",
     add_completion=True,
 )
 console = Console()
+
+
+class DayOfWeek(str, Enum):
+    """Days of the week."""
+
+    MONDAY = "monday"
+    TUESDAY = "tuesday"
+    WEDNESDAY = "wednesday"
+    THURSDAY = "thursday"
+    FRIDAY = "friday"
+    SATURDAY = "saturday"
+    SUNDAY = "sunday"
 
 
 def format_airport(airport: Airport) -> str:
@@ -141,6 +163,103 @@ def display_flight_results(flights: list):
         console.print()
 
 
+def filter_dates_by_days(dates: list, days: List[DayOfWeek]) -> list:
+    """Filter dates by days of the week."""
+    if not days:
+        return dates
+
+    day_numbers = {
+        DayOfWeek.MONDAY: 0,
+        DayOfWeek.TUESDAY: 1,
+        DayOfWeek.WEDNESDAY: 2,
+        DayOfWeek.THURSDAY: 3,
+        DayOfWeek.FRIDAY: 4,
+        DayOfWeek.SATURDAY: 5,
+        DayOfWeek.SUNDAY: 6,
+    }
+
+    allowed_days = {day_numbers[day] for day in days}
+    return [date_price for date_price in dates if date_price.date.weekday() in allowed_days]
+
+
+def display_date_results(dates: list):
+    """Display date search results in a beautiful format."""
+    if not dates:
+        console.print(Panel("No flights found for these dates", style="red"))
+        return
+
+    table = Table(title="Cheapest Dates to Fly", box=box.ROUNDED)
+    table.add_column("Date", style="cyan")
+    table.add_column("Day", style="yellow")
+    table.add_column("Price", style="green")
+
+    for date_price in dates:
+        table.add_row(
+            date_price.date.strftime("%Y-%m-%d"),
+            date_price.date.strftime("%A"),
+            f"${date_price.price:,.2f}",
+        )
+
+    console.print(table)
+    console.print()
+
+
+def search_flights(
+    from_airport: str,
+    to_airport: str,
+    date: str,
+    time: Optional[tuple[int, int]] = None,
+    airlines: Optional[List[str]] = None,
+    seat: str = "ECONOMY",
+    stops: str = "ANY",
+    sort: str = "CHEAPEST",
+):
+    """Core flight search functionality."""
+    try:
+        # Parse parameters
+        departure_airport = getattr(Airport, from_airport.upper())
+        arrival_airport = getattr(Airport, to_airport.upper())
+        seat_type = getattr(SeatType, seat.upper())
+        max_stops = getattr(MaxStops, stops.upper())
+        sort_by = getattr(SortBy, sort.upper())
+
+        # Create search filters
+        filters = SearchFlightsFilters(
+            departure_airport=departure_airport,
+            arrival_airport=arrival_airport,
+            departure_date=date,
+            passenger_info=PassengerInfo(adults=1),
+            seat_type=seat_type,
+            stops=max_stops,
+            sort_by=sort_by,
+        )
+
+        # Perform search
+        search_client = SearchFlights()
+        flights = search_client.search(filters)
+
+        if not flights:
+            console.print(Panel("No flights found.", style="red"))
+            raise typer.Exit(1)
+
+        # Apply time filter if specified
+        if time:
+            start_hour, end_hour = time
+            flights = filter_flights_by_time(flights, start_hour, end_hour)
+
+        # Apply airline filter if specified
+        airline_list = parse_airlines(airlines)
+        if airline_list:
+            flights = filter_flights_by_airlines(flights, airline_list)
+
+        # Display results
+        display_flight_results(flights)
+
+    except (AttributeError, ValueError) as e:
+        console.print(f"[red]Error:[/red] {str(e)}")
+        raise typer.Exit(1)
+
+
 @app.command()
 def search(
     from_airport: Annotated[str, typer.Argument(help="Departure airport code (e.g., JFK)")],
@@ -196,46 +315,200 @@ def search(
         fli search SFO NYC 2025-11-01 -t 9-17 --stops NON_STOP --sort DURATION\n
         fli search LAX MIA 2025-12-25 --seat BUSINESS
     """
-    with console.status("[bold green]Searching for flights...") as status:
+    with console.status("[bold green]Searching for flights..."):
+        search_flights(
+            from_airport=from_airport,
+            to_airport=to_airport,
+            date=date,
+            time=time,
+            airlines=airlines,
+            seat=seat,
+            stops=stops,
+            sort=sort,
+        )
+
+
+@app.callback(invoke_without_command=True)
+def main(ctx: typer.Context):
+    """
+    Search for flights using Google Flights data.
+    If no command is provided, the search command will be used.
+    """
+    # If no command is provided, show help
+    if ctx.invoked_subcommand is None:
+        ctx.get_help()
+        raise typer.Exit()
+
+
+def cli():
+    """Entry point for the CLI that handles default command."""
+    import sys
+
+    args = sys.argv[1:]
+    if not args:
+        app()
+        return
+
+    # If the first argument isn't a command, treat as search
+    if args[0] not in ["search", "cheap", "--help", "-h"]:
+        sys.argv.insert(1, "search")
+
+    app()
+
+
+@app.command()
+def cheap(
+    from_airport: Annotated[str, typer.Argument(help="Departure airport code (e.g., JFK)")],
+    to_airport: Annotated[str, typer.Argument(help="Arrival airport code (e.g., LHR)")],
+    from_date: Annotated[
+        str, typer.Option("--from", help="Start date (YYYY-MM-DD)", callback=validate_date)
+    ] = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d"),
+    to_date: Annotated[
+        str, typer.Option("--to", help="End date (YYYY-MM-DD)", callback=validate_date)
+    ] = (datetime.now() + timedelta(days=60)).strftime("%Y-%m-%d"),
+    seat: Annotated[
+        str,
+        typer.Option(
+            "--seat",
+            "-s",
+            help="Seat type (ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST)",
+        ),
+    ] = "ECONOMY",
+    stops: Annotated[
+        str,
+        typer.Option(
+            "--stops",
+            "-x",
+            help="Maximum number of stops (ANY, NON_STOP, ONE_STOP, TWO_PLUS_STOPS)",
+        ),
+    ] = "ANY",
+    monday: Annotated[
+        bool,
+        typer.Option(
+            "--monday",
+            "-mon",
+            help="Include Mondays in results",
+        ),
+    ] = False,
+    tuesday: Annotated[
+        bool,
+        typer.Option(
+            "--tuesday",
+            "-tue",
+            help="Include Tuesdays in results",
+        ),
+    ] = False,
+    wednesday: Annotated[
+        bool,
+        typer.Option(
+            "--wednesday",
+            "-wed",
+            help="Include Wednesdays in results",
+        ),
+    ] = False,
+    thursday: Annotated[
+        bool,
+        typer.Option(
+            "--thursday",
+            "-thu",
+            help="Include Thursdays in results",
+        ),
+    ] = False,
+    friday: Annotated[
+        bool,
+        typer.Option(
+            "--friday",
+            "-fri",
+            help="Include Fridays in results",
+        ),
+    ] = False,
+    saturday: Annotated[
+        bool,
+        typer.Option(
+            "--saturday",
+            "-sat",
+            help="Include Saturdays in results",
+        ),
+    ] = False,
+    sunday: Annotated[
+        bool,
+        typer.Option(
+            "--sunday",
+            "-sun",
+            help="Include Sundays in results",
+        ),
+    ] = False,
+):
+    """
+    Find the cheapest dates to fly between two airports.
+
+    Examples:\n
+        fli cheap JFK LHR\n
+        fli cheap SFO NYC --from 2025-01-01 --to 2025-02-01\n
+        fli cheap LAX MIA --seat BUSINESS --stops NON_STOP\n
+        fli cheap JFK LHR --monday --friday  # Only show Monday and Friday flights\n
+        fli cheap SFO NYC --monday --wednesday --friday  # Show weekday options
+    """
+    with console.status("[bold green]Searching for cheapest dates...") as status:
         try:
             # Parse parameters
             departure_airport = getattr(Airport, from_airport.upper())
             arrival_airport = getattr(Airport, to_airport.upper())
             seat_type = getattr(SeatType, seat.upper())
             max_stops = getattr(MaxStops, stops.upper())
-            sort_by = getattr(SortBy, sort.upper())
+
+            # Create flight segment
+            flight_segment = FlightSegment(
+                departure_airport=[[departure_airport, 0]],
+                arrival_airport=[[arrival_airport, 0]],
+                travel_date=from_date,
+            )
 
             # Create search filters
-            filters = SearchFlightsFilters(
+            filters = DateSearchFilters(
                 departure_airport=departure_airport,
                 arrival_airport=arrival_airport,
-                departure_date=date,
                 passenger_info=PassengerInfo(adults=1),
+                flight_segments=[flight_segment],
                 seat_type=seat_type,
                 stops=max_stops,
-                sort_by=sort_by,
+                from_date=from_date,
+                to_date=to_date,
             )
 
             # Perform search
-            search_client = SearchFlights()
-            flights = search_client.search(filters)
+            search_client = SearchDates()
+            dates = search_client.search(filters)
 
-            if not flights:
-                console.print(Panel("No flights found.", style="red"))
+            if not dates:
+                console.print(Panel("No flights found for these dates.", style="red"))
                 raise typer.Exit(1)
 
-            # Apply time filter if specified
-            if time:
-                start_hour, end_hour = time
-                flights = filter_flights_by_time(flights, start_hour, end_hour)
+            # Filter by days if any day filters are specified
+            selected_days = []
+            if monday:
+                selected_days.append(DayOfWeek.MONDAY)
+            if tuesday:
+                selected_days.append(DayOfWeek.TUESDAY)
+            if wednesday:
+                selected_days.append(DayOfWeek.WEDNESDAY)
+            if thursday:
+                selected_days.append(DayOfWeek.THURSDAY)
+            if friday:
+                selected_days.append(DayOfWeek.FRIDAY)
+            if saturday:
+                selected_days.append(DayOfWeek.SATURDAY)
+            if sunday:
+                selected_days.append(DayOfWeek.SUNDAY)
 
-            # Apply airline filter if specified
-            airline_list = parse_airlines(airlines)
-            if airline_list:
-                flights = filter_flights_by_airlines(flights, airline_list)
+            dates = filter_dates_by_days(dates, selected_days)
+
+            if not dates:
+                console.print(Panel("No flights found for the selected days.", style="red"))
+                raise typer.Exit(1)
 
             # Display results
-            display_flight_results(flights)
+            display_date_results(dates)
 
         except (AttributeError, ValueError) as e:
             console.print(f"[red]Error:[/red] {str(e)}")
@@ -243,4 +516,4 @@ def search(
 
 
 if __name__ == "__main__":
-    app()
+    cli()

@@ -17,7 +17,7 @@ tenacity = "^9.0.0"
 typer = "^0.15.1"
 
 [tool.poetry.scripts]
-fli = "fli.cli:app"
+fli = "fli.cli:cli"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.4"
