@@ -96,8 +96,8 @@ def search(
     seat: Annotated[
         str,
         typer.Option(
-            "--seat",
-            "-s",
+            "--class",
+            "-c",
             help="Seat type (ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST)",
         ),
     ] = "ECONOMY",
@@ -105,7 +105,7 @@ def search(
         str,
         typer.Option(
             "--stops",
-            "-x",
+            "-s",
             help="Maximum number of stops (ANY, 0 for non-stop, 1 for one stop, 2+ for two stops)",
         ),
     ] = "ANY",
