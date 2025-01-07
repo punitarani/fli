@@ -1,11 +1,8 @@
 import json
 from datetime import datetime
-from typing import Dict, List
+from typing import List
 
-from curl_cffi import requests
 from pydantic import BaseModel
-from ratelimit import limits, sleep_and_retry
-from tenacity import retry, stop_after_attempt, wait_exponential
 
 from fli.models import (
     Airline,
@@ -19,6 +16,7 @@ from fli.models import (
     SeatType,
     SortBy,
 )
+from fli.search.client import get_client
 
 
 class SearchFlightsFilters(BaseModel):
@@ -41,17 +39,8 @@ class SearchFlights:
 
     def __init__(self):
         """Initialize the search client."""
-        self._client = requests.Session()
-        self._client.headers.update(self.DEFAULT_HEADERS)
+        self.client = get_client()
 
-    def __del__(self):
-        """Cleanup client session."""
-        if hasattr(self, "_client"):
-            self._client.close()
-
-    @sleep_and_retry
-    @limits(calls=10, period=1)
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(), reraise=True)
     def search(self, filters: SearchFlightsFilters) -> List[FlightResult] | None:
         """
         Perform the flight search using the new simplified parameters.
@@ -60,7 +49,7 @@ class SearchFlights:
         encoded_filters = search_filters.encode()
 
         try:
-            response = self._client.post(
+            response = self.client.post(
                 url=self.BASE_URL,
                 data=f"f.req={encoded_filters}",
                 impersonate="chrome",

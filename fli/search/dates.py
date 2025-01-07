@@ -3,12 +3,10 @@
 import json
 from datetime import datetime
 
-from curl_cffi import requests
 from pydantic import BaseModel
-from ratelimit import limits, sleep_and_retry
-from tenacity import retry, stop_after_attempt, wait_exponential
 
 from fli.models import DateSearchFilters
+from fli.search.client import get_client
 
 
 class DatePrice(BaseModel):
@@ -26,17 +24,8 @@ class SearchDates:
 
     def __init__(self):
         """Initialize the search client."""
-        self._client = requests.Session()
-        self._client.headers.update(self.DEFAULT_HEADERS)
+        self.client = get_client()
 
-    def __del__(self):
-        """Cleanup client session."""
-        if hasattr(self, "_client"):
-            self._client.close()
-
-    @sleep_and_retry
-    @limits(calls=10, period=1)
-    @retry(stop=stop_after_attempt(1), wait=wait_exponential(), reraise=True)
     def search(self, filters: DateSearchFilters) -> list[DatePrice] | None:
         """
         Perform the date search using the search parameters.
@@ -51,7 +40,7 @@ class SearchDates:
 
         try:
             # Debugging
-            response = self._client.post(
+            response = self.client.post(
                 url=self.BASE_URL,
                 data=f"f.req={encoded_filters}",
                 impersonate="chrome",
