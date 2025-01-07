@@ -40,6 +40,13 @@ def cheap(
             help="Maximum number of stops (ANY, 0 for non-stop, 1 for one stop, 2+ for two stops)",
         ),
     ] = "ANY",
+    sort: Annotated[
+        bool,
+        typer.Option(
+            "--sort",
+            help="Sort results by price (lowest to highest)",
+        ),
+    ] = False,
     monday: Annotated[
         bool,
         typer.Option(
@@ -163,6 +170,10 @@ def cheap(
         if not dates:
             typer.echo("No flights found for the selected days.")
             raise typer.Exit(1)
+
+        # Sort dates by price if sort flag is enabled
+        if sort:
+            dates.sort(key=lambda x: x.price)
 
         # Display results
         display_date_results(dates)
