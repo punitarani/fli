@@ -4,12 +4,11 @@ import typer
 from typing_extensions import Annotated
 
 from fli.cli.enums import DayOfWeek
-from fli.cli.utils import display_date_results, filter_dates_by_days, validate_date
+from fli.cli.utils import display_date_results, filter_dates_by_days, parse_stops, validate_date
 from fli.models import (
     Airport,
     DateSearchFilters,
     FlightSegment,
-    MaxStops,
     PassengerInfo,
     SeatType,
 )
@@ -38,7 +37,7 @@ def cheap(
         typer.Option(
             "--stops",
             "-x",
-            help="Maximum number of stops (ANY, NON_STOP, ONE_STOP, TWO_PLUS_STOPS)",
+            help="Maximum number of stops (ANY, 0 for non-stop, 1 for one stop, 2+ for two stops)",
         ),
     ] = "ANY",
     monday: Annotated[
@@ -113,7 +112,7 @@ def cheap(
         departure_airport = getattr(Airport, from_airport.upper())
         arrival_airport = getattr(Airport, to_airport.upper())
         seat_type = getattr(SeatType, seat.upper())
-        max_stops = getattr(MaxStops, stops.upper())
+        max_stops = parse_stops(stops)
 
         # Create flight segment
         flight_segment = FlightSegment(

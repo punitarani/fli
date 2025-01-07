@@ -8,10 +8,11 @@ from fli.cli.utils import (
     filter_flights_by_airlines,
     filter_flights_by_time,
     parse_airlines,
+    parse_stops,
     validate_date,
     validate_time_range,
 )
-from fli.models import Airport, MaxStops, PassengerInfo, SeatType, SortBy
+from fli.models import Airport, PassengerInfo, SeatType, SortBy
 from fli.search import SearchFlights, SearchFlightsFilters
 
 
@@ -31,7 +32,7 @@ def search_flights(
         departure_airport = getattr(Airport, from_airport.upper())
         arrival_airport = getattr(Airport, to_airport.upper())
         seat_type = getattr(SeatType, seat.upper())
-        max_stops = getattr(MaxStops, stops.upper())
+        max_stops = parse_stops(stops)
         sort_by = getattr(SortBy, sort.upper())
 
         # Create search filters
@@ -105,7 +106,7 @@ def search(
         typer.Option(
             "--stops",
             "-x",
-            help="Maximum number of stops (ANY, NON_STOP, ONE_STOP, TWO_PLUS_STOPS)",
+            help="Maximum number of stops (ANY, 0 for non-stop, 1 for one stop, 2+ for two stops)",
         ),
     ] = "ANY",
     sort: Annotated[
