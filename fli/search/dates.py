@@ -55,11 +55,25 @@ class SearchDates:
             dates_data = [
                 DatePrice(
                     date=datetime.strptime(item[0], "%Y-%m-%d"),
-                    price=item[2][0][1],
+                    price=self.__parse_price(item),
                 )
                 for item in data[-1]
+                if self.__parse_price(item)
             ]
             return dates_data
 
         except Exception as e:
             raise Exception(f"Search failed: {str(e)}") from e
+
+    @staticmethod
+    def __parse_price(item: list[list] | list | None) -> float | None:
+        """Parse the price string safely."""
+        try:
+            if item and isinstance(item, list) and len(item) > 2:
+                if isinstance(item[2], list) and len(item[2]) > 0:
+                    if isinstance(item[2][0], list) and len(item[2][0]) > 1:
+                        return float(item[2][0][1])
+        except (IndexError, TypeError, ValueError):
+            pass
+
+        return None
