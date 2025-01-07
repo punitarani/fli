@@ -1,16 +1,24 @@
 from datetime import datetime, timedelta
+from typing import Optional
 
 import typer
 from typing_extensions import Annotated
 
 from fli.cli.enums import DayOfWeek
-from fli.cli.utils import display_date_results, filter_dates_by_days, parse_stops, validate_date
+from fli.cli.utils import (
+    display_date_results,
+    filter_dates_by_days,
+    parse_stops,
+    validate_date,
+    validate_time_range,
+)
 from fli.models import (
     Airport,
     DateSearchFilters,
     FlightSegment,
     PassengerInfo,
     SeatType,
+    TimeRestrictions,
 )
 from fli.search import SearchDates
 
@@ -103,6 +111,15 @@ def cheap(
             help="Include Sundays in results",
         ),
     ] = False,
+    time: Annotated[
+        Optional[str],
+        typer.Option(
+            "--time",
+            "-t",
+            help="Time range in 24h format (e.g., 6-20)",
+            callback=validate_time_range,
+        ),
+    ] = None,
 ):
     """
     Find the cheapest dates to fly between two airports.
@@ -121,11 +138,26 @@ def cheap(
         seat_type = getattr(SeatType, seat.upper())
         max_stops = parse_stops(stops)
 
+        # Parse time restrictions
+        time_restrictions = None
+        if time:
+            if isinstance(time, tuple):
+                start_hour, end_hour = time
+            else:
+                start_hour, end_hour = map(int, time.split("-"))
+            time_restrictions = TimeRestrictions(
+                earliest_departure=start_hour,
+                latest_departure=end_hour,
+                earliest_arrival=None,
+                latest_arrival=None,
+            )
+
         # Create flight segment
         flight_segment = FlightSegment(
             departure_airport=[[departure_airport, 0]],
             arrival_airport=[[arrival_airport, 0]],
             travel_date=from_date,
+            time_restrictions=time_restrictions,
         )
 
         # Create search filters
