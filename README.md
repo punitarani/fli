@@ -23,20 +23,33 @@ pip install git+https://github.com/punitarani/fli.git
 The package provides a command-line interface for quick flight searches:
 
 ```bash
-# Basic search
-fli JFK LHR 2025-10-25
+# Basic flight search
+fli search JFK LHR 2025-10-25
 
 # Search with time range
-fli JFK LHR 2025-10-25 -t 6-20
+fli search JFK LHR 2025-10-25 -t 6-20
 
 # Search with specific airlines
-fli JFK LHR 2025-10-25 --airlines BA KL
+fli search JFK LHR 2025-10-25 --airlines BA KL
 
 # Full example with all options
-fli JFK LHR 2025-10-25 -t 6-20 -a BA KL -s BUSINESS -x NON_STOP -o DURATION
+fli search JFK LHR 2025-10-25 -t 6-20 -a BA KL -s BUSINESS -x NON_STOP -o DURATION
+
+# Find cheapest dates to fly
+fli cheap JFK LHR
+
+# Find cheapest dates with date range
+fli cheap JFK LHR --from 2025-01-01 --to 2025-02-01
+
+# Find cheapest dates for specific days
+fli cheap JFK LHR --monday --friday  # Only Mondays and Fridays
 ```
 
-### CLI Options
+### CLI Commands
+
+#### Search Command
+
+Search for specific flight dates with detailed options:
 
 - `-t, --time`: Time range in 24h format (e.g., 6-20)
 - `-a, --airlines`: List of airline codes (e.g., BA KL)
@@ -44,12 +57,24 @@ fli JFK LHR 2025-10-25 -t 6-20 -a BA KL -s BUSINESS -x NON_STOP -o DURATION
 - `-x, --stops`: Maximum stops (ANY, NON_STOP, ONE_STOP, TWO_PLUS_STOPS)
 - `-o, --sort`: Sort results by (CHEAPEST, DURATION, DEPARTURE_TIME, ARRIVAL_TIME)
 
+#### Cheap Command
+
+Find the cheapest dates to fly between airports:
+
+- `--from`: Start date (YYYY-MM-DD)
+- `--to`: End date (YYYY-MM-DD)
+- `-s, --seat`: Seat type (ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST)
+- `-x, --stops`: Maximum stops (ANY, NON_STOP, ONE_STOP, TWO_PLUS_STOPS)
+- Day filters: `--monday`, `--tuesday`, `--wednesday`, `--thursday`, `--friday`, `--saturday`, `--sunday`
+
 ### Help
 
 Get detailed help with:
 
 ```bash
 fli --help
+fli search --help
+fli cheap --help
 ```
 
 ## Python API Usage
@@ -59,24 +84,24 @@ You can also use the package programmatically:
 ```python
 from datetime import datetime, timedelta
 from fli.models import (
-  Airport,
-  FlightSegment,
-  MaxStops,
-  PassengerInfo,
-  SeatType,
-  SortBy,
+    Airport,
+    FlightSegment,
+    MaxStops,
+    PassengerInfo,
+    SeatType,
+    SortBy,
 )
 from fli.search import SearchFlights, SearchFlightsFilters
 
 # Create search filters
 filters = SearchFlightsFilters(
-  departure_airport=Airport.JFK,
-  arrival_airport=Airport.LAX,
-  departure_date=(datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
-  passenger_info=PassengerInfo(adults=1),
-  seat_type=SeatType.ECONOMY,
-  stops=MaxStops.NON_STOP,
-  sort_by=SortBy.CHEAPEST,
+    departure_airport=Airport.JFK,
+    arrival_airport=Airport.LAX,
+    departure_date=(datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
+    passenger_info=PassengerInfo(adults=1),
+    seat_type=SeatType.ECONOMY,
+    stops=MaxStops.NON_STOP,
+    sort_by=SortBy.CHEAPEST,
 )
 
 # Search flights
@@ -85,14 +110,14 @@ flights = search.search(filters)
 
 # Process results
 for flight in flights:
-  print(f"Price: ${flight.price}")
-  print(f"Duration: {flight.duration} minutes")
-  print(f"Stops: {flight.stops}")
+    print(f"Price: ${flight.price}")
+    print(f"Duration: {flight.duration} minutes")
+    print(f"Stops: {flight.stops}")
 
-  for leg in flight.legs:
-    print(f"\nFlight: {leg.airline.value} {leg.flight_number}")
-    print(f"From: {leg.departure_airport.value} at {leg.departure_datetime}")
-    print(f"To: {leg.arrival_airport.value} at {leg.arrival_datetime}")
+    for leg in flight.legs:
+        print(f"\nFlight: {leg.airline.value} {leg.flight_number}")
+        print(f"From: {leg.departure_airport.value} at {leg.departure_datetime}")
+        print(f"To: {leg.arrival_airport.value} at {leg.arrival_datetime}")
 ```
 
 ## Features
