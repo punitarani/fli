@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Optional, Union
 
-from pydantic import BaseModel, NonNegativeInt, PositiveInt
+from pydantic import BaseModel, NonNegativeFloat, NonNegativeInt, PositiveInt
 
 from .airline import Airline
 from .airport import Airport
@@ -89,7 +89,7 @@ class FlightLeg(BaseModel):
 
 class FlightResult(BaseModel):
     legs: List[FlightLeg]
-    price: float
+    price: NonNegativeFloat
     duration: PositiveInt
     stops: NonNegativeInt
 
