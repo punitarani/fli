@@ -11,14 +11,16 @@ from rich.text import Text
 
 from fli.cli.console import console
 from fli.cli.enums import DayOfWeek
-from fli.models import Airline, Airport
+from fli.models import Airline, Airport, MaxStops
 
 
-def format_airport(airport: Airport) -> str:
-    """Format airport code and name (first two words)."""
-    name_parts = airport.value.split()[:3]  # Get first three words
-    name = " ".join(name_parts)
-    return f"{airport.name} ({name})"
+def validate_date(ctx: Context, param: Parameter, value: str) -> str:
+    """Validate date format."""
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+        return value
+    except ValueError:
+        raise typer.BadParameter("Date must be in YYYY-MM-DD format")
 
 
 def validate_time_range(
@@ -37,13 +39,25 @@ def validate_time_range(
         raise typer.BadParameter("Time range must be in format 'start-end' (e.g., 6-20)")
 
 
-def validate_date(ctx: Context, param: Parameter, value: str) -> str:
-    """Validate date format."""
+def parse_stops(stops: str) -> MaxStops:
+    """Convert stops parameter to MaxStops enum."""
+    # Try parsing as integer first
     try:
-        datetime.strptime(value, "%Y-%m-%d")
-        return value
+        stops_int = int(stops)
+        if stops_int == 0:
+            return MaxStops.NON_STOP
+        elif stops_int == 1:
+            return MaxStops.ONE_STOP_OR_FEWER
+        elif stops_int >= 2:
+            return MaxStops.TWO_OR_FEWER_STOPS
+        else:
+            return MaxStops.ANY
     except ValueError:
-        raise typer.BadParameter("Date must be in YYYY-MM-DD format")
+        # If not an integer, try as enum string
+        try:
+            return getattr(MaxStops, stops.upper())
+        except AttributeError:
+            raise ValueError(f"Invalid stops value: {stops}")
 
 
 def parse_airlines(airlines: Optional[List[str]]) -> Optional[List[Airline]]:
@@ -71,6 +85,32 @@ def filter_flights_by_time(flights: list, start_hour: int, end_hour: int) -> lis
 def filter_flights_by_airlines(flights: list, airlines: List[Airline]) -> list:
     """Filter flights by specified airlines."""
     return [flight for flight in flights if any(leg.airline in airlines for leg in flight.legs)]
+
+
+def filter_dates_by_days(dates: list, days: List[DayOfWeek]) -> list:
+    """Filter dates by days of the week."""
+    if not days:
+        return dates
+
+    day_numbers = {
+        DayOfWeek.MONDAY: 0,
+        DayOfWeek.TUESDAY: 1,
+        DayOfWeek.WEDNESDAY: 2,
+        DayOfWeek.THURSDAY: 3,
+        DayOfWeek.FRIDAY: 4,
+        DayOfWeek.SATURDAY: 5,
+        DayOfWeek.SUNDAY: 6,
+    }
+
+    allowed_days = {day_numbers[day] for day in days}
+    return [date_price for date_price in dates if date_price.date.weekday() in allowed_days]
+
+
+def format_airport(airport: Airport) -> str:
+    """Format airport code and name (first two words)."""
+    name_parts = airport.value.split()[:3]  # Get first three words
+    name = " ".join(name_parts)
+    return f"{airport.name} ({name})"
 
 
 def format_duration(minutes: int) -> str:
@@ -131,25 +171,6 @@ def display_flight_results(flights: list):
             )
         )
         console.print()
-
-
-def filter_dates_by_days(dates: list, days: List[DayOfWeek]) -> list:
-    """Filter dates by days of the week."""
-    if not days:
-        return dates
-
-    day_numbers = {
-        DayOfWeek.MONDAY: 0,
-        DayOfWeek.TUESDAY: 1,
-        DayOfWeek.WEDNESDAY: 2,
-        DayOfWeek.THURSDAY: 3,
-        DayOfWeek.FRIDAY: 4,
-        DayOfWeek.SATURDAY: 5,
-        DayOfWeek.SUNDAY: 6,
-    }
-
-    allowed_days = {day_numbers[day] for day in days}
-    return [date_price for date_price in dates if date_price.date.weekday() in allowed_days]
 
 
 def display_date_results(dates: list):
