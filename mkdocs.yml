@@ -1,16 +1,22 @@
 site_name: Fli Documentation
-site_description: Documentation for the Fli library
+site_url: https://punitarani.github.io/fli
+site_description: Documentation for the Fli library - A Python wrapper for Google Flights API
 repo_url: https://github.com/punitarani/fli
+site_author: Punit Arani
+copyright: Copyright &copy; 2024 Punit Arani
+
 theme:
   name: material
   palette:
-    - scheme: default
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
       primary: indigo
       accent: indigo
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
-    - scheme: slate
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
       primary: indigo
       accent: indigo
       toggle:
@@ -22,11 +28,21 @@ theme:
     - navigation.sections
     - navigation.expand
     - navigation.top
+    - navigation.footer
     - search.suggest
     - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - announce.dismiss
+  icon:
+    repo: fontawesome/brands/github
 
 plugins:
   - search
+  - social
+  - tags
   - mkdocstrings:
       handlers:
         python:
@@ -34,20 +50,57 @@ plugins:
           options:
             show_source: true
             show_root_heading: true
+            show_if_no_docstring: true
+            docstring_style: google
+            docstring_section_style: spacy
+            merge_init_into_class: true
+            show_signature_annotations: true
 
 markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
   - admonition
   - pymdownx.details
   - attr_list
   - md_in_html
+  - tables
+  - def_list
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - toc:
+      permalink: true
+      toc_depth: 3
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/punitarani/fli
+  analytics:
+    provider: google
+    property: !ENV GOOGLE_ANALYTICS_KEY
+  consent:
+    title: Cookie consent
+    description: >- 
+      We use cookies to recognize your repeated visits and preferences, as well
+      as to measure the effectiveness of our documentation and whether users
+      find what they're searching for. With your consent, you're helping us to
+      make our documentation better.
 
 nav:
   - Home: index.md
+  - Getting Started:
+    - Quick Start: guides/quickstart.md
+    - Examples: examples/advanced.md
   - API Reference:
-    - Models: reference/models.md
-    - Search: reference/search.md 
+    - Models: api/models.md
+    - Search: api/search.md 
