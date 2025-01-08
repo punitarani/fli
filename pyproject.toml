@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "fli"
+name = "flights"
 version = "0.1.0"
 description = "A Python wrapper for Google Flights API"
 authors = ["Punit Arani <punit@joinslash.com>"]
