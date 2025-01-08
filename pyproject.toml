@@ -15,14 +15,17 @@ ratelimit = "^2.2.1"
 requests = "^2.32.3"
 tenacity = "^9.0.0"
 typer = "^0.15.1"
-
-[tool.poetry.scripts]
-fli = "fli.cli:cli"
+mkdocstrings = "^0.27.0"
 
 [tool.poetry.group.dev.dependencies]
+mkdocs-material = "^9.5.49"
+mkdocstrings = {extras = ["python"], version = "^0.27.0"}
 pytest = "^8.3.4"
 pytest-xdist = "^3.6.1"
 ruff = "^0.8.4"
+
+[tool.poetry.scripts]
+fli = "fli.cli:cli"
 
 [build-system]
 requires = ["poetry-core"]
