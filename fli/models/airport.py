@@ -2,6 +2,11 @@ from enum import Enum
 
 
 class Airport(Enum):
+    """Airport codes for most airports in the world.
+
+    This is auto-generated from data/airports.csv.
+    """
+
     AAA = "Anaa"
     AAB = "Arrabury Airport"
     AAC = "El Arish International Airport"

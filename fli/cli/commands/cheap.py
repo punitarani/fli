@@ -1,8 +1,7 @@
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Annotated
 
 import typer
-from typing_extensions import Annotated
 
 from fli.cli.enums import DayOfWeek
 from fli.cli.utils import (
@@ -112,7 +111,7 @@ def cheap(
         ),
     ] = False,
     time: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--time",
             "-t",
@@ -121,15 +120,11 @@ def cheap(
         ),
     ] = None,
 ):
-    """
-    Find the cheapest dates to fly between two airports.
+    """Find the cheapest dates to fly between two airports.
 
-    Examples:\n
-        fli cheap JFK LHR\n
-        fli cheap SFO NYC --from 2025-01-01 --to 2025-02-01\n
-        fli cheap LAX MIA --seat BUSINESS --stops NON_STOP\n
-        fli cheap JFK LHR --monday --friday  # Only show Monday and Friday flights\n
-        fli cheap SFO NYC --monday --wednesday --friday  # Show weekday options
+    Example:
+        fli cheap LAX MIA --seat BUSINESS --stops NON_STOP --friday
+
     """
     try:
         # Parse parameters
@@ -212,4 +207,4 @@ def cheap(
 
     except (AttributeError, ValueError) as e:
         typer.echo(f"Error: {str(e)}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e

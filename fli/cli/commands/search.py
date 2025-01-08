@@ -1,7 +1,6 @@
-from typing import List, Optional
+from typing import Annotated
 
 import typer
-from typing_extensions import Annotated
 
 from fli.cli.utils import (
     display_flight_results,
@@ -20,8 +19,8 @@ def search_flights(
     from_airport: str,
     to_airport: str,
     date: str,
-    time: Optional[tuple[int, int]] = None,
-    airlines: Optional[List[str]] = None,
+    time: tuple[int, int] | None = None,
+    airlines: list[str] | None = None,
     seat: str = "ECONOMY",
     stops: str = "ANY",
     sort: str = "CHEAPEST",
@@ -69,7 +68,7 @@ def search_flights(
 
     except (AttributeError, ValueError) as e:
         typer.echo(f"Error: {str(e)}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 def search(
@@ -77,7 +76,7 @@ def search(
     to_airport: Annotated[str, typer.Argument(help="Arrival airport code (e.g., LHR)")],
     date: Annotated[str, typer.Argument(help="Travel date (YYYY-MM-DD)", callback=validate_date)],
     time: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--time",
             "-t",
@@ -86,7 +85,7 @@ def search(
         ),
     ] = None,
     airlines: Annotated[
-        Optional[List[str]],
+        list[str] | None,
         typer.Option(
             "--airlines",
             "-a",
@@ -118,13 +117,11 @@ def search(
         ),
     ] = "CHEAPEST",
 ):
-    """
-    Search for flights with flexible filtering options.
+    """Search for flights with flexible filtering options.
 
-    Examples:\n
-        fli search JFK LHR 2025-10-25 --time 6-20 --airlines BA KL\n
-        fli search SFO NYC 2025-11-01 -t 9-17 --stops NON_STOP --sort DURATION\n
-        fli search LAX MIA 2025-12-25 --seat BUSINESS
+    Example:
+        fli search JFK LHR 2025-10-25 --time 6-20 --airlines BA KL --stops NON_STOP
+
     """
     search_flights(
         from_airport=from_airport,

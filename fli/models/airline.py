@@ -2,6 +2,11 @@ from enum import Enum
 
 
 class Airline(Enum):
+    """Airline codes for most airlines in the world.
+
+    This is auto-generated from data/airlines.csv.
+    """
+
     A0 = "Macair Jet"
     A1 = "APG Distribution System"
     A2 = "Astra Airlines"

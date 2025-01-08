@@ -6,7 +6,6 @@ import typer
 
 from fli.cli.commands.cheap import cheap
 from fli.cli.commands.search import search
-from fli.cli.console import console
 
 app = typer.Typer(
     help="Search for flights using Google Flights data",
@@ -20,8 +19,8 @@ app.command(name="cheap")(cheap)
 
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context):
-    """
-    Search for flights using Google Flights data.
+    """Search for flights using Google Flights data.
+
     If no command is provided, the search command will be used.
     """
     # If no command is provided, show help

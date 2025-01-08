@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import List, Optional
 
 import typer
 from click import Context, Parameter
@@ -19,13 +18,13 @@ def validate_date(ctx: Context, param: Parameter, value: str) -> str:
     try:
         datetime.strptime(value, "%Y-%m-%d")
         return value
-    except ValueError:
-        raise typer.BadParameter("Date must be in YYYY-MM-DD format")
+    except ValueError as e:
+        raise typer.BadParameter("Date must be in YYYY-MM-DD format") from e
 
 
 def validate_time_range(
-    ctx: Context, param: Parameter, value: Optional[str]
-) -> Optional[tuple[int, int]]:
+    ctx: Context, param: Parameter, value: str | None
+) -> tuple[int, int] | None:
     """Validate and parse time range in format 'start-end' (24h format)."""
     if not value:
         return None
@@ -35,8 +34,8 @@ def validate_time_range(
         if not (0 <= start <= 23 and 0 <= end <= 23):
             raise ValueError
         return start, end
-    except ValueError:
-        raise typer.BadParameter("Time range must be in format 'start-end' (e.g., 6-20)")
+    except ValueError as e:
+        raise typer.BadParameter("Time range must be in format 'start-end' (e.g., 6-20)") from e
 
 
 def parse_stops(stops: str) -> MaxStops:
@@ -56,11 +55,11 @@ def parse_stops(stops: str) -> MaxStops:
         # If not an integer, try as enum string
         try:
             return getattr(MaxStops, stops.upper())
-        except AttributeError:
-            raise ValueError(f"Invalid stops value: {stops}")
+        except AttributeError as e:
+            raise typer.BadParameter(f"Invalid stops value: {stops}") from e
 
 
-def parse_airlines(airlines: Optional[List[str]]) -> Optional[List[Airline]]:
+def parse_airlines(airlines: list[str] | None) -> list[Airline] | None:
     """Parse airlines from list of airline codes."""
     if not airlines:
         return None
@@ -70,7 +69,7 @@ def parse_airlines(airlines: Optional[List[str]]) -> Optional[List[Airline]]:
             getattr(Airline, airline.strip().upper()) for airline in airlines if airline.strip()
         ]
     except AttributeError as e:
-        raise typer.BadParameter(f"Invalid airline code: {str(e)}")
+        raise typer.BadParameter(f"Invalid airline code: {str(e)}") from e
 
 
 def filter_flights_by_time(flights: list, start_hour: int, end_hour: int) -> list:
@@ -82,12 +81,12 @@ def filter_flights_by_time(flights: list, start_hour: int, end_hour: int) -> lis
     ]
 
 
-def filter_flights_by_airlines(flights: list, airlines: List[Airline]) -> list:
+def filter_flights_by_airlines(flights: list, airlines: list[Airline]) -> list:
     """Filter flights by specified airlines."""
     return [flight for flight in flights if any(leg.airline in airlines for leg in flight.legs)]
 
 
-def filter_dates_by_days(dates: list, days: List[DayOfWeek]) -> list:
+def filter_dates_by_days(dates: list, days: list[DayOfWeek]) -> list:
     """Filter dates by days of the week."""
     if not days:
         return dates

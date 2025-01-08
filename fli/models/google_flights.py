@@ -1,8 +1,13 @@
+"""Models for interacting with Google Flights API.
+
+This module contains all the data models used for flight searches and results.
+Models are designed to match Google Flights' APIs while providing a clean pythonic interface.
+"""
+
 import json
 import urllib.parse
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional, Union
 
 from pydantic import BaseModel, NonNegativeFloat, NonNegativeInt, PositiveInt
 
@@ -11,6 +16,8 @@ from .airport import Airport
 
 
 class SeatType(Enum):
+    """Available cabin classes for flights."""
+
     ECONOMY = 1
     PREMIUM_ECONOMY = 2
     BUSINESS = 3
@@ -18,6 +25,8 @@ class SeatType(Enum):
 
 
 class SortBy(Enum):
+    """Available sorting options for flight results."""
+
     NONE = 0
     TOP_FLIGHTS = 1
     CHEAPEST = 2
@@ -27,14 +36,18 @@ class SortBy(Enum):
 
 
 class TripType(Enum):
+    """Type of flight journey. Currently only supports one-way flights."""
+
     ONE_WAY = 2
 
-    # Deprecated - kept for reference
+    # Currently not supported - kept for future reference
     _ROUND_TRIP = 1  # Deprecated
     _MULTI_CITY = 3  # Deprecated
 
 
 class MaxStops(Enum):
+    """Maximum number of stops allowed in flight search."""
+
     ANY = 0
     NON_STOP = 1
     ONE_STOP_OR_FEWER = 2
@@ -42,18 +55,27 @@ class MaxStops(Enum):
 
 
 class Currency(Enum):
+    """Supported currencies for pricing. Currently only USD."""
+
     USD = "USD"
     # Placeholder for other currencies
 
 
 class TimeRestrictions(BaseModel):
-    earliest_departure: Optional[NonNegativeInt]
-    latest_departure: Optional[PositiveInt]
-    earliest_arrival: Optional[NonNegativeInt]
-    latest_arrival: Optional[PositiveInt]
+    """Time constraints for flight departure and arrival in local time.
+
+    All times are in hours from midnight (e.g., 20 = 8:00 PM).
+    """
+
+    earliest_departure: NonNegativeInt | None = None
+    latest_departure: PositiveInt | None = None
+    earliest_arrival: NonNegativeInt | None = None
+    latest_arrival: PositiveInt | None = None
 
 
 class PassengerInfo(BaseModel):
+    """Passenger configuration for flight search."""
+
     adults: NonNegativeInt = 1
     children: NonNegativeInt = 0
     infants_in_seat: NonNegativeInt = 0
@@ -61,52 +83,85 @@ class PassengerInfo(BaseModel):
 
 
 class PriceLimit(BaseModel):
+    """Maximum price constraint for flight search."""
+
     max_price: PositiveInt
-    currency: Optional[Currency] = Currency.USD
+    currency: Currency | None = Currency.USD
 
 
 class LayoverRestrictions(BaseModel):
-    airports: Optional[List[Airport]]
-    max_duration: Optional[PositiveInt]
+    """Constraints for layovers in multi-leg flights."""
+
+    airports: list[Airport] | None = None
+    max_duration: PositiveInt | None = None
 
 
 class FlightSegment(BaseModel):
-    departure_airport: List[List[Union[Airport, int]]]
-    arrival_airport: List[List[Union[Airport, int]]]
+    """A segment represents a single portion of a flight journey between two airports.
+
+    For example, in a one-way flight from JFK to LAX, there would be one segment.
+    In a multi-city trip from JFK -> LAX -> SEA, there would be two segments:
+    JFK -> LAX and LAX -> SEA.
+    """
+
+    departure_airport: list[list[Airport | int]]
+    arrival_airport: list[list[Airport | int]]
     travel_date: str
-    time_restrictions: Optional[TimeRestrictions] = None
+    time_restrictions: TimeRestrictions | None = None
 
 
 class FlightLeg(BaseModel):
+    """A single flight leg (segment) with airline and timing details."""
+
     airline: Airline
     flight_number: str
     departure_airport: Airport
     arrival_airport: Airport
     departure_datetime: datetime
     arrival_datetime: datetime
-    duration: PositiveInt
+    duration: PositiveInt  # in minutes
 
 
 class FlightResult(BaseModel):
-    legs: List[FlightLeg]
-    price: NonNegativeFloat
-    duration: PositiveInt
+    """Complete flight search result with pricing and timing."""
+
+    legs: list[FlightLeg]
+    price: NonNegativeFloat  # in specified currency
+    duration: PositiveInt  # total duration in minutes
     stops: NonNegativeInt
 
 
 class FlightSearchFilters(BaseModel):
+    """Complete set of filters for flight search.
+
+    This model matches required Google Flights' API structure.
+    """
+
     trip_type: TripType = TripType.ONE_WAY
     passenger_info: PassengerInfo
-    flight_segments: List[FlightSegment]
+    flight_segments: list[FlightSegment]
     stops: MaxStops = MaxStops.ANY
     seat_type: SeatType = SeatType.ECONOMY
-    price_limit: Optional[PriceLimit] = None
-    airlines: Optional[List[Airline]] = None
-    max_duration: Optional[PositiveInt] = None
-    layover_restrictions: Optional[LayoverRestrictions] = None
+    price_limit: PriceLimit | None = None
+    airlines: list[Airline] | None = None
+    max_duration: PositiveInt | None = None  # in minutes
+    layover_restrictions: LayoverRestrictions | None = None
     sort_by: SortBy = SortBy.NONE
 
     def format(self) -> list:
+        """Format filters into Google Flights API structure.
+
+        This method converts the FlightSearchFilters model into the specific nested list/dict
+        structure required by Google Flights' API.
+
+        The output format matches Google Flights' internal API structure, with careful handling
+        of nested arrays and proper serialization of enums and model objects.
+
+        Returns:
+            list: A formatted list structure ready for the Google Flights API request
+
+        """
+
         def serialize(obj):
             if isinstance(obj, Airport) or isinstance(obj, Airline):
                 return obj.name
@@ -222,7 +277,7 @@ class FlightSearchFilters(BaseModel):
         return filters
 
     def encode(self) -> str:
-        """Format and URL encode the filters."""
+        """URL encode the formatted filters for API request."""
         formatted_filters = self.format()
         # First convert the formatted filters to a JSON string
         formatted_json = json.dumps(formatted_filters, separators=(",", ":"))
@@ -233,19 +288,35 @@ class FlightSearchFilters(BaseModel):
 
 
 class DateSearchFilters(BaseModel):
+    """Filters for searching flights across a date range.
+
+    Similar to FlightSearchFilters but includes date range parameters
+    for finding the cheapest dates to fly.
+    """
+
     trip_type: TripType = TripType.ONE_WAY
     passenger_info: PassengerInfo
-    flight_segments: List[FlightSegment]
+    flight_segments: list[FlightSegment]
     stops: MaxStops = MaxStops.ANY
     seat_type: SeatType = SeatType.ECONOMY
-    price_limit: Optional[PriceLimit] = None
-    airlines: Optional[List[Airline]] = None
-    max_duration: Optional[PositiveInt] = None
-    layover_restrictions: Optional[LayoverRestrictions] = None
-    from_date: str
-    to_date: str
+    price_limit: PriceLimit | None = None
+    airlines: list[Airline] | None = None
+    max_duration: PositiveInt | None = None  # in minutes
+    layover_restrictions: LayoverRestrictions | None = None
+    from_date: str  # YYYY-MM-DD format
+    to_date: str  # YYYY-MM-DD format
 
     def format(self) -> list:
+        """Format filters into Google Flights API structure.
+
+        This method converts the DateSearchFilters model into the specific nested list/dict
+        structure required by Google Flights' API.
+
+        Returns:
+            list: A formatted list structure ready for the Google Flights API request
+
+        """
+
         def serialize(obj):
             if isinstance(obj, Airport) or isinstance(obj, Airline):
                 return obj.name
@@ -361,7 +432,7 @@ class DateSearchFilters(BaseModel):
         return filters
 
     def encode(self) -> str:
-        """Format and URL encode the filters."""
+        """URL encode the formatted filters for API request."""
         formatted_filters = self.format()
         # First convert the formatted filters to a JSON string
         formatted_json = json.dumps(formatted_filters, separators=(",", ":"))

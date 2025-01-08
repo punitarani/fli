@@ -2,7 +2,6 @@
 
 import random
 from datetime import datetime, timedelta
-from typing import List, Tuple
 
 import pytest
 
@@ -33,7 +32,7 @@ def generate_test_id(val, argname=None, idx=None) -> str:
     return str(val)
 
 
-def generate_random_test_cases(num_tests: int) -> List[Tuple]:
+def generate_random_test_cases(num_tests: int) -> list[tuple]:
     """Generate randomized test cases for fuzz testing."""
     random.seed(42)
     airports = list(Airport)
@@ -82,7 +81,7 @@ def generate_random_test_cases(num_tests: int) -> List[Tuple]:
 @pytest.mark.fuzz
 @pytest.mark.parallel
 @pytest.mark.parametrize(
-    "dep_airport, arr_airport, dep_date, adults, children, infants_on_lap, infants_in_seat, seat_type, stops, sort_by",
+    "dep_airport, arr_airport, dep_date, adults, children, infants_on_lap, infants_in_seat, seat_type, stops, sort_by",  # noqa: E501
     generate_random_test_cases(num_tests=100),
     ids=generate_test_id,
 )
@@ -99,8 +98,8 @@ def test_search_fuzz(
     stops: MaxStops,
     sort_by: SortBy,
 ):
-    """
-    Parameterized fuzz test for flight search with various filter combinations.
+    """Parameterized fuzz test for flight search with various filter combinations.
+
     Designed to run in parallel using pytest-xdist.
     """
     passenger_info = PassengerInfo(
