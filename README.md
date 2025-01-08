@@ -1,96 +1,122 @@
-# fli
+# Fli 🛫
 
-A Python package for searching flights using Google Flights data.
-Provides a clean interface for flight searches with comprehensive filtering options.
+A powerful Python library that provides programmatic access to Google Flights data with an elegant CLI interface. Search
+flights, find the best deals, and filter results with ease.
 
-Simply get started with the CLI by running:
+> 🚀 **What makes `fli` special?**  
+> Unlike other flight search libraries that rely on web scraping, Fli directly interacts with Google Flights' API
+> through reverse engineering.
+> This means:
+> - **Fast**: Direct API access means faster, more reliable results
+> - **Zero Scraping**: No HTML parsing, no browser automation, just pure API interaction
+> - **Reliable**: Less prone to breaking from UI changes
+> - **Modular**: Extensible architecture for easy customization and integration
 
-```bash
-pipx install git+https://github.com/punitarani/fli.git
-fli --help
-```
+[![CLI Demo](data/cli-demo.png)](data/cli-demo.png)
 
-## Installation
+## Quick Start
 
 ```bash
 pip install git+https://github.com/punitarani/fli.git
 ```
 
+```bash
+# Install using pipx (recommended to use CLI)
+pipx install git+https://github.com/punitarani/fli.git
+```
+
+```bash
+# Get started with CLI
+fli --help
+```
+
+## Features
+
+- 🔍 **Powerful Search**
+    - One-way flight searches
+    - Flexible departure times
+    - Multi-airline support
+    - Cabin class selection
+    - Stop preferences
+    - Custom result sorting
+
+- 💺 **Cabin Classes**
+    - Economy
+    - Premium Economy
+    - Business
+    - First
+
+- 🎯 **Smart Sorting**
+    - Price
+    - Duration
+    - Departure Time
+    - Arrival Time
+
+- 🛡️ **Built-in Protection**
+    - Rate limiting
+    - Automatic retries
+    - Comprehensive error handling
+    - Input validation
+
 ## CLI Usage
 
-[![CLI Demo](data/cli-demo.png)](data/cli-demo.png)
-
-The package provides a command-line interface for quick flight searches:
+### Search for Specific Flights
 
 ```bash
-# Basic flight search
+# Basic search
 fli search JFK LHR 2025-10-25
 
-# Search with time range
-fli search JFK LHR 2025-10-25 -t 6-20
-
-# Search with specific airlines
-fli search JFK LHR 2025-10-25 --airlines BA KL
-
-# Full example with all options
-fli search JFK LHR 2025-10-25 -t 6-20 -a BA KL -s BUSINESS -x NON_STOP -o DURATION
-
-# Find cheapest dates to fly
-fli cheap JFK LHR
-
-# Find cheapest dates with date range
-fli cheap JFK LHR --from 2025-01-01 --to 2025-02-01
-
-# Find cheapest dates for specific days
-fli cheap JFK LHR --monday --friday  # Only Mondays and Fridays
+# Advanced search with filters
+fli search JFK LHR 2025-10-25 \
+    -t 6-20 \              # Time range (6 AM - 8 PM)
+    -a BA KL \             # Airlines (British Airways, KLM)
+    -s BUSINESS \          # Seat type
+    -x NON_STOP \          # Non-stop flights only
+    -o DURATION            # Sort by duration
 ```
 
-### CLI Commands
-
-#### Search Command
-
-Search for specific flight dates with detailed options:
-
-- `-t, --time`: Time range in 24h format (e.g., 6-20)
-- `-a, --airlines`: List of airline codes (e.g., BA KL)
-- `-s, --seat`: Seat type (ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST)
-- `-x, --stops`: Maximum stops (ANY, NON_STOP, ONE_STOP, TWO_PLUS_STOPS)
-- `-o, --sort`: Sort results by (CHEAPEST, DURATION, DEPARTURE_TIME, ARRIVAL_TIME)
-
-#### Cheap Command
-
-Find the cheapest dates to fly between airports:
-
-- `--from`: Start date (YYYY-MM-DD)
-- `--to`: End date (YYYY-MM-DD)
-- `-s, --seat`: Seat type (ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST)
-- `-x, --stops`: Maximum stops (ANY, NON_STOP, ONE_STOP, TWO_PLUS_STOPS)
-- Day filters: `--monday`, `--tuesday`, `--wednesday`, `--thursday`, `--friday`, `--saturday`, `--sunday`
-
-### Help
-
-Get detailed help with:
+### Find Cheapest Dates
 
 ```bash
-fli --help
-fli search --help
-fli cheap --help
+# Basic search for cheapest dates
+fli cheap JFK LHR
+
+# Advanced search with date range
+fli cheap JFK LHR \
+    --from 2025-01-01 \
+    --to 2025-02-01 \
+    --monday --friday      # Only Mondays and Fridays
 ```
+
+### CLI Options
+
+#### Search Command (`fli search`)
+
+| Option           | Description             | Example                |
+|------------------|-------------------------|------------------------|
+| `-t, --time`     | Time range (24h format) | `6-20`                 |
+| `-a, --airlines` | Airline codes           | `BA KL`                |
+| `-s, --seat`     | Cabin class             | `ECONOMY`, `BUSINESS`  |
+| `-x, --stops`    | Maximum stops           | `NON_STOP`, `ONE_STOP` |
+| `-o, --sort`     | Sort results by         | `CHEAPEST`, `DURATION` |
+
+#### Cheap Command (`fli cheap`)
+
+| Option        | Description   | Example                |
+|---------------|---------------|------------------------|
+| `--from`      | Start date    | `2025-01-01`           |
+| `--to`        | End date      | `2025-02-01`           |
+| `-s, --seat`  | Cabin class   | `ECONOMY`, `BUSINESS`  |
+| `-x, --stops` | Maximum stops | `NON_STOP`, `ONE_STOP` |
+| `--[day]`     | Day filters   | `--monday`, `--friday` |
 
 ## Python API Usage
 
-You can also use the package programmatically:
+### Basic Search Example
 
 ```python
 from datetime import datetime, timedelta
-from fli.models import (
-    Airport,
-    FlightSegment,
-    MaxStops,
-    PassengerInfo,
-    SeatType,
-    SortBy,
-)
+from fli.models import Airport, PassengerInfo, SeatType, MaxStops, SortBy
 from fli.search import SearchFlights, SearchFlightsFilters
 
 # Create search filters
@@ -110,57 +136,24 @@ flights = search.search(filters)
 
 # Process results
 for flight in flights:
-    print(f"Price: ${flight.price}")
-    print(f"Duration: {flight.duration} minutes")
-    print(f"Stops: {flight.stops}")
+    print(f"💰 Price: ${flight.price}")
+    print(f"⏱️ Duration: {flight.duration} minutes")
+    print(f"✈️ Stops: {flight.stops}")
 
     for leg in flight.legs:
-        print(f"\nFlight: {leg.airline.value} {leg.flight_number}")
-        print(f"From: {leg.departure_airport.value} at {leg.departure_datetime}")
-        print(f"To: {leg.arrival_airport.value} at {leg.arrival_datetime}")
+        print(f"\n🛫 Flight: {leg.airline.value} {leg.flight_number}")
+        print(f"📍 From: {leg.departure_airport.value} at {leg.departure_datetime}")
+        print(f"📍 To: {leg.arrival_airport.value} at {leg.arrival_datetime}")
 ```
-
-## Features
-
-- **Search Options**:
-    - One-way flights
-    - Flexible departure times
-    - Multiple airlines
-    - Various cabin classes
-    - Stop preferences
-    - Custom sorting
-
-- **Cabin Classes**:
-    - Economy
-    - Premium Economy
-    - Business
-    - First
-
-- **Sort Options**:
-    - Price
-    - Duration
-    - Departure Time
-    - Arrival Time
-
-- **Built-in Features**:
-    - Rate limiting
-    - Automatic retries
-    - Error handling
-    - Beautiful CLI output
-
-## Error Handling
-
-The package includes comprehensive error handling:
-
-- Input validation
-- Rate limiting
-- Automatic retries for failed requests
-- Clear error messages
 
 ## Development
 
 ```bash
-# Install development dependencies
+# Clone the repository
+git clone https://github.com/punitarani/fli.git
+cd fli
+
+# Install dependencies with Poetry
 poetry install
 
 # Run tests
@@ -169,4 +162,15 @@ poetry run pytest
 # Run linting
 poetry run ruff check .
 poetry run ruff format .
+
+# Build documentation
+poetry run mkdocs serve
 ```
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+This project is licensed under the MIT License — see the LICENSE file for details.
