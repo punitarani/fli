@@ -1,9 +1,16 @@
 [tool.poetry]
 name = "fli"
 version = "0.1.0"
-description = "Fli"
+description = "A Python wrapper for Google Flights API"
 authors = ["Punit Arani <punit@joinslash.com>"]
 readme = "README.md"
+homepage = "https://github.com/punitarani/fli"
+repository = "https://github.com/punitarani/fli"
+documentation = "https://punitarani.github.io/fli"
+keywords = ["flights", "google-flights", "travel", "api", "flight-search"]
+packages = [
+    { include = "fli" }
+]
 
 [tool.poetry.dependencies]
 python = "^3.12"
@@ -15,11 +22,10 @@ ratelimit = "^2.2.1"
 requests = "^2.32.3"
 tenacity = "^9.0.0"
 typer = "^0.15.1"
-mkdocstrings = "^0.27.0"
 
 [tool.poetry.group.dev.dependencies]
-mkdocs-material = "^9.5.49"
-mkdocstrings = {extras = ["python"], version = "^0.27.0"}
+mkdocs-material = { extras = ["imaging"], version = "^9.5.49" }
+mkdocstrings = { extras = ["python"], version = "^0.27.0" }
 pytest = "^8.3.4"
 pytest-xdist = "^3.6.1"
 ruff = "^0.8.4"
@@ -30,7 +36,6 @@ fli = "fli.cli:cli"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
-
 
 [tool.pytest.ini_options]
 markers = [
@@ -43,7 +48,16 @@ line-length = 100
 indent-width = 4
 
 [tool.ruff.lint]
-select = ["I"]
+select = [
+    "E", # pycodestyle
+    "F", # pyflakes
+    "I", # isort
+    "B", # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "UP", # pyupgrade
+    "D", # pydocstyle
+]
+ignore = ["D100", "D104", "D203", "D213"]
 
 [tool.ruff.format]
 indent-style = "space"
