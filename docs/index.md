@@ -35,10 +35,10 @@ flights and analyze pricing data.
 
 ```bash
 # Install using pip
-pip install git+https://github.com/punitarani/fli.git
+pip install flights
 
 # Or install using pipx (recommended for CLI usage)
-pipx install git+https://github.com/punitarani/fli.git
+pipx install flights
 ```
 
 ### Basic Usage

@@ -12,17 +12,17 @@ flights, find the best deals, and filter results with ease.
 > - **Reliable**: Less prone to breaking from UI changes
 > - **Modular**: Extensible architecture for easy customization and integration
 
-[![CLI Demo](data/cli-demo.png)](data/cli-demo.png)
+[![CLI Demo](https://github.com/punitarani/fli/blob/main/data/cli-demo.png)](https://github.com/punitarani/fli/blob/main/data/cli-demo.png)
 
 ## Quick Start
 
 ```bash
-pip install git+https://github.com/punitarani/fli.git
+pip install flights
 ```
 
 ```bash
 # Install using pipx (recommended to use CLI)
-pipx install git+https://github.com/punitarani/fli.git
+pipx install flights
 ```
 
 ```bash

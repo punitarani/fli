@@ -7,13 +7,13 @@ This guide will help you get started with Fli quickly.
 ### For Python Usage
 
 ```bash
-pip install git+https://github.com/punitarani/fli.git
+pip install flights
 ```
 
 ### For CLI Usage
 
 ```bash
-pipx install git+https://github.com/punitarani/fli.git
+pipx install flights
 ```
 
 ## Basic Usage
