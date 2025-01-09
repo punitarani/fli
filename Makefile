@@ -3,6 +3,10 @@
 # List of directories and files to format and lint
 TARGETS = fli/ scripts/ tests/
 
+# Run the streamlit app
+app:
+	poetry run streamlit run fli/app/main.py --server.port 3600
+
 # Format code using ruff
 format:
 	poetry run ruff format $(TARGETS)
