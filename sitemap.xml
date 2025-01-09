@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+         <loc>https://punitarani.github.io/fli/</loc>
+         <lastmod>2025-01-09</lastmod>
+    </url>
+    <url>
+         <loc>https://punitarani.github.io/fli/api/models/</loc>
+         <lastmod>2025-01-09</lastmod>
+    </url>
+    <url>
+         <loc>https://punitarani.github.io/fli/api/search/</loc>
+         <lastmod>2025-01-09</lastmod>
+    </url>
+    <url>
+         <loc>https://punitarani.github.io/fli/examples/advanced/</loc>
+         <lastmod>2025-01-09</lastmod>
+    </url>
+    <url>
+         <loc>https://punitarani.github.io/fli/guides/quickstart/</loc>
+         <lastmod>2025-01-09</lastmod>
+    </url>
+</urlset>
