@@ -10,13 +10,21 @@ This guide will help you get started with Fli quickly.
 pip install flights
 ```
 
-### For CLI Usage
+### For CLI and GUI Usage
 
 ```bash
 pipx install flights
 ```
 
 ## Basic Usage
+
+### Application (GUI)
+
+```bash
+fli app
+```
+
+This will launch the Streamlit application at [http://localhost:3600](http://localhost:3600).
 
 ### Command Line Interface
 
