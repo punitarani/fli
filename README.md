@@ -14,7 +14,7 @@ Try out the live demo at [flightly.streamlit.app](https://flightly.streamlit.app
 > - **Reliable**: Less prone to breaking from UI changes
 > - **Modular**: Extensible architecture for easy customization and integration
 
-![CLI App](https://github.com/punitarani/fli/blob/main/data/cli-app.jpeg)
+![Fli App](https://github.com/punitarani/fli/blob/main/data/fli-app.jpeg)
 
 ![CLI Demo](https://github.com/punitarani/fli/blob/main/data/cli-demo.png)
 
