@@ -7,6 +7,7 @@ from fli.cli.enums import DayOfWeek
 from fli.cli.utils import (
     display_date_results,
     filter_dates_by_days,
+    parse_airlines,
     parse_stops,
     validate_date,
     validate_time_range,
@@ -31,6 +32,14 @@ def cheap(
     to_date: Annotated[
         str, typer.Option("--to", help="End date (YYYY-MM-DD)", callback=validate_date)
     ] = (datetime.now() + timedelta(days=60)).strftime("%Y-%m-%d"),
+    airlines: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--airlines",
+            "-a",
+            help="List of airline codes (e.g., BA KL)",
+        ),
+    ] = None,
     seat: Annotated[
         str,
         typer.Option(
@@ -157,12 +166,11 @@ def cheap(
 
         # Create search filters
         filters = DateSearchFilters(
-            departure_airport=departure_airport,
-            arrival_airport=arrival_airport,
             passenger_info=PassengerInfo(adults=1),
             flight_segments=[flight_segment],
-            seat_type=seat_type,
             stops=max_stops,
+            seat_type=seat_type,
+            airlines=parse_airlines(airlines),
             from_date=from_date,
             to_date=to_date,
         )
