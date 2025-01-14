@@ -8,7 +8,7 @@ Currently only supports one-way flights.
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from pydantic import BaseModel
 
@@ -34,6 +34,7 @@ class SearchDates:
     DEFAULT_HEADERS = {
         "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
     }
+    MAX_DAYS_PER_SEARCH = 61
 
     def __init__(self):
         """Initialize the search client for date-based searches."""
@@ -41,6 +42,56 @@ class SearchDates:
 
     def search(self, filters: DateSearchFilters) -> list[DatePrice] | None:
         """Search for flight prices across a date range and search parameters.
+        For date ranges larger than 92 days, splits into multiple searches.
+
+        Args:
+            filters: Search parameters including date range, airports, and preferences
+
+        Returns:
+            List of DatePrice objects containing date and price pairs, or None if no results
+
+        Raises:
+            Exception: If the search fails or returns invalid data
+
+        Notes:
+            - For date ranges larger than 61 days, splits into multiple searches.
+            - We can't search more than 305 days in the future.
+
+        """
+        from_date = datetime.strptime(filters.from_date, "%Y-%m-%d")
+        to_date = datetime.strptime(filters.to_date, "%Y-%m-%d")
+        date_range = (to_date - from_date).days + 1
+
+        if date_range <= self.MAX_DAYS_PER_SEARCH:
+            return self._search_chunk(filters)
+
+        # Split into chunks of MAX_DAYS_PER_SEARCH
+        all_results = []
+        current_from = from_date
+        while current_from <= to_date:
+            current_to = min(current_from + timedelta(days=self.MAX_DAYS_PER_SEARCH - 1), to_date)
+
+            # Create new filters for this chunk
+            chunk_filters = DateSearchFilters(
+                passenger_info=filters.passenger_info,
+                flight_segments=filters.flight_segments,
+                stops=filters.stops,
+                seat_type=filters.seat_type,
+                airlines=filters.airlines,
+                from_date=current_from.strftime("%Y-%m-%d"),
+                to_date=current_to.strftime("%Y-%m-%d"),
+            )
+
+            chunk_results = self._search_chunk(chunk_filters)
+            if chunk_results:
+                all_results.extend(chunk_results)
+
+            current_from = current_to + timedelta(days=1)
+
+        return all_results if all_results else None
+
+    def _search_chunk(self, filters: DateSearchFilters) -> list[DatePrice] | None:
+        """Search for flight prices for a single date range chunk.
 
         Args:
             filters: Search parameters including date range, airports, and preferences
