@@ -9,7 +9,15 @@ import urllib.parse
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, NonNegativeFloat, NonNegativeInt, PositiveInt
+from pydantic import (
+    BaseModel,
+    NonNegativeFloat,
+    NonNegativeInt,
+    PositiveInt,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from .airline import Airline
 from .airport import Airport
@@ -72,6 +80,25 @@ class TimeRestrictions(BaseModel):
     earliest_arrival: NonNegativeInt | None = None
     latest_arrival: PositiveInt | None = None
 
+    @field_validator("latest_departure", "latest_arrival")
+    @classmethod
+    def validate_latest_times(
+        cls, v: PositiveInt | None, info: ValidationInfo
+    ) -> PositiveInt | None:
+        """Validate and adjust the latest time restrictions."""
+        if v is None:
+            return v
+
+        # Get "departure" or "arrival" from field name
+        field_prefix = "earliest_" + info.field_name[7:]
+        earliest = info.data.get(field_prefix)
+
+        # Swap values to ensure that `from` is always before `to`
+        if earliest is not None and earliest > v:
+            info.data[field_prefix] = v
+            return earliest
+        return v
+
 
 class PassengerInfo(BaseModel):
     """Passenger configuration for flight search."""
@@ -108,6 +135,40 @@ class FlightSegment(BaseModel):
     arrival_airport: list[list[Airport | int]]
     travel_date: str
     time_restrictions: TimeRestrictions | None = None
+
+    @property
+    def parsed_travel_date(self) -> datetime:
+        """Parse the travel date string into a datetime object."""
+        return datetime.strptime(self.travel_date, "%Y-%m-%d")
+
+    @field_validator("travel_date")
+    @classmethod
+    def validate_travel_date(cls, v: str) -> str:
+        """Validate that the travel date is not in the past."""
+        travel_date = datetime.strptime(v, "%Y-%m-%d").date()
+        if travel_date < datetime.now().date():
+            raise ValueError("Travel date cannot be in the past")
+        return v
+
+    @model_validator(mode="after")
+    def validate_airports(self) -> "FlightSegment":
+        """Validate that departure and arrival airports are different."""
+        if not self.departure_airport or not self.arrival_airport:
+            raise ValueError("Both departure and arrival airports must be specified")
+
+        # Get first airport from each nested list
+        dep_airport = (
+            self.departure_airport[0][0]
+            if isinstance(self.departure_airport[0][0], Airport)
+            else None
+        )
+        arr_airport = (
+            self.arrival_airport[0][0] if isinstance(self.arrival_airport[0][0], Airport) else None
+        )
+
+        if dep_airport and arr_airport and dep_airport == arr_airport:
+            raise ValueError("Departure and arrival airports must be different")
+        return self
 
 
 class FlightLeg(BaseModel):
@@ -305,6 +366,61 @@ class DateSearchFilters(BaseModel):
     layover_restrictions: LayoverRestrictions | None = None
     from_date: str
     to_date: str
+
+    @property
+    def parsed_from_date(self) -> datetime:
+        """Parse the from_date string into a datetime object."""
+        return datetime.strptime(self.from_date, "%Y-%m-%d")
+
+    @property
+    def parsed_to_date(self) -> datetime:
+        """Parse the to_date string into a datetime object."""
+        return datetime.strptime(self.to_date, "%Y-%m-%d")
+
+    @field_validator("from_date", "to_date")
+    @classmethod
+    def validate_date_order(cls, v: str, info: ValidationInfo) -> str:
+        """Validate and adjust the date range constraints."""
+        if info.field_name == "from_date":
+            # If from_date is in the past, set it to today
+            from_date = datetime.strptime(v, "%Y-%m-%d").date()
+            if from_date < datetime.now().date():
+                return datetime.now().date().strftime("%Y-%m-%d")
+            return v
+
+        # For to_date, check if it's after from_date
+        if "from_date" in info.data:
+            from_date = datetime.strptime(info.data["from_date"], "%Y-%m-%d").date()
+            to_date = datetime.strptime(v, "%Y-%m-%d").date()
+            if from_date > to_date:
+                # Swap dates by returning the from_date
+                info.data["from_date"] = v
+                return from_date.strftime("%Y-%m-%d")
+        return v
+
+    @field_validator("to_date")
+    @classmethod
+    def validate_to_date(cls, v: str) -> str:
+        """Validate that to_date is in the future."""
+        to_date = datetime.strptime(v, "%Y-%m-%d").date()
+        if to_date <= datetime.now().date():
+            raise ValueError("To date must be in the future")
+        return v
+
+    @model_validator(mode="after")
+    def validate_segments_within_range(self) -> "DateSearchFilters":
+        """Validate that flight segments' travel dates are within the search range."""
+        from_date = self.parsed_from_date.date()
+        to_date = self.parsed_to_date.date()
+
+        for segment in self.flight_segments:
+            segment_date = segment.parsed_travel_date.date()
+            if not (from_date <= segment_date <= to_date):
+                raise ValueError(
+                    f"Flight segment travel date {segment.travel_date} "
+                    f"must be within the search date range"
+                )
+        return self
 
     def format(self) -> list:
         """Format filters into Google Flights API structure.
