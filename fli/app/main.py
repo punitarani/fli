@@ -80,34 +80,49 @@ sort_by = st.selectbox("Sort Results By", options=list(SortBy), format_func=form
 advanced_options = st.expander("Advanced Options", expanded=False)
 
 with advanced_options:
-    # Departure time range slider
-    departure_time_range = st.slider(
-        "Departure Time Range",
-        min_value=0,
-        max_value=24,
-        value=(0, 24),
-        format="%d:00",
-        help="Filter flights by departure time (24h format)",
-    )
+    # Create two columns for advanced options
+    col_left, col_right = st.columns(2)
 
-    # Arrival time range slider
-    arrival_time_range = st.slider(
-        "Arrival Time Range",
-        min_value=0,
-        max_value=24,
-        value=(0, 24),
-        format="%d:00",
-        help="Filter flights by arrival time (24h format)",
-    )
+    with col_left:
+        st.markdown("##### Time Restrictions")
+        # Departure time range slider
+        departure_time_range = st.slider(
+            "Departure Time Range",
+            min_value=0,
+            max_value=24,
+            value=(0, 24),
+            format="%d:00",
+            help="Filter flights by departure time (24h format)",
+        )
 
-    # Add toggle for limiting to selected day
-    limit_to_selected_day = st.toggle(
-        "Limit to selected day",
-        value=False,
-        help="""The chart will only plot points that fall on the same day 
-        as the inputted date (e.g., if the inputted date falls on Friday, 
-        filter the chart to only include Friday data)""",
-    )
+        # Arrival time range slider
+        arrival_time_range = st.slider(
+            "Arrival Time Range",
+            min_value=0,
+            max_value=24,
+            value=(0, 24),
+            format="%d:00",
+            help="Filter flights by arrival time (24h format)",
+        )
+
+    with col_right:
+        st.markdown("##### Day Filters")
+        # Multi-select for days of the week
+        days_of_week = [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+            "Sunday",
+        ]
+        selected_days = st.multiselect(
+            "Filter by days of the week",
+            options=days_of_week,
+            default=[days_of_week[departure_date.weekday()]],
+            help="Select which days of the week to include in the price trends chart",
+        )
 
 # Create TimeRestrictions object
 time_restrictions = (
@@ -218,13 +233,14 @@ if st.button("Search Flights", type="primary", use_container_width=True):
                     st.subheader("Price Trends")
                     date_prices = {result.date.date(): result.price for result in date_results}
 
-                    # Filter dates by selected day if toggle is on
-                    if limit_to_selected_day:
-                        selected_weekday = departure_date.weekday()
+                    # Filter dates by selected days if any are selected
+                    if selected_days:
+                        # Convert day names to weekday numbers (0 = Monday, 6 = Sunday)
+                        selected_weekdays = [days_of_week.index(day) for day in selected_days]
                         date_prices = {
                             date: price
                             for date, price in date_prices.items()
-                            if date.weekday() == selected_weekday
+                            if date.weekday() in selected_weekdays
                         }
 
                     df_prices = pd.DataFrame(
@@ -255,4 +271,3 @@ if st.button("Search Flights", type="primary", use_container_width=True):
                 )
         except Exception as e:
             st.error(f"An error occurred while searching for flights: {str(e)}")
- 
