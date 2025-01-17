@@ -15,6 +15,7 @@ packages = [
 [tool.poetry.dependencies]
 python = "^3.12"
 curl-cffi = "^0.7.4"
+fastapi = "^0.115.6"
 google-genai = "^0.4.0"
 httpx = "^0.28.1"
 pandas = "^2.2.3"
@@ -24,11 +25,13 @@ ratelimit = "^2.2.1"
 streamlit = "^1.41.1"
 tenacity = "^9.0.0"
 typer = "^0.15.1"
+uvicorn = "^0.34.0"
 
 [tool.poetry.group.dev.dependencies]
 mkdocs-material = { extras = ["imaging"], version = "^9.5.49" }
 mkdocstrings = { extras = ["python"], version = "^0.27.0" }
 pytest = "^8.3.4"
+pytest-asyncio = "^0.25.2"
 pytest-xdist = "^3.6.1"
 ruff = "^0.8.4"
 
