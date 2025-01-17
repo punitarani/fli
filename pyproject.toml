@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "flights"
-version = "0.3.0"
+version = "0.3.1"
 description = "A Python wrapper for Google Flights API"
 authors = ["Punit Arani <punit@joinslash.com>"]
 readme = "README.md"
