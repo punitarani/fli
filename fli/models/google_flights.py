@@ -405,21 +405,6 @@ class DateSearchFilters(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def validate_segments_within_range(self) -> "DateSearchFilters":
-        """Validate that flight segments' travel dates are within the search range."""
-        from_date = self.parsed_from_date.date()
-        to_date = self.parsed_to_date.date()
-
-        for segment in self.flight_segments:
-            segment_date = segment.parsed_travel_date.date()
-            if not (from_date <= segment_date <= to_date):
-                raise ValueError(
-                    f"Flight segment travel date {segment.travel_date} "
-                    f"must be within the search date range"
-                )
-        return self
-
-    @model_validator(mode="after")
     def validate_and_adjust_from_date(self) -> "DateSearchFilters":
         """Adjust from_date to current date if it's in the past."""
         from_date = self.parsed_from_date.date()

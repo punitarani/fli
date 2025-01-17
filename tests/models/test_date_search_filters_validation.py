@@ -146,32 +146,3 @@ def test_date_search_past_from_date_after_swap(basic_search_params, future_date)
     # After swap and adjustment, from_date should be today and to_date should be the later date
     assert filters.from_date == datetime.now().date().strftime("%Y-%m-%d")
     assert filters.to_date == later_date.strftime("%Y-%m-%d")
-
-
-def test_date_search_segment_outside_range(basic_search_params, future_date):
-    """Test DateSearchFilters validates flight segment dates are within range."""
-    from_date = future_date
-    to_date = future_date + timedelta(days=7)
-    outside_date = future_date + timedelta(days=14)
-
-    # Update flight segment to be outside the date range
-    basic_search_params["flight_segments"][0].travel_date = outside_date.strftime("%Y-%m-%d")
-
-    with pytest.raises(
-        ValueError, match="Flight segment travel date .* must be within the search date range"
-    ):
-        DateSearchFilters(
-            **basic_search_params,
-            from_date=from_date.strftime("%Y-%m-%d"),
-            to_date=to_date.strftime("%Y-%m-%d"),
-        )
-
-    # Even if the from and to dates are reversed, the to date should still be in the future
-    with pytest.raises(
-        ValueError, match="Flight segment travel date .* must be within the search date range"
-    ):
-        DateSearchFilters(
-            **basic_search_params,
-            from_date=to_date.strftime("%Y-%m-%d"),
-            to_date=from_date.strftime("%Y-%m-%d"),
-        )
