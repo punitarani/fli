@@ -100,6 +100,15 @@ with advanced_options:
         help="Filter flights by arrival time (24h format)",
     )
 
+    # Add toggle for limiting to selected day
+    limit_to_selected_day = st.toggle(
+        "Limit to selected day",
+        value=False,
+        help="""The chart will only plot points that fall on the same day 
+        as the inputted date (e.g., if the inputted date falls on Friday, 
+        filter the chart to only include Friday data)""",
+    )
+
 # Create TimeRestrictions object
 time_restrictions = (
     TimeRestrictions(
@@ -113,7 +122,7 @@ time_restrictions = (
 )
 
 # Search button
-if st.button("Search Flights", type="primary"):
+if st.button("Search Flights", type="primary", use_container_width=True):
     # Input validation
     if departure_airport == arrival_airport:
         st.error("Origin and destination airports cannot be the same.")
@@ -135,9 +144,9 @@ if st.button("Search Flights", type="primary"):
                 sort_by=sort_by,
             )
 
-            # Search for date prices (4 weeks before and after)
-            date_from = departure_date - timedelta(weeks=4)
-            date_to = departure_date + timedelta(weeks=4)
+            # Search for date prices (5 weeks before and 10 after)
+            date_from = departure_date - timedelta(weeks=5)
+            date_to = departure_date + timedelta(weeks=10)
 
             # Create date search filters
             date_filters = DateSearchFilters(
@@ -209,6 +218,15 @@ if st.button("Search Flights", type="primary"):
                     st.subheader("Price Trends")
                     date_prices = {result.date.date(): result.price for result in date_results}
 
+                    # Filter dates by selected day if toggle is on
+                    if limit_to_selected_day:
+                        selected_weekday = departure_date.weekday()
+                        date_prices = {
+                            date: price
+                            for date, price in date_prices.items()
+                            if date.weekday() == selected_weekday
+                        }
+
                     df_prices = pd.DataFrame(
                         list(date_prices.items()), columns=["Date", "Price"]
                     ).set_index("Date")
@@ -237,3 +255,4 @@ if st.button("Search Flights", type="primary"):
                 )
         except Exception as e:
             st.error(f"An error occurred while searching for flights: {str(e)}")
+ 
