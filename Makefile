@@ -7,6 +7,10 @@ TARGETS = fli/ scripts/ tests/
 app:
 	poetry run streamlit run fli/app/main.py --server.port 3600
 
+# Build the docs
+docs:
+	poetry run mkdocs build
+
 # Format code using ruff
 format:
 	poetry run ruff format $(TARGETS)
