@@ -131,6 +131,23 @@ def test_date_search_today_to_date(basic_search_params, future_date):
         )
 
 
+def test_date_search_past_from_date_after_swap(basic_search_params, future_date):
+    """Test DateSearchFilters bumps up from_date to current date after date swap."""
+    past_date = datetime.now() - timedelta(days=7)
+    later_date = future_date + timedelta(days=7)
+
+    # Create with reversed dates where from_date is in the future but will be swapped with past date
+    filters = DateSearchFilters(
+        **basic_search_params,
+        from_date=later_date.strftime("%Y-%m-%d"),
+        to_date=past_date.strftime("%Y-%m-%d"),
+    )
+
+    # After swap and adjustment, from_date should be today and to_date should be the later date
+    assert filters.from_date == datetime.now().date().strftime("%Y-%m-%d")
+    assert filters.to_date == later_date.strftime("%Y-%m-%d")
+
+
 def test_date_search_segment_outside_range(basic_search_params, future_date):
     """Test DateSearchFilters validates flight segment dates are within range."""
     from_date = future_date

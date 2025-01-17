@@ -382,10 +382,7 @@ class DateSearchFilters(BaseModel):
     def validate_date_order(cls, v: str, info: ValidationInfo) -> str:
         """Validate and adjust the date range constraints."""
         if info.field_name == "from_date":
-            # If from_date is in the past, set it to today
-            from_date = datetime.strptime(v, "%Y-%m-%d").date()
-            if from_date < datetime.now().date():
-                return datetime.now().date().strftime("%Y-%m-%d")
+            # Remove the past date check since we'll handle it in model validator
             return v
 
         # For to_date, check if it's after from_date
@@ -420,6 +417,17 @@ class DateSearchFilters(BaseModel):
                     f"Flight segment travel date {segment.travel_date} "
                     f"must be within the search date range"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def validate_and_adjust_from_date(self) -> "DateSearchFilters":
+        """Adjust from_date to current date if it's in the past."""
+        from_date = self.parsed_from_date.date()
+        current_date = datetime.now().date()
+
+        if from_date < current_date:
+            self.from_date = current_date.strftime("%Y-%m-%d")
+
         return self
 
     def format(self) -> list:
