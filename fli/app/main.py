@@ -170,7 +170,7 @@ if st.button("Search Flights", type="primary", use_container_width=True):
                     FlightSegment(
                         departure_airport=[[departure_airport, 0]],
                         arrival_airport=[[arrival_airport, 0]],
-                        travel_date=date_from.strftime("%Y-%m-%d"),
+                        travel_date=departure_date.strftime("%Y-%m-%d"),
                         time_restrictions=time_restrictions,
                     )
                 ],
