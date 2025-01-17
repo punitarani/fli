@@ -8,11 +8,11 @@ The main search functionality for finding specific flights.
 
 ::: fli.search.flights.SearchFlights
 
-### SearchFlightsFilters
+### FlightSearchFilters
 
 A simplified interface for flight search parameters.
 
-::: fli.search.flights.SearchFlightsFilters
+::: fli.models.google_flights.FlightSearchFilters
 
 ## Date Search
 
