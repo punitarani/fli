@@ -7,12 +7,14 @@ import pytest
 
 from fli.models import (
     Airport,
+    FlightSearchFilters,
+    FlightSegment,
     MaxStops,
     PassengerInfo,
     SeatType,
     SortBy,
 )
-from fli.search import SearchFlights, SearchFlightsFilters
+from fli.search import SearchFlights
 
 
 @pytest.fixture
@@ -109,13 +111,17 @@ def test_search_fuzz(
         infants_in_seat=infants_in_seat,
     )
 
-    search_filters = SearchFlightsFilters(
-        departure_airport=dep_airport,
-        arrival_airport=arr_airport,
-        departure_date=dep_date.strftime("%Y-%m-%d"),
+    search_filters = FlightSearchFilters(
         passenger_info=passenger_info,
-        seat_type=seat_type,
+        flight_segments=[
+            FlightSegment(
+                departure_airport=[[dep_airport, 0]],
+                arrival_airport=[[arr_airport, 0]],
+                travel_date=dep_date.strftime("%Y-%m-%d"),
+            )
+        ],
         stops=stops,
+        seat_type=seat_type,
         sort_by=sort_by,
     )
 

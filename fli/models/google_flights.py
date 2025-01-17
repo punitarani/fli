@@ -144,7 +144,7 @@ class FlightSearchFilters(BaseModel):
     seat_type: SeatType = SeatType.ECONOMY
     price_limit: PriceLimit | None = None
     airlines: list[Airline] | None = None
-    max_duration: PositiveInt | None = None  # in minutes
+    max_duration: PositiveInt | None = None
     layover_restrictions: LayoverRestrictions | None = None
     sort_by: SortBy = SortBy.NONE
 
@@ -301,10 +301,10 @@ class DateSearchFilters(BaseModel):
     seat_type: SeatType = SeatType.ECONOMY
     price_limit: PriceLimit | None = None
     airlines: list[Airline] | None = None
-    max_duration: PositiveInt | None = None  # in minutes
+    max_duration: PositiveInt | None = None
     layover_restrictions: LayoverRestrictions | None = None
-    from_date: str  # YYYY-MM-DD format
-    to_date: str  # YYYY-MM-DD format
+    from_date: str
+    to_date: str
 
     def format(self) -> list:
         """Format filters into Google Flights API structure.

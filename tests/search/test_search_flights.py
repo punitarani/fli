@@ -6,12 +6,14 @@ import pytest
 
 from fli.models import (
     Airport,
+    FlightSearchFilters,
+    FlightSegment,
     MaxStops,
     PassengerInfo,
     SeatType,
     SortBy,
 )
-from fli.search import SearchFlights, SearchFlightsFilters
+from fli.search import SearchFlights
 
 
 @pytest.fixture
@@ -25,18 +27,23 @@ def basic_search_params():
     """Create basic search params for testing."""
     today = datetime.now()
     future_date = today + timedelta(days=30)
-    return SearchFlightsFilters(
-        departure_airport=Airport.PHX,
-        arrival_airport=Airport.SFO,
-        departure_date=future_date.strftime("%Y-%m-%d"),
+    return FlightSearchFilters(
         passenger_info=PassengerInfo(
             adults=1,
             children=0,
             infants_in_seat=0,
             infants_on_lap=0,
         ),
+        flight_segments=[
+            FlightSegment(
+                departure_airport=[[Airport.PHX, 0]],
+                arrival_airport=[[Airport.SFO, 0]],
+                travel_date=future_date.strftime("%Y-%m-%d"),
+            )
+        ],
         stops=MaxStops.NON_STOP,
         seat_type=SeatType.ECONOMY,
+        sort_by=SortBy.CHEAPEST,
     )
 
 
@@ -45,19 +52,23 @@ def complex_search_params():
     """Create more complex search params for testing."""
     today = datetime.now()
     future_date = today + timedelta(days=60)
-    return SearchFlightsFilters(
-        departure_airport=Airport.JFK,
-        arrival_airport=Airport.LAX,
-        departure_date=future_date.strftime("%Y-%m-%d"),
+    return FlightSearchFilters(
         passenger_info=PassengerInfo(
             adults=2,
             children=1,
             infants_in_seat=0,
             infants_on_lap=1,
         ),
-        stops=MaxStops.TWO_OR_FEWER_STOPS,
-        seat_type=SeatType.PREMIUM_ECONOMY,
-        sort_by=SortBy.CHEAPEST,
+        flight_segments=[
+            FlightSegment(
+                departure_airport=[[Airport.JFK, 0]],
+                arrival_airport=[[Airport.LAX, 0]],
+                travel_date=future_date.strftime("%Y-%m-%d"),
+            )
+        ],
+        stops=MaxStops.ONE_STOP_OR_FEWER,
+        seat_type=SeatType.FIRST,
+        sort_by=SortBy.TOP_FLIGHTS,
     )
 
 

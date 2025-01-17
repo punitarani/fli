@@ -42,7 +42,6 @@ class SearchDates:
 
     def search(self, filters: DateSearchFilters) -> list[DatePrice] | None:
         """Search for flight prices across a date range and search parameters.
-        For date ranges larger than 92 days, splits into multiple searches.
 
         Args:
             filters: Search parameters including date range, airports, and preferences

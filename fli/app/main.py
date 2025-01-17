@@ -7,14 +7,16 @@ from fli.app.utils import format_enum
 from fli.models import (
     Airport,
     DateSearchFilters,
+    FlightSearchFilters,
     FlightSegment,
     MaxStops,
     PassengerInfo,
     SeatType,
     SortBy,
+    TimeRestrictions,
 )
 from fli.search.dates import SearchDates
-from fli.search.flights import SearchFlights, SearchFlightsFilters
+from fli.search.flights import SearchFlights
 
 # Set page config
 st.set_page_config(page_title="Fli", page_icon=":airplane:", layout="wide")
@@ -74,6 +76,42 @@ with col6:
 # Sort criteria
 sort_by = st.selectbox("Sort Results By", options=list(SortBy), format_func=format_enum)
 
+# Advanced options dropdown
+advanced_options = st.expander("Advanced Options", expanded=False)
+
+with advanced_options:
+    # Departure time range slider
+    departure_time_range = st.slider(
+        "Departure Time Range",
+        min_value=0,
+        max_value=24,
+        value=(0, 24),
+        format="%d:00",
+        help="Filter flights by departure time (24h format)",
+    )
+
+    # Arrival time range slider
+    arrival_time_range = st.slider(
+        "Arrival Time Range",
+        min_value=0,
+        max_value=24,
+        value=(0, 24),
+        format="%d:00",
+        help="Filter flights by arrival time (24h format)",
+    )
+
+# Create TimeRestrictions object
+time_restrictions = (
+    TimeRestrictions(
+        earliest_departure=departure_time_range[0] if departure_time_range[0] != 0 else None,
+        latest_departure=departure_time_range[1] if departure_time_range[1] != 24 else None,
+        earliest_arrival=arrival_time_range[0] if arrival_time_range[0] != 0 else None,
+        latest_arrival=arrival_time_range[1] if arrival_time_range[1] != 24 else None,
+    )
+    if departure_time_range != (0, 24) or arrival_time_range != (0, 24)
+    else None
+)
+
 # Search button
 if st.button("Search Flights", type="primary"):
     # Input validation
@@ -82,42 +120,46 @@ if st.button("Search Flights", type="primary"):
     else:
         try:
             # Create search filters
-            filters = SearchFlightsFilters(
-                departure_airport=departure_airport,
-                arrival_airport=arrival_airport,
-                departure_date=departure_date.strftime("%Y-%m-%d"),
+            flights_filters = FlightSearchFilters(
                 passenger_info=PassengerInfo(adults=num_adults),
-                seat_type=seat_type,
+                flight_segments=[
+                    FlightSegment(
+                        departure_airport=[[departure_airport, 0]],
+                        arrival_airport=[[arrival_airport, 0]],
+                        travel_date=departure_date.strftime("%Y-%m-%d"),
+                        time_restrictions=time_restrictions,
+                    )
+                ],
                 stops=stops,
+                seat_type=seat_type,
                 sort_by=sort_by,
             )
 
-            # Show searching message
+            # Search for date prices (4 weeks before and after)
+            date_from = departure_date - timedelta(weeks=4)
+            date_to = departure_date + timedelta(weeks=4)
+
+            # Create date search filters
+            date_filters = DateSearchFilters(
+                passenger_info=PassengerInfo(adults=num_adults),
+                flight_segments=[
+                    FlightSegment(
+                        departure_airport=[[departure_airport, 0]],
+                        arrival_airport=[[arrival_airport, 0]],
+                        travel_date=date_from.strftime("%Y-%m-%d"),
+                        time_restrictions=time_restrictions,
+                    )
+                ],
+                stops=stops,
+                seat_type=seat_type,
+                from_date=date_from.strftime("%Y-%m-%d"),
+                to_date=date_to.strftime("%Y-%m-%d"),
+            )
+
             with st.spinner("Searching for flights..."):
                 # Perform search
                 search = SearchFlights()
-                results = search.search(filters)
-
-                # Search for date prices (4 weeks before and after)
-                date_from = departure_date - timedelta(weeks=4)
-                date_to = departure_date + timedelta(weeks=4)
-
-                date_filters = DateSearchFilters(
-                    departure_airport=departure_airport,
-                    arrival_airport=arrival_airport,
-                    from_date=date_from.strftime("%Y-%m-%d"),
-                    to_date=date_to.strftime("%Y-%m-%d"),
-                    passenger_info=PassengerInfo(adults=num_adults),
-                    seat_type=seat_type,
-                    stops=stops,
-                    flight_segments=[
-                        FlightSegment(
-                            departure_airport=[[departure_airport, 0]],
-                            arrival_airport=[[arrival_airport, 0]],
-                            travel_date=date_from.strftime("%Y-%m-%d"),
-                        )
-                    ],
-                )
+                results = search.search(flights_filters)
 
                 date_search = SearchDates()
                 date_results = date_search.search(date_filters)

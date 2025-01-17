@@ -1,8 +1,7 @@
 from .dates import SearchDates
-from .flights import SearchFlights, SearchFlightsFilters
+from .flights import SearchFlights
 
 __all__ = [
-    "SearchDates",
     "SearchFlights",
-    "SearchFlightsFilters",
+    "SearchDates",
 ]

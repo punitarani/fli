@@ -9,47 +9,14 @@ Currently only supports one-way flights.
 import json
 from datetime import datetime
 
-from pydantic import BaseModel
-
 from fli.models import (
     Airline,
     Airport,
     FlightLeg,
     FlightResult,
     FlightSearchFilters,
-    FlightSegment,
-    MaxStops,
-    PassengerInfo,
-    SeatType,
-    SortBy,
 )
 from fli.search.client import get_client
-
-
-class SearchFlightsFilters(BaseModel):
-    """Simplified search filters for flight searches.
-
-    This model provides a simpler interface compared to the full FlightSearchFilters,
-    focusing on the most common search parameters.
-
-    Attributes:
-        departure_airport: Origin airport
-        arrival_airport: Destination airport
-        departure_date: Date in YYYY-MM-DD format
-        passenger_info: Passenger configuration (defaults to 1 adult)
-        seat_type: Cabin class (defaults to economy)
-        stops: Maximum stops allowed (defaults to any)
-        sort_by: Sort criteria (defaults to cheapest)
-
-    """
-
-    departure_airport: Airport
-    arrival_airport: Airport
-    departure_date: str
-    passenger_info: PassengerInfo = PassengerInfo(adults=1)
-    seat_type: SeatType = SeatType.ECONOMY
-    stops: MaxStops = MaxStops.ANY
-    sort_by: SortBy = SortBy.CHEAPEST
 
 
 class SearchFlights:
@@ -70,11 +37,11 @@ class SearchFlights:
         """Initialize the search client for flight searches."""
         self.client = get_client()
 
-    def search(self, filters: SearchFlightsFilters) -> list[FlightResult] | None:
-        """Search for flights using the provided filters.
+    def search(self, filters: FlightSearchFilters) -> list[FlightResult] | None:
+        """Search for flights using the given FlightSearchFilters.
 
         Args:
-            filters: Search parameters including airports, dates, and preferences
+            filters: Full flight search object including airports, dates, and preferences
 
         Returns:
             List of FlightResult objects containing flight details, or None if no results
@@ -83,8 +50,7 @@ class SearchFlights:
             Exception: If the search fails or returns invalid data
 
         """
-        search_filters = self._create_flight_search_data(filters)
-        encoded_filters = search_filters.encode()
+        encoded_filters = filters.encode()
 
         try:
             response = self.client.post(
@@ -111,31 +77,6 @@ class SearchFlights:
 
         except Exception as e:
             raise Exception(f"Search failed: {str(e)}") from e
-
-    @staticmethod
-    def _create_flight_search_data(params: SearchFlightsFilters) -> FlightSearchFilters:
-        """Convert simplified filters to full API filters.
-
-        Args:
-            params: Simplified search parameters
-
-        Returns:
-            Complete FlightSearchFilters object ready for API use
-
-        """
-        return FlightSearchFilters(
-            passenger_info=params.passenger_info,
-            flight_segments=[
-                FlightSegment(
-                    departure_airport=[[params.departure_airport, 0]],
-                    arrival_airport=[[params.arrival_airport, 0]],
-                    travel_date=params.departure_date,
-                )
-            ],
-            stops=params.stops,
-            seat_type=params.seat_type,
-            sort_by=params.sort_by,
-        )
 
     @staticmethod
     def _parse_flights_data(data: list) -> FlightResult:

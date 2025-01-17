@@ -11,8 +11,15 @@ from fli.cli.utils import (
     validate_date,
     validate_time_range,
 )
-from fli.models import Airport, PassengerInfo, SeatType, SortBy
-from fli.search import SearchFlights, SearchFlightsFilters
+from fli.models import (
+    Airport,
+    FlightSearchFilters,
+    FlightSegment,
+    PassengerInfo,
+    SeatType,
+    SortBy,
+)
+from fli.search import SearchFlights
 
 
 def search_flights(
@@ -35,11 +42,15 @@ def search_flights(
         sort_by = getattr(SortBy, sort.upper())
 
         # Create search filters
-        filters = SearchFlightsFilters(
-            departure_airport=departure_airport,
-            arrival_airport=arrival_airport,
-            departure_date=date,
+        filters = FlightSearchFilters(
             passenger_info=PassengerInfo(adults=1),
+            flight_segments=[
+                FlightSegment(
+                    departure_airport=[[departure_airport, 0]],
+                    arrival_airport=[[arrival_airport, 0]],
+                    travel_date=date,
+                )
+            ],
             seat_type=seat_type,
             stops=max_stops,
             sort_by=sort_by,
