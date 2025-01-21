@@ -15,7 +15,7 @@ flights and analyze pricing data.
 
 ### 🔍 Search Capabilities
 
-- One-way flight searches
+- One-way and round-trip flight searches
 - Flexible departure times
 - Multi-airline support
 - Various cabin classes
@@ -75,7 +75,7 @@ for flight in flights:
 The library is organized into several key modules:
 
 - `models/`: Data models and enums
-    - `google_flights.py`: Core data models
+    - `google_flights`: Core data models specific to Google Flights
     - `airline.py`: Airline enums and data
     - `airport.py`: Airport enums and data
 

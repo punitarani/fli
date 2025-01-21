@@ -3,8 +3,6 @@
 A powerful Python library that provides programmatic access to Google Flights data with an elegant CLI interface. Search
 flights, find the best deals, and filter results with ease.
 
-Try out the live demo at [flightly.streamlit.app](https://flightly.streamlit.app)
-
 > 🚀 **What makes `fli` special?**  
 > Unlike other flight search libraries that rely on web scraping, Fli directly interacts with Google Flights' API
 > through reverse engineering.
@@ -13,8 +11,6 @@ Try out the live demo at [flightly.streamlit.app](https://flightly.streamlit.app
 > - **Zero Scraping**: No HTML parsing, no browser automation, just pure API interaction
 > - **Reliable**: Less prone to breaking from UI changes
 > - **Modular**: Extensible architecture for easy customization and integration
-
-![Fli App](https://github.com/punitarani/fli/blob/main/data/fli-app.jpeg)
 
 ![CLI Demo](https://github.com/punitarani/fli/blob/main/data/cli-demo.png)
 
@@ -25,14 +21,11 @@ pip install flights
 ```
 
 ```bash
-# Install using pipx (recommended for CLI and GUI)
+# Install using pipx (recommended for CLI)
 pipx install flights
 
 # Get started with CLI
 fli --help
-
-# Launch the GUI
-fli app
 ```
 
 ## Features

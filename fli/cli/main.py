@@ -6,7 +6,6 @@ import typer
 
 from fli.cli.commands.cheap import cheap
 from fli.cli.commands.search import search
-from fli.cli.commands.streamlit import streamlit
 
 app = typer.Typer(
     help="Search for flights using Google Flights data",
@@ -14,7 +13,6 @@ app = typer.Typer(
 )
 
 # Register commands
-app.command(name="app")(streamlit)
 app.command(name="cheap")(cheap)
 app.command(name="search")(search)
 
@@ -35,11 +33,11 @@ def cli():
     """Entry point for the CLI that handles default command."""
     args = sys.argv[1:]
     if not args:
-        app()
-        return
+        sys.argv.append("--help")
+        args.append("--help")
 
     # If the first argument isn't a command, treat as search
-    if args[0] not in ["app", "cheap", "search", "--help", "-h"]:
+    if args[0] not in ["cheap", "search", "--help", "-h"]:
         sys.argv.insert(1, "search")
 
     app()
