@@ -1,10 +1,6 @@
-from .airline import Airline
-from .airport import Airport
-from .google_flights import (
-    DateSearchFilters,
+from .base import (
     FlightLeg,
     FlightResult,
-    FlightSearchFilters,
     FlightSegment,
     LayoverRestrictions,
     MaxStops,
@@ -15,6 +11,8 @@ from .google_flights import (
     TimeRestrictions,
     TripType,
 )
+from .dates import DateSearchFilters
+from .flights import FlightSearchFilters
 
 __all__ = [
     "Airline",

@@ -4,8 +4,6 @@ import typer
 
 from fli.cli.utils import (
     display_flight_results,
-    filter_flights_by_airlines,
-    filter_flights_by_time,
     parse_airlines,
     parse_stops,
     validate_date,
@@ -19,13 +17,16 @@ from fli.models import (
     SeatType,
     SortBy,
 )
+from fli.models.google_flights.base import TimeRestrictions, TripType
 from fli.search import SearchFlights
 
 
 def search_flights(
+    trip_type: TripType,
     from_airport: str,
     to_airport: str,
     date: str,
+    return_date: str | None = None,
     time: tuple[int, int] | None = None,
     airlines: list[str] | None = None,
     seat: str = "ECONOMY",
@@ -39,20 +40,43 @@ def search_flights(
         arrival_airport = getattr(Airport, to_airport.upper())
         seat_type = getattr(SeatType, seat.upper())
         max_stops = parse_stops(stops)
+        airlines = parse_airlines(airlines)
         sort_by = getattr(SortBy, sort.upper())
+
+        time_restrictions = None
+        if time:
+            start_hour, end_hour = time
+            time_restrictions = TimeRestrictions(
+                earliest_departure=start_hour, latest_departure=end_hour
+            )
+
+        # Create flight segments
+        flight_segments = [
+            FlightSegment(
+                departure_airport=[[departure_airport, 0]],
+                arrival_airport=[[arrival_airport, 0]],
+                travel_date=date,
+                time_restrictions=time_restrictions,
+            )
+        ]
+        if return_date:
+            flight_segments.append(
+                FlightSegment(
+                    departure_airport=[[arrival_airport, 0]],
+                    arrival_airport=[[departure_airport, 0]],
+                    travel_date=return_date,
+                    time_restrictions=time_restrictions,
+                )
+            )
 
         # Create search filters
         filters = FlightSearchFilters(
+            trip_type=trip_type,
             passenger_info=PassengerInfo(adults=1),
-            flight_segments=[
-                FlightSegment(
-                    departure_airport=[[departure_airport, 0]],
-                    arrival_airport=[[arrival_airport, 0]],
-                    travel_date=date,
-                )
-            ],
-            seat_type=seat_type,
+            flight_segments=flight_segments,
             stops=max_stops,
+            seat_type=seat_type,
+            airlines=airlines,
             sort_by=sort_by,
         )
 
@@ -63,16 +87,6 @@ def search_flights(
         if not flights:
             typer.echo("No flights found.")
             raise typer.Exit(1)
-
-        # Apply time filter if specified
-        if time:
-            start_hour, end_hour = time
-            flights = filter_flights_by_time(flights, start_hour, end_hour)
-
-        # Apply airline filter if specified
-        airline_list = parse_airlines(airlines)
-        if airline_list:
-            flights = filter_flights_by_airlines(flights, airline_list)
 
         # Display results
         display_flight_results(flights)
@@ -86,6 +100,15 @@ def search(
     from_airport: Annotated[str, typer.Argument(help="Departure airport code (e.g., JFK)")],
     to_airport: Annotated[str, typer.Argument(help="Arrival airport code (e.g., LHR)")],
     date: Annotated[str, typer.Argument(help="Travel date (YYYY-MM-DD)", callback=validate_date)],
+    return_date: Annotated[
+        str | None,
+        typer.Option(
+            "--return",
+            "-r",
+            help="Return date (YYYY-MM-DD)",
+            callback=validate_date,
+        ),
+    ] = None,
     time: Annotated[
         str | None,
         typer.Option(
@@ -135,9 +158,11 @@ def search(
 
     """
     search_flights(
+        trip_type=TripType.ROUND_TRIP if return_date else TripType.ONE_WAY,
         from_airport=from_airport,
         to_airport=to_airport,
         date=date,
+        return_date=return_date,
         time=time,
         airlines=airlines,
         seat=seat,
