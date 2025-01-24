@@ -58,6 +58,45 @@ def mock_search_flights(monkeypatch):
             ],
         ),
     ]
+
+    # Add round-trip mock results
+    mock.search_round_trip.return_value = [
+        {
+            "outbound": FlightResult(
+                price=299.99,
+                duration=180,
+                stops=0,
+                legs=[
+                    FlightLeg(
+                        airline=Airline.DL,
+                        flight_number="DL123",
+                        departure_airport=Airport.JFK,
+                        arrival_airport=Airport.LAX,
+                        departure_datetime=datetime.now(),
+                        arrival_datetime=datetime.now() + timedelta(hours=3),
+                        duration=180,
+                    )
+                ],
+            ),
+            "return": FlightResult(
+                price=299.99,
+                duration=180,
+                stops=0,
+                legs=[
+                    FlightLeg(
+                        airline=Airline.DL,
+                        flight_number="DL456",
+                        departure_airport=Airport.LAX,
+                        arrival_airport=Airport.JFK,
+                        departure_datetime=datetime.now() + timedelta(days=7),
+                        arrival_datetime=datetime.now() + timedelta(days=7, hours=3),
+                        duration=180,
+                    )
+                ],
+            ),
+            "total_price": 599.98,
+        }
+    ]
     monkeypatch.setattr("fli.search.flights.SearchFlights.__new__", lambda cls: mock)
     monkeypatch.setattr("fli.search.SearchFlights.__new__", lambda cls: mock)
     return mock
