@@ -9,7 +9,6 @@ from fli.cli.utils import (
     filter_dates_by_days,
     parse_airlines,
     parse_stops,
-    parse_trip_type,
     validate_date,
     validate_time_range,
 )
@@ -50,14 +49,14 @@ def cheap(
             help="List of airline codes (e.g., BA KL)",
         ),
     ] = None,
-    trip_type: Annotated[
-        str,
+    round_trip: Annotated[
+        bool,
         typer.Option(
-            "--type",
-            "-t",
-            help="Trip type (ONEWAY, ROUND)",
+            "--round",
+            "-R",
+            help="Search for round-trip flights",
         ),
-    ] = "ONEWAY",
+    ] = False,
     stops: Annotated[
         str,
         typer.Option(
@@ -157,7 +156,7 @@ def cheap(
         # Parse parameters
         departure_airport = getattr(Airport, from_airport.upper())
         arrival_airport = getattr(Airport, to_airport.upper())
-        trip_type = parse_trip_type(trip_type)
+        trip_type = TripType.ROUND_TRIP if round_trip else TripType.ONE_WAY
         max_stops = parse_stops(stops)
         seat_type = getattr(SeatType, seat.upper())
         airlines = parse_airlines(airlines)

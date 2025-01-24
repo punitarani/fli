@@ -4,6 +4,7 @@ import pytest
 from typer.testing import CliRunner
 
 from fli.cli.main import app
+from fli.models.google_flights.base import TripType
 from fli.search import DatePrice
 
 
@@ -14,7 +15,7 @@ def runner():
 
 
 def test_basic_cheap_search(runner, mock_search_dates, mock_console):
-    """Test basic cheap flight search."""
+    """Test basic cheap flight search (one-way by default)."""
     mock_search_dates.search.return_value = [
         DatePrice(
             date=(datetime.now() + timedelta(days=1),),
@@ -24,6 +25,8 @@ def test_basic_cheap_search(runner, mock_search_dates, mock_console):
     result = runner.invoke(app, ["cheap", "JFK", "LAX"])
     assert result.exit_code == 0
     mock_search_dates.search.assert_called_once()
+    args, _ = mock_search_dates.search.call_args
+    assert args[0].trip_type == TripType.ONE_WAY
 
 
 def test_cheap_with_date_range(runner, mock_search_dates, mock_console):
@@ -171,3 +174,46 @@ def test_cheap_no_results(runner, mock_search_dates, mock_console):
     result = runner.invoke(app, ["cheap", "JFK", "LAX"])
     assert result.exit_code == 1
     assert "No flights found" in result.stdout
+
+
+def test_cheap_round_trip(runner, mock_search_dates, mock_console):
+    """Test cheap search with round-trip flag."""
+    mock_search_dates.search.return_value = [
+        DatePrice(
+            date=(
+                datetime.now() + timedelta(days=1),
+                datetime.now() + timedelta(days=8),
+            ),
+            price=599.98,
+        ),
+    ]
+    result = runner.invoke(
+        app,
+        ["cheap", "JFK", "LAX", "--round"],
+    )
+    assert result.exit_code == 0
+    mock_search_dates.search.assert_called_once()
+    args, _ = mock_search_dates.search.call_args
+    assert args[0].trip_type == TripType.ROUND_TRIP
+
+
+def test_cheap_round_trip_with_duration(runner, mock_search_dates, mock_console):
+    """Test cheap round-trip search with custom duration."""
+    mock_search_dates.search.return_value = [
+        DatePrice(
+            date=(
+                datetime.now() + timedelta(days=1),
+                datetime.now() + timedelta(days=15),
+            ),
+            price=599.98,
+        ),
+    ]
+    result = runner.invoke(
+        app,
+        ["cheap", "JFK", "LAX", "--round", "-d", "14"],
+    )
+    assert result.exit_code == 0
+    mock_search_dates.search.assert_called_once()
+    args, _ = mock_search_dates.search.call_args
+    assert args[0].trip_type == TripType.ROUND_TRIP
+    assert args[0].duration == 14
