@@ -3,8 +3,6 @@
 This module provides functionality to search for the cheapest flights across a date range.
 It uses Google Flights' calendar view API to find the best prices for each date.
 It is intended to be used for finding the cheapest dates to fly, not the cheapest flights.
-
-Currently only supports one-way flights.
 """
 
 import json
@@ -13,13 +11,14 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel
 
 from fli.models import DateSearchFilters
+from fli.models.google_flights.base import TripType
 from fli.search.client import get_client
 
 
 class DatePrice(BaseModel):
     """Flight price for a specific date."""
 
-    date: datetime
+    date: tuple[datetime] | tuple[datetime, datetime]
     price: float
 
 
@@ -30,7 +29,7 @@ class SearchDates:
     useful for finding the cheapest dates to fly.
     """
 
-    BASE_URL = "https://www.google.com/_/FlightsFrontendUi/data/travel.frontend.flights.FlightsFrontendService/GetCalendarGrid"
+    BASE_URL = "https://www.google.com/_/FlightsFrontendUi/data/travel.frontend.flights.FlightsFrontendService/GetCalendarGraph"
     DEFAULT_HEADERS = {
         "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
     }
@@ -70,8 +69,17 @@ class SearchDates:
         while current_from <= to_date:
             current_to = min(current_from + timedelta(days=self.MAX_DAYS_PER_SEARCH - 1), to_date)
 
+            # Update the travel date for the flight segments
+            if current_from > from_date:
+                for segment in filters.flight_segments:
+                    segment.travel_date = (
+                        datetime.strptime(segment.travel_date, "%Y-%m-%d")
+                        + timedelta(days=self.MAX_DAYS_PER_SEARCH)
+                    ).strftime("%Y-%m-%d")
+
             # Create new filters for this chunk
             chunk_filters = DateSearchFilters(
+                trip_type=filters.trip_type,
                 passenger_info=filters.passenger_info,
                 flight_segments=filters.flight_segments,
                 stops=filters.stops,
@@ -79,6 +87,7 @@ class SearchDates:
                 airlines=filters.airlines,
                 from_date=current_from.strftime("%Y-%m-%d"),
                 to_date=current_to.strftime("%Y-%m-%d"),
+                duration=filters.duration,
             )
 
             chunk_results = self._search_chunk(chunk_filters)
@@ -119,7 +128,7 @@ class SearchDates:
             data = json.loads(parsed)
             dates_data = [
                 DatePrice(
-                    date=datetime.strptime(item[0], "%Y-%m-%d"),
+                    date=self.__parse_date(item, filters.trip_type),
                     price=self.__parse_price(item),
                 )
                 for item in data[-1]
@@ -129,6 +138,28 @@ class SearchDates:
 
         except Exception as e:
             raise Exception(f"Search failed: {str(e)}") from e
+
+    @staticmethod
+    def __parse_date(
+        item: list[list] | list | None, trip_type: TripType
+    ) -> tuple[datetime] | tuple[datetime, datetime]:
+        """Parse date data from the API response.
+
+        Args:
+            item: Raw date data from the API response
+            trip_type: Trip type (one-way or round-trip)
+
+        Returns:
+            Tuple of datetime objects
+
+        """
+        if trip_type == TripType.ONE_WAY:
+            return (datetime.strptime(item[0], "%Y-%m-%d"),)
+        else:
+            return (
+                datetime.strptime(item[0], "%Y-%m-%d"),
+                datetime.strptime(item[1], "%Y-%m-%d"),
+            )
 
     @staticmethod
     def __parse_price(item: list[list] | list | None) -> float | None:

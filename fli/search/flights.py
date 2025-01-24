@@ -2,11 +2,10 @@
 
 This module provides the core flight search functionality, interfacing directly
 with Google Flights' API to find available flights and their details.
-
-Currently only supports one-way flights.
 """
 
 import json
+from copy import deepcopy
 from datetime import datetime
 
 from fli.models import (
@@ -16,6 +15,7 @@ from fli.models import (
     FlightResult,
     FlightSearchFilters,
 )
+from fli.models.google_flights.base import TripType
 from fli.search.client import get_client
 
 
@@ -24,8 +24,6 @@ class SearchFlights:
 
     This class handles searching for specific flights with detailed filters,
     parsing the results into structured data models.
-
-    Currently only supports one-way flights.
     """
 
     BASE_URL = "https://www.google.com/_/FlightsFrontendUi/data/travel.frontend.flights.FlightsFrontendService/GetShoppingResults"
@@ -37,11 +35,14 @@ class SearchFlights:
         """Initialize the search client for flight searches."""
         self.client = get_client()
 
-    def search(self, filters: FlightSearchFilters) -> list[FlightResult] | None:
+    def search(
+        self, filters: FlightSearchFilters, top_n: int = 5
+    ) -> list[FlightResult | tuple[FlightResult, FlightResult]] | None:
         """Search for flights using the given FlightSearchFilters.
 
         Args:
             filters: Full flight search object including airports, dates, and preferences
+            top_n: Number of flights to limit the return flight search to
 
         Returns:
             List of FlightResult objects containing flight details, or None if no results
@@ -73,7 +74,26 @@ class SearchFlights:
                 for item in encoded_filters[i][0]
             ]
             flights = [self._parse_flights_data(flight) for flight in flights_data]
-            return flights
+
+            if (
+                filters.trip_type == TripType.ONE_WAY
+                or filters.flight_segments[0].selected_flight is not None
+            ):
+                return flights
+
+            # Get the return flights if round-trip
+            flight_pairs = []
+            # Call the search again with the return flight data
+            for selected_flight in flights[:top_n]:
+                selected_flight_filters = deepcopy(filters)
+                selected_flight_filters.flight_segments[0].selected_flight = selected_flight
+                return_flights = self.search(selected_flight_filters, top_n=top_n)
+                if return_flights is not None:
+                    flight_pairs.extend(
+                        (selected_flight, return_flight) for return_flight in return_flights
+                    )
+
+            return flight_pairs
 
         except Exception as e:
             raise Exception(f"Search failed: {str(e)}") from e

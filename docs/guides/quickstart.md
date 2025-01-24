@@ -10,7 +10,7 @@ This guide will help you get started with Fli quickly.
 pip install flights
 ```
 
-### For CLI and GUI Usage
+### For CLI Usage
 
 ```bash
 pipx install flights
@@ -18,33 +18,31 @@ pipx install flights
 
 ## Basic Usage
 
-### Application (GUI)
-
-```bash
-fli app
-```
-
-This will launch the Streamlit application at [http://localhost:3600](http://localhost:3600).
-
 ### Command Line Interface
 
-1. Search for flights on a specific date:
+1. Search for one-way flights:
 
 ```bash
 fli search JFK LHR 2024-06-01
 ```
 
-2. Search with filters:
+2. Search for round trip flights:
+
+```bash
+fli search JFK LHR 2024-06-01 --return 2024-06-15
+```
+
+3. Search with filters:
 
 ```bash
 fli search JFK LHR 2024-06-01 \
     -t 6-20 \              # Time range (6 AM - 8 PM)
     -a BA KL \             # Airlines (British Airways, KLM)
-    -s BUSINESS \          # Seat type
-    -x NON_STOP           # Non-stop flights only
+    -c BUSINESS \          # Seat type
+    -s 0                   # Non-stop flights only
 ```
 
-3. Find cheapest dates:
+4. Find cheapest dates:
 
 ```bash
 fli cheap JFK LHR --from 2024-06-01 --to 2024-06-30
@@ -52,17 +50,29 @@ fli cheap JFK LHR --from 2024-06-01 --to 2024-06-30
 
 ### Python API
 
-1. Basic Flight Search:
+1. Basic One-Way Flight Search:
 
 ```python
-from fli.search import SearchFlights, SearchFlightsFilters
-from fli.models import Airport, SeatType
+from fli.search import SearchFlights
+from fli.models import (
+    FlightSearchFilters, FlightSegment,
+    Airport, SeatType, TripType, PassengerInfo
+)
+
+# Create flight segment
+flight_segments = [
+    FlightSegment(
+        departure_airport=[[Airport.JFK, 0]],
+        arrival_airport=[[Airport.LAX, 0]],
+        travel_date="2024-06-01"
+    )
+]
 
 # Create filters
-filters = SearchFlightsFilters(
-    departure_airport=Airport.JFK,
-    arrival_airport=Airport.LAX,
-    departure_date="2024-06-01",
+filters = FlightSearchFilters(
+    trip_type=TripType.ONE_WAY,
+    passenger_info=PassengerInfo(adults=1),
+    flight_segments=flight_segments,
     seat_type=SeatType.ECONOMY
 )
 
@@ -78,7 +88,58 @@ for flight in results:
         print(f"Flight: {leg.airline.value} {leg.flight_number}")
 ```
 
-2. Date Range Search:
+2. Round Trip Flight Search:
+
+```python
+from fli.search import SearchFlights
+from fli.models import (
+    FlightSearchFilters, FlightSegment,
+    Airport, TripType, PassengerInfo
+)
+
+# Create flight segments for round trip
+flight_segments = [
+    FlightSegment(
+        departure_airport=[[Airport.JFK, 0]],
+        arrival_airport=[[Airport.LAX, 0]],
+        travel_date="2024-06-01"
+    ),
+    FlightSegment(
+        departure_airport=[[Airport.LAX, 0]],
+        arrival_airport=[[Airport.JFK, 0]],
+        travel_date="2024-06-15"
+    )
+]
+
+# Create filters
+filters = FlightSearchFilters(
+    trip_type=TripType.ROUND_TRIP,
+    passenger_info=PassengerInfo(adults=1),
+    flight_segments=flight_segments
+)
+
+# Search flights
+search = SearchFlights()
+results = search.search(filters)
+
+# Process results
+for flight in results:
+    print(f"\nOutbound Flight:")
+    for leg in flight.outbound.legs:
+        print(f"Flight: {leg.airline.value} {leg.flight_number}")
+        print(f"Departure: {leg.departure_datetime}")
+        print(f"Arrival: {leg.arrival_datetime}")
+    
+    print(f"\nReturn Flight:")
+    for leg in flight.return_flight.legs:
+        print(f"Flight: {leg.airline.value} {leg.flight_number}")
+        print(f"Departure: {leg.departure_datetime}")
+        print(f"Arrival: {leg.arrival_datetime}")
+    
+    print(f"\nTotal Price: ${flight.total_price}")
+```
+
+3. Date Range Search:
 
 ```python
 from fli.search import SearchDates

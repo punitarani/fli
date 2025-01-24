@@ -10,11 +10,14 @@ from rich.text import Text
 
 from fli.cli.console import console
 from fli.cli.enums import DayOfWeek
-from fli.models import Airline, Airport, MaxStops
+from fli.models import Airline, Airport, MaxStops, TripType
 
 
-def validate_date(ctx: Context, param: Parameter, value: str) -> str:
+def validate_date(ctx: Context, param: Parameter, value: str) -> str | None:
     """Validate date format."""
+    if value is None:
+        return None
+
     try:
         datetime.strptime(value, "%Y-%m-%d")
         return value
@@ -38,6 +41,19 @@ def validate_time_range(
         raise typer.BadParameter("Time range must be in format 'start-end' (e.g., 6-20)") from e
 
 
+def parse_airlines(airlines: list[str] | None) -> list[Airline] | None:
+    """Parse airlines from list of airline codes."""
+    if not airlines:
+        return None
+
+    try:
+        return [
+            getattr(Airline, airline.strip().upper()) for airline in airlines if airline.strip()
+        ]
+    except AttributeError as e:
+        raise typer.BadParameter(f"Invalid airline code: {str(e)}") from e
+
+
 def parse_stops(stops: str) -> MaxStops:
     """Convert stops parameter to MaxStops enum."""
     # Try parsing as integer first
@@ -59,17 +75,15 @@ def parse_stops(stops: str) -> MaxStops:
             raise typer.BadParameter(f"Invalid stops value: {stops}") from e
 
 
-def parse_airlines(airlines: list[str] | None) -> list[Airline] | None:
-    """Parse airlines from list of airline codes."""
-    if not airlines:
-        return None
-
-    try:
-        return [
-            getattr(Airline, airline.strip().upper()) for airline in airlines if airline.strip()
-        ]
-    except AttributeError as e:
-        raise typer.BadParameter(f"Invalid airline code: {str(e)}") from e
+def parse_trip_type(trip_type: str) -> TripType:
+    """Convert trip type parameter to TripType enum."""
+    match trip_type.upper():
+        case "ONEWAY" | "ONE_WAY":
+            return TripType.ONE_WAY
+        case "ROUND" | "ROUND_TRIP":
+            return TripType.ROUND_TRIP
+        case _:
+            raise typer.BadParameter(f"Invalid trip type: {trip_type}")
 
 
 def filter_flights_by_time(flights: list, start_hour: int, end_hour: int) -> list:
@@ -86,7 +100,7 @@ def filter_flights_by_airlines(flights: list, airlines: list[Airline]) -> list:
     return [flight for flight in flights if any(leg.airline in airlines for leg in flight.legs)]
 
 
-def filter_dates_by_days(dates: list, days: list[DayOfWeek]) -> list:
+def filter_dates_by_days(dates: list, days: list[DayOfWeek], trip_type: TripType) -> list:
     """Filter dates by days of the week."""
     if not days:
         return dates
@@ -102,7 +116,7 @@ def filter_dates_by_days(dates: list, days: list[DayOfWeek]) -> list:
     }
 
     allowed_days = {day_numbers[day] for day in days}
-    return [date_price for date_price in dates if date_price.date.weekday() in allowed_days]
+    return [date_price for date_price in dates if date_price.date[0].weekday() in allowed_days]
 
 
 def format_airport(airport: Airport) -> str:
@@ -120,51 +134,78 @@ def format_duration(minutes: int) -> str:
 
 
 def display_flight_results(flights: list):
-    """Display flight results in a beautiful format."""
+    """Display flight results in a beautiful format.
+
+    Args:
+        flights: List of either FlightResult objects (one-way)
+        or tuples of (outbound, return) FlightResults (round-trip)
+
+    """
     if not flights:
         console.print(Panel("No flights found matching your criteria", style="red"))
         return
 
-    for i, flight in enumerate(flights, 1):
+    for i, flight_data in enumerate(flights, 1):
+        is_round_trip = isinstance(flight_data, tuple)
+        flight_segments = [flight_data] if not is_round_trip else [flight_data[0], flight_data[1]]
+
         # Create main flight info table
         table = Table(show_header=False, box=box.SIMPLE)
         table.add_column("Label", style="blue")
         table.add_column("Value", style="green")
 
-        table.add_row("Price", f"${flight.price:,.2f}")
-        table.add_row("Duration", format_duration(flight.duration))
-        table.add_row("Stops", str(flight.stops))
+        total_price = flight_segments[0].price
+        if is_round_trip:
+            total_price += flight_segments[1].price
+        table.add_row("Total Price", f"${total_price:,.2f}")
 
-        # Create segments table
-        segments = Table(title="Flight Segments", box=box.ROUNDED)
-        segments.add_column("Airline", style="cyan")
-        segments.add_column("Flight", style="magenta")
-        segments.add_column("From", style="yellow", width=30)
-        segments.add_column("Departure", style="green")
-        segments.add_column("To", style="yellow", width=30)
-        segments.add_column("Arrival", style="green")
+        if is_round_trip:
+            table.add_row("Outbound Price", f"${flight_segments[0].price:,.2f}")
+            table.add_row("Return Price", f"${flight_segments[1].price:,.2f}")
 
-        for leg in flight.legs:
-            segments.add_row(
-                leg.airline.value,
-                leg.flight_number,
-                format_airport(leg.departure_airport),
-                leg.departure_datetime.strftime("%H:%M %d-%b"),
-                format_airport(leg.arrival_airport),
-                leg.arrival_datetime.strftime("%H:%M %d-%b"),
+        total_duration = sum(flight.duration for flight in flight_segments)
+        table.add_row("Total Duration", format_duration(total_duration))
+        total_stops = sum(flight.stops for flight in flight_segments)
+        table.add_row("Total Stops", str(total_stops))
+
+        # Create segments tables for each direction
+        all_segments = []
+        for idx, flight in enumerate(flight_segments):
+            direction = "Outbound" if idx == 0 else "Return" if is_round_trip else ""
+            segments = Table(
+                title=f"{direction} Flight Segments" if direction else "Flight Segments",
+                box=box.ROUNDED,
             )
+            segments.add_column("Airline", style="cyan")
+            segments.add_column("Flight", style="magenta")
+            segments.add_column("From", style="yellow", width=30)
+            segments.add_column("Departure", style="green")
+            segments.add_column("To", style="yellow", width=30)
+            segments.add_column("Arrival", style="green")
+
+            for leg in flight.legs:
+                segments.add_row(
+                    leg.airline.value,
+                    leg.flight_number,
+                    format_airport(leg.departure_airport),
+                    leg.departure_datetime.strftime("%H:%M %d-%b"),
+                    format_airport(leg.arrival_airport),
+                    leg.arrival_datetime.strftime("%H:%M %d-%b"),
+                )
+            all_segments.extend([segments, Text("")])
 
         # Display in a panel
+        title = "Round-trip Flight" if is_round_trip else "One-way Flight"
         console.print(
             Panel(
                 Group(
-                    Text(f"Flight Option {i}", style="bold blue"),
+                    Text(f"{title} Option {i}", style="bold blue"),
                     Text(""),
                     table,
                     Text(""),
-                    segments,
+                    *all_segments[:-1],  # Remove the last empty Text
                 ),
-                title=f"[bold]Flight {i} of {len(flights)}[/bold]",
+                title=f"[bold]Option {i} of {len(flights)}[/bold]",
                 border_style="blue",
                 box=box.ROUNDED,
             )
@@ -172,23 +213,35 @@ def display_flight_results(flights: list):
         console.print()
 
 
-def display_date_results(dates: list):
+def display_date_results(dates: list, trip_type: TripType):
     """Display date search results in a beautiful format."""
     if not dates:
         console.print(Panel("No flights found for these dates", style="red"))
         return
 
     table = Table(title="Cheapest Dates to Fly", box=box.ROUNDED)
-    table.add_column("Date", style="cyan")
+    table.add_column("Departure", style="cyan")
     table.add_column("Day", style="yellow")
+    if trip_type == TripType.ROUND_TRIP:
+        table.add_column("Return", style="cyan")
+        table.add_column("Day", style="yellow")
     table.add_column("Price", style="green")
 
     for date_price in dates:
-        table.add_row(
-            date_price.date.strftime("%Y-%m-%d"),
-            date_price.date.strftime("%A"),
-            f"${date_price.price:,.2f}",
-        )
+        if trip_type == TripType.ONE_WAY:
+            table.add_row(
+                date_price.date[0].strftime("%Y-%m-%d"),
+                date_price.date[0].strftime("%A"),
+                f"${date_price.price:,.2f}",
+            )
+        else:
+            table.add_row(
+                date_price.date[0].strftime("%Y-%m-%d"),
+                date_price.date[0].strftime("%A"),
+                date_price.date[1].strftime("%Y-%m-%d"),
+                date_price.date[1].strftime("%A"),
+                f"${date_price.price:,.2f}",
+            )
 
     console.print(table)
     console.print()
