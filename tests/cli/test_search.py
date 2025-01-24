@@ -1,9 +1,10 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from typer.testing import CliRunner
 
 from fli.cli.main import app
+from fli.models.google_flights.base import TripType
 
 
 @pytest.fixture
@@ -117,3 +118,72 @@ def test_search_no_results(runner, mock_search_flights, mock_console):
     )
     assert result.exit_code == 1
     assert "No flights found" in result.stdout
+
+
+def test_basic_round_trip_search(runner, mock_search_flights, mock_console):
+    """Test basic round-trip flight search."""
+    outbound_date = datetime.now().strftime("%Y-%m-%d")
+    return_date = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+
+    result = runner.invoke(
+        app,
+        [
+            "search",
+            "JFK",
+            "LAX",
+            outbound_date,
+            "--return",
+            return_date,
+        ],
+    )
+    assert result.exit_code == 0
+    mock_search_flights.search.assert_called_once()
+
+
+def test_round_trip_with_filters(runner, mock_search_flights, mock_console):
+    """Test round-trip search with additional filters."""
+    outbound_date = datetime.now().strftime("%Y-%m-%d")
+    return_date = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+
+    result = runner.invoke(
+        app,
+        [
+            "search",
+            "JFK",
+            "LAX",
+            outbound_date,
+            "--return",
+            return_date,
+            "--class",
+            "BUSINESS",
+            "--stops",
+            "NON_STOP",
+            "-a",
+            "DL",
+        ],
+    )
+    assert result.exit_code == 0
+    mock_search_flights.search.assert_called_once()
+    # Verify the trip type was set to ROUND_TRIP
+    args, kwargs = mock_search_flights.search.call_args
+    assert args[0].trip_type == TripType.ROUND_TRIP
+
+
+def test_round_trip_invalid_dates(runner, mock_search_flights, mock_console):
+    """Test round-trip search with return date before outbound date."""
+    outbound_date = datetime.now().strftime("%Y-%m-%d")
+    return_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    result = runner.invoke(
+        app,
+        [
+            "search",
+            "JFK",
+            "LAX",
+            outbound_date,
+            "--return",
+            return_date,
+        ],
+    )
+    assert result.exit_code == 1
+    assert "Error" in result.stdout
