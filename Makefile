@@ -33,13 +33,22 @@ test-fuzz:
 test-all:
 	poetry run pytest -vv --all
 
+# Generate the requirements.txt file
+requirements:
+	poetry export --without-hashes --without-urls --format requirements.txt > requirements.txt
+	sed -e 's/ ;.*//' requirements.txt > requirements.tmp && mv requirements.tmp requirements.txt
+
 # Display help message by default
 .DEFAULT_GOAL := help
 help:
 	@echo "Available commands:"
+	@echo "  make server      - Run the server"
 	@echo "  make format      - Format code using ruff"
 	@echo "  make lint        - Lint code using ruff"
 	@echo "  make lint-fix    - Lint and fix code using ruff"
 	@echo "  make test        - Run tests"
+	@echo "  make test-fuzz   - Run tests with fuzzing"
+	@echo "  make test-all    - Run all tests"
+	@echo "  make requirements - Generate the requirements.txt file"
 # Declare the targets as phony
 .PHONY: format lint check help
