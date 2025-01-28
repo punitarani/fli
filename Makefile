@@ -3,6 +3,12 @@
 # List of directories and files to format and lint
 TARGETS = fli/ scripts/ tests/
 
+# Run the server
+server:
+	poetry run uvicorn fli.server.main:app
+server-dev:
+	poetry run uvicorn fli.server.main:app --reload
+
 # Build the docs
 docs:
 	poetry run mkdocs build
