@@ -104,7 +104,7 @@ def test_search_invalid_date(runner, mock_search_flights, mock_console):
     """Test search with invalid date format."""
     result = runner.invoke(app, ["search", "JFK", "LAX", "2024-13-45"])
     assert result.exit_code == 2
-    assert "Error" in result.stdout
+    assert "Error" in result.output
 
 
 def test_search_no_results(runner, mock_search_flights, mock_console):

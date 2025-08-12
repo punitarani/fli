@@ -1,41 +1,66 @@
-[tool.poetry]
-name = "flights"
-version = "0.4.0"
+[project]
+name = "fli"
+version = "0.5.0"
 description = "A Python wrapper for Google Flights API"
-authors = ["Punit Arani <punit@joinslash.com>"]
+authors = [
+    { name = "Punit Arani", email = "punit@joinslash.com" }
+]
 readme = "README.md"
-homepage = "https://github.com/punitarani/fli"
-repository = "https://github.com/punitarani/fli"
-documentation = "https://punitarani.github.io/fli"
+license = { text = "MIT" }
+requires-python = ">=3.12"
 keywords = ["flights", "google-flights", "travel", "api", "flight-search"]
-packages = [
-    { include = "fli" }
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Internet :: WWW/HTTP :: Indexing/Search",
 ]
 
-[tool.poetry.dependencies]
-python = "^3.12"
-curl-cffi = "^0.7.4"
-httpx = "^0.28.1"
-pandas = "^2.2.3"
-pydantic = "^2.10.4"
-python-dotenv = "^1.0.1"
-ratelimit = "^2.2.1"
-tenacity = "^9.0.0"
-typer = "^0.15.1"
+dependencies = [
+    "curl-cffi>=0.7.4",
+    "fastapi>=0.115.6",
+    "fastmcp>=0.1.0",
+    "httpx>=0.28.1",
+    "pandas>=2.2.3",
+    "pydantic>=2.10.4",
+    "python-dotenv>=1.0.1",
+    "ratelimit>=2.2.1",
+    "tenacity>=9.0.0",
+    "typer>=0.15.1",
+    "uvicorn>=0.34.0",
+]
 
-[tool.poetry.group.dev.dependencies]
-mkdocs-material = { extras = ["imaging"], version = "^9.5.49" }
-mkdocstrings = { extras = ["python"], version = "^0.27.0" }
-pytest = "^8.3.4"
-pytest-xdist = "^3.6.1"
-ruff = "^0.8.4"
+[project.optional-dependencies]
+dev = [
+    "mkdocs-material[imaging]>=9.5.49",
+    "mkdocstrings[python]>=0.27.0",
+    "pytest>=8.3.4",
+    "pytest-asyncio>=0.25.2",
+    "pytest-xdist>=3.6.1",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.8.4",
+    "twine>=6.0.0",
+]
 
-[tool.poetry.scripts]
+[project.scripts]
 fli = "fli.cli:cli"
+fli-mcp = "fli.mcp.server:run"
+
+[project.urls]
+Homepage = "https://github.com/punitarani/fli"
+Repository = "https://github.com/punitarani/fli"
+Documentation = "https://punitarani.github.io/fli"
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["fli"]
 
 [tool.pytest.ini_options]
 markers = [
@@ -43,7 +68,7 @@ markers = [
 ]
 
 [tool.ruff]
-target-version = "py313"
+target-version = "py312"
 line-length = 100
 indent-width = 4
 

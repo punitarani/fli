@@ -17,12 +17,12 @@ flights, find the best deals, and filter results with ease.
 ## Quick Start
 
 ```bash
-pip install flights
+pip install fli
 ```
 
 ```bash
 # Install using pipx (recommended for CLI)
-pipx install flights
+pipx install fli
 
 # Get started with CLI
 fli --help
@@ -108,6 +108,54 @@ fli cheap JFK LHR \
 | `-x, --stops` | Maximum stops | `NON_STOP`, `ONE_STOP` |
 | `--[day]`     | Day filters   | `--monday`, `--friday` |
 
+## MCP Server Integration
+
+Fli includes a Model Context Protocol (MCP) server that allows AI assistants like Claude to search for flights directly. This enables natural language flight search through conversation.
+
+### Running the MCP Server
+
+```bash
+# Run the MCP server on STDIO
+fli-mcp
+
+# Or with uv (for development)
+uv run fli-mcp
+
+# Or with make (for development)
+make mcp
+```
+
+### Claude Desktop Configuration
+
+To use the flight search capabilities in Claude Desktop, add this configuration to your `claude_desktop_config.json`:
+
+**Location**: `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
+
+```json
+{
+  "mcpServers": {
+    "flight-search": {
+      "command": "fli-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+After adding this configuration:
+1. Restart Claude Desktop
+2. You can now ask Claude to search for flights naturally:
+   - "Find flights from JFK to LAX on December 25th"
+   - "What are the cheapest dates to fly from NYC to London in January?"
+   - "Search for business class flights from SFO to NRT with no stops"
+
+### MCP Tools Available
+
+The MCP server provides two main tools:
+
+- **`search_flights`**: Search for specific flights with detailed filters
+- **`search_cheap_flights`**: Find the cheapest dates across a flexible date range
+
 ## Python API Usage
 
 ### Basic Search Example
@@ -151,18 +199,24 @@ for flight in flights:
 git clone https://github.com/punitarani/fli.git
 cd fli
 
-# Install dependencies with Poetry
-poetry install
+# Install dependencies with uv
+uv sync --all-extras
 
 # Run tests
-poetry run pytest
+uv run pytest
 
 # Run linting
-poetry run ruff check .
-poetry run ruff format .
+uv run ruff check .
+uv run ruff format .
 
 # Build documentation
-poetry run mkdocs serve
+uv run mkdocs serve
+
+# Or use the Makefile for common tasks
+make install-all  # Install all dependencies
+make test         # Run tests
+make lint         # Check code style
+make format       # Format code
 ```
 
 ## Contributing
