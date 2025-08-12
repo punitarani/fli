@@ -17,30 +17,26 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [ "3.11", "3.12", "3.13" ]
+        python-version: [ "3.12", "3.13" ]
       fail-fast: false
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install poetry
-        run: pipx install poetry
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: 'poetry'
-          cache-dependency-path: |
-            poetry.lock
-            pyproject.toml
+        run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: poetry install --with dev --no-interaction
+        run: uv sync --extra dev
 
       - name: Run tests
         run: |
-          poetry run pytest tests/ --all -v \
+          uv run pytest tests/ --all -v \
             --junitxml=junit.xml
         env:
           FORCE_COLOR: 1

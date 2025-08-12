@@ -29,7 +29,7 @@ TEST_CASES = [
                     departure_airport=[[Airport.PHX, 0]],
                     arrival_airport=[[Airport.SFO, 0]],
                     time_restrictions=None,
-                    travel_date="2025-06-01",
+                    travel_date="2025-12-01",
                 )
             ],
             price_limit=None,
@@ -61,7 +61,7 @@ TEST_CASES = [
                         1,
                         None,
                         None,
-                        "2025-06-01",
+                        "2025-12-01",
                         None,
                         None,
                         None,
@@ -98,7 +98,7 @@ TEST_CASES = [
                     departure_airport=[[Airport.PHX, 0]],
                     arrival_airport=[[Airport.SFO, 0]],
                     time_restrictions=None,
-                    travel_date="2025-06-01",
+                    travel_date="2025-12-01",
                 ),
             ],
             price_limit=None,
@@ -130,7 +130,7 @@ TEST_CASES = [
                         2,
                         None,
                         None,
-                        "2025-06-01",
+                        "2025-12-01",
                         None,
                         None,
                         None,
@@ -175,7 +175,7 @@ TEST_CASES = [
                         earliest_arrival=13,
                         latest_arrival=21,
                     ),
-                    travel_date="2025-06-01",
+                    travel_date="2025-12-01",
                 )
             ],
             stops=MaxStops.ANY,
@@ -210,7 +210,7 @@ TEST_CASES = [
                         0,
                         ["AA", "F9", "UA"],
                         None,
-                        "2025-06-01",
+                        "2025-12-01",
                         [660],
                         None,
                         ["LAX"],
@@ -231,7 +231,7 @@ TEST_CASES = [
             0,
             2,
         ],
-        "encoded": "%5Bnull%2C%22%5B%5B%5D%2C%5Bnull%2Cnull%2C2%2Cnull%2C%5B%5D%2C1%2C%5B2%2C3%2C1%2C0%5D%2C%5Bnull%2C900%5D%2Cnull%2Cnull%2Cnull%2Cnull%2Cnull%2C%5B%5B%5B%5B%5B%5C%22PHX%5C%22%2C0%5D%5D%5D%2C%5B%5B%5B%5C%22SFO%5C%22%2C0%5D%5D%5D%2C%5B9%2C20%2C13%2C21%5D%2C0%2C%5B%5C%22AA%5C%22%2C%5C%22F9%5C%22%2C%5C%22UA%5C%22%5D%2Cnull%2C%5C%222025-06-01%5C%22%2C%5B660%5D%2Cnull%2C%5B%5C%22LAX%5C%22%5D%2Cnull%2Cnull%2C420%2Cnull%2C3%5D%5D%2Cnull%2Cnull%2Cnull%2C1%5D%2C0%2C0%2C0%2C2%5D%22%5D",  # noqa: E501
+        "encoded": "%5Bnull%2C%22%5B%5B%5D%2C%5Bnull%2Cnull%2C2%2Cnull%2C%5B%5D%2C1%2C%5B2%2C3%2C1%2C0%5D%2C%5Bnull%2C900%5D%2Cnull%2Cnull%2Cnull%2Cnull%2Cnull%2C%5B%5B%5B%5B%5B%5C%22PHX%5C%22%2C0%5D%5D%5D%2C%5B%5B%5B%5C%22SFO%5C%22%2C0%5D%5D%5D%2C%5B9%2C20%2C13%2C21%5D%2C0%2C%5B%5C%22AA%5C%22%2C%5C%22F9%5C%22%2C%5C%22UA%5C%22%5D%2Cnull%2C%5C%222025-12-01%5C%22%2C%5B660%5D%2Cnull%2C%5B%5C%22LAX%5C%22%5D%2Cnull%2Cnull%2C420%2Cnull%2C3%5D%5D%2Cnull%2Cnull%2Cnull%2C1%5D%2C0%2C0%2C0%2C2%5D%22%5D",  # noqa: E501
     },
 ]
 

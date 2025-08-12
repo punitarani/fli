@@ -1,0 +1,42 @@
+version: 2
+updates:
+  # Enable version updates for Python dependencies
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "punitarani"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    groups:
+      dev-dependencies:
+        patterns:
+          - "pytest*"
+          - "ruff*"
+          - "mkdocs*"
+          - "mkdocstrings*"
+      production-dependencies:
+        patterns:
+          - "fastapi*"
+          - "pydantic*"
+          - "httpx*"
+          - "pandas*"
+          - "typer*"
+          - "uvicorn*"
+
+  # Enable version updates for GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "punitarani"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
