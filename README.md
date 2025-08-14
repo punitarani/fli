@@ -1,4 +1,4 @@
-# Fli 🛫
+# 🛫 Fli - Flight Search MCP Server and Library
 
 A powerful Python library that provides programmatic access to Google Flights data with an elegant CLI interface. Search
 flights, find the best deals, and filter results with ease.
@@ -12,21 +12,47 @@ flights, find the best deals, and filter results with ease.
 > - **Reliable**: Less prone to breaking from UI changes
 > - **Modular**: Extensible architecture for easy customization and integration
 
-![CLI Demo](https://github.com/punitarani/fli/blob/main/data/cli-demo.png)
+## MCP Server
+
+```bash
+pipx install flights
+
+# Run the MCP server on STDIO
+fli-mcp
+```
+
+![MCP Demo](https://github.com/punitarani/fli/blob/main/data/mcp-demo.mp4)
+
+### Connecting to Claude Desktop
+
+```json
+{
+  "mcpServers": {
+    "fli": {
+      "command": "/Users/<user>/.local/bin/fli-mcp"
+    }
+  }
+}
+```
+
+> **Note**: Replace `<user>` with your actual username.
+> You can also find the path to the MCP server by running `which fli-mcp` in your terminal.
 
 ## Quick Start
 
 ```bash
-pip install fli
+pip install flights
 ```
 
 ```bash
 # Install using pipx (recommended for CLI)
-pipx install fli
+pipx install flights
 
 # Get started with CLI
 fli --help
 ```
+
+![CLI Demo](https://github.com/punitarani/fli/blob/main/data/cli-demo.png)
 
 ## Features
 
