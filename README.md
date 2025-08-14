@@ -21,7 +21,7 @@ pipx install flights
 fli-mcp
 ```
 
-![MCP Demo](https://github.com/punitarani/fli/blob/main/data/mcp-demo.mp4)
+![MCP Demo](https://github.com/punitarani/fli/blob/main/data/mcp-demo.gif)
 
 ### Connecting to Claude Desktop
 
