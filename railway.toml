@@ -4,7 +4,7 @@ nixpacksPlan = { "repo" = "punitarani/fli" }
 
 [deploy]
 numReplicas = 1
-startCommand = "uvicorn fli.mcp.server:run --host 0.0.0.0 --port $PORT"
+startCommand = "uv run fli-mcp"
 sleepApplication = false
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
