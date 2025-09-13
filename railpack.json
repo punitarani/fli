@@ -1,0 +1,15 @@
+{
+	"$schema": "https://schema.railpack.com",
+	"steps": {
+		"install": {
+			"commands": ["uv sync --all-extras"]
+		},
+		"build": {
+			"inputs": [{ "step": "install" }],
+			"commands": []
+		}
+	},
+	"deploy": {
+		"startCommand": "uv run fli-mcp"
+	}
+}

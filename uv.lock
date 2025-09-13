@@ -457,7 +457,7 @@ wheels = [
 ]
 
 [[package]]
-name = "fli"
+name = "flights"
 version = "0.5.0"
 source = { editable = "." }
 dependencies = [
