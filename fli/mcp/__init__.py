@@ -4,6 +4,8 @@ from fli.mcp.server import (
     CheapFlightSearchRequest,
     FlightSearchRequest,
     mcp,
+    run,
+    run_http,
     search_cheap_flights,
     search_flights,
 )
@@ -14,4 +16,6 @@ __all__ = [
     "search_cheap_flights",
     "search_flights",
     "mcp",
+    "run",
+    "run_http",
 ]

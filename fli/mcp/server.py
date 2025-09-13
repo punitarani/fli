@@ -376,5 +376,16 @@ def run():
     mcp.run(transport="stdio")
 
 
+def run_http(host: str = "127.0.0.1", port: int = 8000) -> None:
+    """Run the MCP server over HTTP (streamable).
+
+    Args:
+        host: Host interface to bind the HTTP server.
+        port: Port to listen on.
+
+    """
+    mcp.run(transport="http", host=host, port=port)
+
+
 if __name__ == "__main__":
     run()

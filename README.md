@@ -3,14 +3,15 @@
 A powerful Python library that provides programmatic access to Google Flights data with an elegant CLI interface. Search
 flights, find the best deals, and filter results with ease.
 
-> 🚀 **What makes `fli` special?**  
+> 🚀 **What makes `fli` special?**
 > Unlike other flight search libraries that rely on web scraping, Fli directly interacts with Google Flights' API
 > through reverse engineering.
 > This means:
-> - **Fast**: Direct API access means faster, more reliable results
-> - **Zero Scraping**: No HTML parsing, no browser automation, just pure API interaction
-> - **Reliable**: Less prone to breaking from UI changes
-> - **Modular**: Extensible architecture for easy customization and integration
+>
+> * **Fast**: Direct API access means faster, more reliable results
+> * **Zero Scraping**: No HTML parsing, no browser automation, just pure API interaction
+> * **Reliable**: Less prone to breaking from UI changes
+> * **Modular**: Extensible architecture for easy customization and integration
 
 ## MCP Server
 
@@ -19,6 +20,9 @@ pipx install flights
 
 # Run the MCP server on STDIO
 fli-mcp
+
+# Run the MCP server over HTTP (streamable)
+fli-mcp-http  # serves at http://127.0.0.1:8000/mcp/
 ```
 
 ![MCP Demo](https://github.com/punitarani/fli/blob/main/data/mcp-demo.gif)
@@ -56,31 +60,31 @@ fli --help
 
 ## Features
 
-- 🔍 **Powerful Search**
-    - One-way flight searches
-    - Flexible departure times
-    - Multi-airline support
-    - Cabin class selection
-    - Stop preferences
-    - Custom result sorting
+* 🔍 **Powerful Search**
+  * One-way flight searches
+  * Flexible departure times
+  * Multi-airline support
+  * Cabin class selection
+  * Stop preferences
+  * Custom result sorting
 
-- 💺 **Cabin Classes**
-    - Economy
-    - Premium Economy
-    - Business
-    - First
+* 💺 **Cabin Classes**
+  * Economy
+  * Premium Economy
+  * Business
+  * First
 
-- 🎯 **Smart Sorting**
-    - Price
-    - Duration
-    - Departure Time
-    - Arrival Time
+* 🎯 **Smart Sorting**
+  * Price
+  * Duration
+  * Departure Time
+  * Arrival Time
 
-- 🛡️ **Built-in Protection**
-    - Rate limiting
-    - Automatic retries
-    - Comprehensive error handling
-    - Input validation
+* 🛡️ **Built-in Protection**
+  * Rate limiting
+  * Automatic retries
+  * Comprehensive error handling
+  * Input validation
 
 ## CLI Usage
 
@@ -149,6 +153,9 @@ uv run fli-mcp
 
 # Or with make (for development)
 make mcp
+
+# Run the MCP server over HTTP (streamable)
+fli-mcp-http  # serves at http://127.0.0.1:8000/mcp/
 ```
 
 ### Claude Desktop Configuration
@@ -169,18 +176,19 @@ To use the flight search capabilities in Claude Desktop, add this configuration 
 ```
 
 After adding this configuration:
+
 1. Restart Claude Desktop
 2. You can now ask Claude to search for flights naturally:
-   - "Find flights from JFK to LAX on December 25th"
-   - "What are the cheapest dates to fly from NYC to London in January?"
-   - "Search for business class flights from SFO to NRT with no stops"
+   * "Find flights from JFK to LAX on December 25th"
+   * "What are the cheapest dates to fly from NYC to London in January?"
+   * "Search for business class flights from SFO to NRT with no stops"
 
 ### MCP Tools Available
 
 The MCP server provides two main tools:
 
-- **`search_flights`**: Search for specific flights with detailed filters
-- **`search_cheap_flights`**: Find the cheapest dates across a flexible date range
+* **`search_flights`**: Search for specific flights with detailed filters
+* **`search_cheap_flights`**: Find the cheapest dates across a flexible date range
 
 ## Python API Usage
 

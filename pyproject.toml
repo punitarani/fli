@@ -49,6 +49,7 @@ dev = [
 [project.scripts]
 fli = "fli.cli:cli"
 fli-mcp = "fli.mcp.server:run"
+fli-mcp-http = "fli.mcp.server:run_http"
 
 [project.urls]
 Homepage = "https://github.com/punitarani/fli"
