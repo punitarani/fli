@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -29,14 +30,18 @@ class FlightSearchRequest(BaseModel):
     return_date: str | None = Field(
         None, description="Return date in YYYY-MM-DD format for round trips"
     )
-    time_range: str | None = Field(None, description="Time range in 24h format (e.g., '6-20')")
+    time_range: str | None = Field(
+        None, description="Time range in 24h format (e.g., '6-20')"
+    )
     airlines: list[str] | None = Field(
         None, description="List of airline codes (e.g., ['BA', 'KL'])"
     )
     seat_class: str = Field(
         "ECONOMY", description="Seat type: ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST"
     )
-    stops: str = Field("ANY", description="Maximum stops: ANY, NON_STOP, ONE_STOP, TWO_PLUS_STOPS")
+    stops: str = Field(
+        "ANY", description="Maximum stops: ANY, NON_STOP, ONE_STOP, TWO_PLUS_STOPS"
+    )
     sort_by: str = Field(
         "CHEAPEST",
         description="Sort by: CHEAPEST, DURATION, DEPARTURE_TIME, ARRIVAL_TIME",
@@ -48,19 +53,29 @@ class CheapFlightSearchRequest(BaseModel):
 
     from_airport: str = Field(description="Departure airport code (e.g., 'JFK')")
     to_airport: str = Field(description="Arrival airport code (e.g., 'LHR')")
-    from_date: str = Field(description="Start date for search range in YYYY-MM-DD format")
+    from_date: str = Field(
+        description="Start date for search range in YYYY-MM-DD format"
+    )
     to_date: str = Field(description="End date for search range in YYYY-MM-DD format")
     duration: int = Field(3, description="Duration of trip in days for round trips")
-    round_trip: bool = Field(False, description="Whether to search for round-trip flights")
+    round_trip: bool = Field(
+        False, description="Whether to search for round-trip flights"
+    )
     airlines: list[str] | None = Field(
         None, description="List of airline codes (e.g., ['BA', 'KL'])"
     )
     seat_class: str = Field(
         "ECONOMY", description="Seat type: ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST"
     )
-    stops: str = Field("ANY", description="Maximum stops: ANY, NON_STOP, ONE_STOP, TWO_PLUS_STOPS")
-    time_range: str | None = Field(None, description="Time range in 24h format (e.g., '6-20')")
-    sort_by_price: bool = Field(False, description="Sort results by price (lowest to highest)")
+    stops: str = Field(
+        "ANY", description="Maximum stops: ANY, NON_STOP, ONE_STOP, TWO_PLUS_STOPS"
+    )
+    time_range: str | None = Field(
+        None, description="Time range in 24h format (e.g., '6-20')"
+    )
+    sort_by_price: bool = Field(
+        False, description="Sort results by price (lowest to highest)"
+    )
 
 
 mcp = FastMCP("Flight Search MCP Server")
@@ -384,7 +399,13 @@ def run_http(host: str = "127.0.0.1", port: int = 8000) -> None:
         port: Port to listen on.
 
     """
-    mcp.run(transport="http", host=host, port=port)
+    env_host = os.getenv("HOST")
+    env_port = os.getenv("PORT")
+
+    bind_host = env_host if env_host else host
+    bind_port = int(env_port) if env_port else port
+
+    mcp.run(transport="http", host=bind_host, port=bind_port)
 
 
 if __name__ == "__main__":
