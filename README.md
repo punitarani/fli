@@ -196,15 +196,27 @@ The MCP server provides two main tools:
 
 ```python
 from datetime import datetime, timedelta
-from fli.models import Airport, PassengerInfo, SeatType, MaxStops, SortBy
-from fli.search import SearchFlights, SearchFlightsFilters
+from fli.models import (
+    Airport,
+    PassengerInfo,
+    SeatType,
+    MaxStops,
+    SortBy,
+    FlightSearchFilters,
+    FlightSegment
+)
+from fli.search import SearchFlights
 
 # Create search filters
-filters = SearchFlightsFilters(
-    departure_airport=Airport.JFK,
-    arrival_airport=Airport.LAX,
-    departure_date=(datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
+filters = FlightSearchFilters(
     passenger_info=PassengerInfo(adults=1),
+    flight_segments=[
+        FlightSegment(
+            departure_airport=[[Airport.JFK, 0]],
+            arrival_airport=[[Airport.LAX, 0]],
+            travel_date=(datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
+        )
+    ],
     seat_type=SeatType.ECONOMY,
     stops=MaxStops.NON_STOP,
     sort_by=SortBy.CHEAPEST,
@@ -225,6 +237,61 @@ for flight in flights:
         print(f"📍 From: {leg.departure_airport.value} at {leg.departure_datetime}")
         print(f"📍 To: {leg.arrival_airport.value} at {leg.arrival_datetime}")
 ```
+
+### Running Examples
+
+We provide 11 comprehensive examples in the `examples/` directory that demonstrate various use cases:
+
+```bash
+# Run examples with uv (recommended)
+uv run python examples/basic_one_way_search.py
+uv run python examples/round_trip_search.py
+uv run python examples/date_range_search.py
+
+# Or install dependencies first, then run directly
+pip install pydantic curl_cffi httpx
+python examples/basic_one_way_search.py
+```
+
+**Available Examples:**
+
+* `basic_one_way_search.py` - Simple one-way flight search
+* `round_trip_search.py` - Round-trip flight booking
+* `date_range_search.py` - Find cheapest dates
+* `complex_flight_search.py` - Advanced filtering and multi-passenger
+* `time_restrictions_search.py` - Time-based filtering
+* `date_search_with_preferences.py` - Weekend filtering
+* `price_tracking.py` - Price monitoring over time
+* `error_handling_with_retries.py` - Robust error handling
+* `result_processing.py` - Data analysis with pandas
+* `complex_round_trip_validation.py` - Advanced round-trip with validation
+* `advanced_date_search_validation.py` - Complex date search with filtering
+
+> 💡 **Tip**: Examples include automatic dependency checking and will show helpful installation instructions if dependencies are missing.
+
+## Examples
+
+For comprehensive examples demonstrating all features, see the [`examples/`](examples/) directory:
+
+```bash
+# Quick test - run a simple example
+uv run python examples/basic_one_way_search.py
+
+# Run all examples to explore different features
+uv run python examples/round_trip_search.py
+uv run python examples/complex_flight_search.py
+uv run python examples/price_tracking.py
+```
+
+**Example Categories:**
+
+* **Basic Usage**: One-way, round-trip, date searches
+* **Advanced Filtering**: Time restrictions, airlines, seat classes
+* **Data Analysis**: Price tracking, result processing with pandas
+* **Error Handling**: Retry logic, robust error management
+* **Complex Scenarios**: Multi-passenger, validation, business rules
+
+Each example is self-contained and includes automatic dependency checking with helpful installation instructions.
 
 ## Development
 

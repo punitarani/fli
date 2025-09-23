@@ -12,7 +12,7 @@ The main search functionality for finding specific flights.
 
 A simplified interface for flight search parameters.
 
-::: fli.models.google_flights.FlightSearchFilters
+::: fli.models.google\_flights.FlightSearchFilters
 
 ## Date Search
 
@@ -31,14 +31,19 @@ Search functionality for finding the cheapest dates to fly.
 ### Basic Flight Search
 
 ```python
-from fli.search import SearchFlights, SearchFlightsFilters
-from fli.models import Airport, SeatType
+from fli.search import SearchFlights
+from fli.models import Airport, SeatType, FlightSearchFilters, FlightSegment, PassengerInfo
 
 # Create filters
-filters = SearchFlightsFilters(
-    departure_airport=Airport.JFK,
-    arrival_airport=Airport.LAX,
-    departure_date="2024-06-01",
+filters = FlightSearchFilters(
+    passenger_info=PassengerInfo(adults=1),
+    flight_segments=[
+        FlightSegment(
+            departure_airport=[[Airport.JFK, 0]],
+            arrival_airport=[[Airport.LAX, 0]],
+            travel_date="2024-06-01",
+        )
+    ],
     seat_type=SeatType.ECONOMY
 )
 
@@ -51,12 +56,18 @@ results = search.search(filters)
 
 ```python
 from fli.search import SearchDates
-from fli.models import DateSearchFilters, Airport
+from fli.models import DateSearchFilters, Airport, FlightSegment, PassengerInfo
 
 # Create filters
 filters = DateSearchFilters(
-    departure_airport=Airport.JFK,
-    arrival_airport=Airport.LAX,
+    passenger_info=PassengerInfo(adults=1),
+    flight_segments=[
+        FlightSegment(
+            departure_airport=[[Airport.JFK, 0]],
+            arrival_airport=[[Airport.LAX, 0]],
+            travel_date="2024-06-01",
+        )
+    ],
     from_date="2024-06-01",
     to_date="2024-06-30"
 )
@@ -66,10 +77,32 @@ search = SearchDates()
 results = search.search(filters)
 ```
 
+### Running These Examples
+
+You can find complete, runnable versions of these examples in the `examples/` directory:
+
+```bash
+# Run with uv (recommended)
+uv run python examples/basic_one_way_search.py
+uv run python examples/date_range_search.py
+
+# Or install dependencies and run directly
+pip install pydantic curl_cffi httpx
+python examples/basic_one_way_search.py
+```
+
+For more advanced examples, see:
+
+* `examples/complex_flight_search.py` - Advanced filtering
+* `examples/result_processing.py` - Data analysis
+* `examples/error_handling_with_retries.py` - Robust error handling
+
+> 💡 All examples include automatic dependency checking and helpful error messages.
+
 ## HTTP Client
 
 The underlying HTTP client used for API requests.
 
 ### Client
 
-::: fli.search.client.Client 
+::: fli.search.client.Client

@@ -1,27 +1,49 @@
 # Advanced Examples
 
+This document contains advanced code examples demonstrating complex flight search scenarios. All examples are available as runnable scripts in the `examples/` directory.
+
+## Running Examples
+
+```bash
+# Run with uv (recommended - handles dependencies automatically)
+uv run python examples/complex_flight_search.py
+uv run python examples/time_restrictions_search.py
+uv run python examples/price_tracking.py
+
+# Or install dependencies first, then run directly
+pip install pydantic curl_cffi httpx pandas tenacity
+python examples/complex_flight_search.py
+```
+
+> 💡 **Tip**: All example files include automatic dependency checking and will show helpful installation instructions if dependencies are missing.
+
 ## Complex Flight Search
 
 ### Search with Multiple Filters
 
 ```python
 from fli.models import (
-    Airport, Airline, SeatType, MaxStops,
-    PassengerInfo, TimeRestrictions, LayoverRestrictions
+    Airport, Airline, SeatType, MaxStops, TripType,
+    PassengerInfo, TimeRestrictions, LayoverRestrictions,
+    FlightSearchFilters, FlightSegment
 )
-from fli.search import SearchFlights, SearchFlightsFilters
+from fli.search import SearchFlights
 
 # Create detailed filters
-filters = SearchFlightsFilters(
+filters = FlightSearchFilters(
     trip_type=TripType.ONE_WAY,
-    departure_airport=Airport.JFK,
-    arrival_airport=Airport.LHR,
-    departure_date="2024-06-01",
     passenger_info=PassengerInfo(
         adults=2,
         children=1,
         infants_on_lap=1
     ),
+    flight_segments=[
+        FlightSegment(
+            departure_airport=[[Airport.JFK, 0]],
+            arrival_airport=[[Airport.LHR, 0]],
+            travel_date="2024-06-01",
+        )
+    ],
     seat_type=SeatType.BUSINESS,
     stops=MaxStops.ONE_STOP_OR_FEWER,
     airlines=[Airline.BA, Airline.VS],  # British Airways and Virgin Atlantic
@@ -39,15 +61,16 @@ results = search.search(filters)
 ### Search with Time Restrictions
 
 ```python
-from fli.models import TimeRestrictions
-from fli.search import SearchFlights, SearchFlightsFilters
+from fli.models import (
+    TimeRestrictions, Airport, TripType, 
+    FlightSearchFilters, FlightSegment, PassengerInfo
+)
+from fli.search import SearchFlights
 
 # Create filters with time restrictions
-filters = SearchFlightsFilters(
+filters = FlightSearchFilters(
     trip_type=TripType.ONE_WAY,
-    departure_airport=Airport.JFK,
-    arrival_airport=Airport.LAX,
-    departure_date="2024-06-01",
+    passenger_info=PassengerInfo(adults=1),
     flight_segments=[
         FlightSegment(
             departure_airport=[[Airport.JFK, 0]],
@@ -73,13 +96,23 @@ results = search.search(filters)
 
 ```python
 from datetime import datetime, timedelta
-from fli.models import DateSearchFilters, Airport, SeatType
+from fli.models import (
+    DateSearchFilters, Airport, SeatType, TripType,
+    FlightSegment, PassengerInfo
+)
+from fli.search import SearchDates
 
 # Create filters for weekends only
 filters = DateSearchFilters(
     trip_type=TripType.ONE_WAY,
-    departure_airport=Airport.JFK,
-    arrival_airport=Airport.LAX,
+    passenger_info=PassengerInfo(adults=1),
+    flight_segments=[
+        FlightSegment(
+            departure_airport=[[Airport.JFK, 0]],
+            arrival_airport=[[Airport.LAX, 0]],
+            travel_date="2024-06-01",
+        )
+    ],
     from_date="2024-06-01",
     to_date="2024-06-30",
     seat_type=SeatType.PREMIUM_ECONOMY
@@ -91,7 +124,7 @@ results = search.search(filters)
 # Filter for weekends only
 weekend_results = [
     r for r in results
-    if r.date.weekday() >= 5  # Saturday = 5, Sunday = 6
+    if r.date[0].weekday() >= 5  # Saturday = 5, Sunday = 6
 ]
 ```
 
@@ -99,14 +132,22 @@ weekend_results = [
 
 ```python
 import time
-from fli.models import DateSearchFilters, Airport
+from fli.models import (
+    DateSearchFilters, Airport, PassengerInfo, FlightSegment
+)
 from fli.search import SearchDates
 
 
 def track_prices(days=7):
     filters = DateSearchFilters(
-        departure_airport=Airport.JFK,
-        arrival_airport=Airport.LAX,
+        passenger_info=PassengerInfo(adults=1),
+        flight_segments=[
+            FlightSegment(
+                departure_airport=[[Airport.JFK, 0]],
+                arrival_airport=[[Airport.LAX, 0]],
+                travel_date="2024-06-01",
+            )
+        ],
         from_date="2024-06-01",
         to_date="2024-06-07"
     )
@@ -119,7 +160,7 @@ def track_prices(days=7):
 
         # Store prices
         for result in results:
-            date_str = result.date.strftime("%Y-%m-%d")
+            date_str = result.date[0].strftime("%Y-%m-%d")
             if date_str not in price_history:
                 price_history[date_str] = []
             price_history[date_str].append(result.price)
@@ -135,12 +176,13 @@ def track_prices(days=7):
 ### Handling Rate Limits and Retries
 
 ```python
-from fli.search import SearchFlights, SearchFlightsFilters
+from fli.search import SearchFlights
+from fli.models import FlightSearchFilters
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 
 @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=4, max=60))
-def search_with_retry(filters: SearchFlightsFilters):
+def search_with_retry(filters: FlightSearchFilters):
     search = SearchFlights()
     try:
         results = search.search(filters)
@@ -282,7 +324,7 @@ for flight in results:
 ```python
 from fli.models import (
     DateSearchFilters, Airport, TripType,
-    FlightSegment, PassengerInfo, SeatType
+    FlightSegment, PassengerInfo, SeatType, TimeRestrictions
 )
 from fli.search import SearchDates
 from datetime import datetime, timedelta
@@ -366,3 +408,4 @@ for trip in weekend_trips:
     print(f"Return: {trip['return']}")
     print(f"Duration: {trip['duration']} days")
     print(f"Total Price: ${trip['price']}") 
+```
