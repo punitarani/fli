@@ -12,7 +12,7 @@ The main search functionality for finding specific flights.
 
 A simplified interface for flight search parameters.
 
-::: fli.models.google\_flights.FlightSearchFilters
+::: fli.models.google_flights.FlightSearchFilters
 
 ## Date Search
 

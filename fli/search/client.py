@@ -8,6 +8,8 @@ This module provides a robust HTTP client that handles:
 - Error handling
 """
 
+from typing import Any
+
 from curl_cffi import requests
 from ratelimit import limits, sleep_and_retry
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -35,7 +37,7 @@ class Client:
     @sleep_and_retry
     @limits(calls=10, period=1)
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(), reraise=True)
-    def get(self, url: str, **kwargs) -> requests.Response:
+    def get(self, url: str, **kwargs: Any) -> requests.Response:
         """Make a rate-limited GET request with automatic retries.
 
         Args:
@@ -59,7 +61,7 @@ class Client:
     @sleep_and_retry
     @limits(calls=10, period=1)
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(), reraise=True)
-    def post(self, url: str, **kwargs) -> requests.Response:
+    def post(self, url: str, **kwargs: Any) -> requests.Response:
         """Make a rate-limited POST request with automatic retries.
 
         Args:
