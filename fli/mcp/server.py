@@ -103,6 +103,18 @@ def parse_airlines(airline_codes: list[str] | None) -> list[Airline] | None:
     return airlines if airlines else None
 
 
+def resolve_enum(enum_cls, name: str):
+    """Resolve enum member name to enum value with normalized errors.
+
+    Converts AttributeError differences across Python versions into a stable
+    ValueError with a consistent message for callers to handle.
+    """
+    try:
+        return getattr(enum_cls, name.upper())
+    except AttributeError as e:
+        raise ValueError("Invalid parameter value") from e
+
+
 @mcp.tool()
 def search_flights(request: FlightSearchRequest) -> dict[str, Any]:
     """Search for flights with flexible filtering options.
@@ -112,12 +124,12 @@ def search_flights(request: FlightSearchRequest) -> dict[str, Any]:
     """
     try:
         # Parse airports
-        departure_airport = getattr(Airport, request.from_airport.upper())
-        arrival_airport = getattr(Airport, request.to_airport.upper())
+        departure_airport = resolve_enum(Airport, request.from_airport)
+        arrival_airport = resolve_enum(Airport, request.to_airport)
 
         # Parse seat type and sort options
-        seat_type = getattr(SeatType, request.seat_class.upper())
-        sort_by = getattr(SortBy, request.sort_by.upper())
+        seat_type = resolve_enum(SeatType, request.seat_class)
+        sort_by = resolve_enum(SortBy, request.sort_by)
 
         # Parse stops
         max_stops = parse_stops(request.stops)
@@ -241,17 +253,28 @@ def search_flights(request: FlightSearchRequest) -> dict[str, Any]:
             "trip_type": trip_type.name,
         }
 
-    except Exception as e:
+    except ValueError as e:
         error_msg = str(e)
+        # Time range parsing may raise ValueError in different forms
+        if (
+            "Invalid time range" in error_msg
+            or "split" in error_msg
+            or "invalid literal for int()" in error_msg
+        ):
+            return {
+                "success": False,
+                "error": "Invalid time range format",
+                "flights": [],
+            }
         if "Invalid airline code" in error_msg:
             return {"success": False, "error": "Invalid airline code", "flights": []}
-        elif "Invalid stops value" in error_msg:
+        if "Invalid stops value" in error_msg:
             return {"success": False, "error": "Invalid parameter value", "flights": []}
-        elif "has no attribute" in error_msg and (
-            "Airport" in error_msg or "SeatType" in error_msg
-        ):
-            return {"success": False, "error": "Invalid parameter value", "flights": []}
-        elif (
+        # Normalized enum resolution failure and other parameter issues
+        return {"success": False, "error": "Invalid parameter value", "flights": []}
+    except Exception as e:
+        error_msg = str(e)
+        if (
             "Invalid time range" in error_msg
             or "split" in error_msg
             or "invalid literal for int()" in error_msg
