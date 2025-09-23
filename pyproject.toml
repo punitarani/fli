@@ -72,6 +72,19 @@ markers = [
 target-version = "py312"
 line-length = 100
 indent-width = 4
+include = [
+    "fli/**/*.py",
+    "examples/**/*.py",
+    "tests/**/*.py",
+    "scripts/**/*.py",
+]
+exclude = [
+    "__pycache__",
+    ".pytest_cache",
+    ".venv",
+    "build",
+    "dist",
+]
 
 [tool.ruff.lint]
 select = [
@@ -84,6 +97,21 @@ select = [
     "D", # pydocstyle
 ]
 ignore = ["D100", "D104", "D203", "D213"]
+
+# Per-file ignores for examples
+[tool.ruff.lint.per-file-ignores]
+"examples/**/*.py" = [
+    "D101", # Missing docstring in public class
+    "D102", # Missing docstring in public method
+    "D103", # Missing docstring in public function
+    "D401", # First line should be in imperative mood (examples use descriptive docstrings)
+    "T201", # print found (examples are meant to print output)
+]
+"tests/**/*.py" = [
+    "D101", # Missing docstring in public class
+    "D102", # Missing docstring in public method
+    "D103", # Missing docstring in public function
+]
 
 [tool.ruff.format]
 indent-style = "space"

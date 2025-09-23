@@ -143,12 +143,18 @@ for flight in results:
 
 ```python
 from fli.search import SearchDates
-from fli.models import DateSearchFilters, Airport
+from fli.models import DateSearchFilters, Airport, FlightSegment, PassengerInfo
 
 # Create filters
 filters = DateSearchFilters(
-    departure_airport=Airport.JFK,
-    arrival_airport=Airport.LAX,
+    passenger_info=PassengerInfo(adults=1),
+    flight_segments=[
+        FlightSegment(
+            departure_airport=[[Airport.JFK, 0]],
+            arrival_airport=[[Airport.LAX, 0]],
+            travel_date="2024-06-01",
+        )
+    ],
     from_date="2024-06-01",
     to_date="2024-06-30"
 )
@@ -162,8 +168,33 @@ for date_price in results:
     print(f"Date: {date_price.date}, Price: ${date_price.price}")
 ```
 
+### Running Complete Examples
+
+All the above code snippets are available as complete, runnable examples in the `examples/` directory:
+
+```bash
+# Run examples with uv (recommended)
+uv run python examples/basic_one_way_search.py
+uv run python examples/round_trip_search.py
+uv run python examples/date_range_search.py
+
+# Or install dependencies first
+pip install pydantic curl_cffi httpx
+python examples/basic_one_way_search.py
+```
+
+**Available Example Files:**
+
+* `basic_one_way_search.py` - One-way flight search example
+* `round_trip_search.py` - Round-trip flight search example
+* `date_range_search.py` - Date range search example
+* `complex_flight_search.py` - Advanced filtering example
+* `error_handling_with_retries.py` - Robust error handling example
+
+> 💡 **Tip**: Examples include automatic dependency checking and will guide you through installation if dependencies are missing.
+
 ## Next Steps
 
-- Check out the [API Reference](../api/models.md) for detailed documentation
-- See [Advanced Examples](../examples/advanced.md) for more complex use cases
-- Read about [Rate Limiting and Error Handling](../api/search.md#http-client) 
+* Check out the [API Reference](../api/models.md) for detailed documentation
+* See [Advanced Examples](../examples/advanced.md) for more complex use cases
+* Read about [Rate Limiting and Error Handling](../api/search.md#http-client)
