@@ -65,9 +65,7 @@ def main():
         min_price = min(prices)
         max_price = max(prices)
         avg_price = sum(prices) / len(prices)
-        print(
-            f"{date}: Min: ${min_price:.2f}, Max: ${max_price:.2f}, Avg: ${avg_price:.2f}"
-        )
+        print(f"{date}: Min: ${min_price:.2f}, Max: ${max_price:.2f}, Avg: ${avg_price:.2f}")
 
 
 if __name__ == "__main__":

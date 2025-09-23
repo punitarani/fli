@@ -42,9 +42,7 @@ def simple_retry_search(filters: FlightSearchFilters, max_attempts=3):
 
 if TENACITY_AVAILABLE:
 
-    @retry(
-        stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=4, max=60)
-    )
+    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=4, max=60))
     def search_with_retry(filters: FlightSearchFilters):
         """Advanced retry logic with exponential backoff."""
         search = SearchFlights()

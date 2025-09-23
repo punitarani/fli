@@ -45,7 +45,9 @@ def main():
 
     # Filter for weekends only
     weekend_results = [
-        r for r in results if r.date[0].weekday() >= 5  # Saturday = 5, Sunday = 6
+        r
+        for r in results
+        if r.date[0].weekday() >= 5  # Saturday = 5, Sunday = 6
     ]
 
     print(f"Found {len(weekend_results)} weekend flights:")

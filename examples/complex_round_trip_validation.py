@@ -103,9 +103,7 @@ def main():
     # Process results with detailed information
     print(f"\n✅ Found {len(results)} flight combinations:")
 
-    for i, (outbound, return_flight) in enumerate(
-        results[:3], 1
-    ):  # Show first 3 results
+    for i, (outbound, return_flight) in enumerate(results[:3], 1):  # Show first 3 results
         print(f"\n{'=' * 50}")
         print(f"Option {i}: Total Price: ${outbound.price + return_flight.price}")
 
