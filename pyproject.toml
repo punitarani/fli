@@ -7,13 +7,15 @@ authors = [
 ]
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 keywords = ["flights", "google-flights", "travel", "api", "flight-search"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
@@ -69,7 +71,7 @@ markers = [
 ]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py310"
 line-length = 100
 indent-width = 4
 
