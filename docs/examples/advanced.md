@@ -329,12 +329,13 @@ from fli.models import (
 from fli.search import SearchDates
 from datetime import datetime, timedelta
 
+
 def validate_dates(from_date: str, to_date: str, min_stay: int, max_stay: int):
     """Validate date ranges for round trip searches."""
     start = datetime.strptime(from_date, "%Y-%m-%d").date()
     end = datetime.strptime(to_date, "%Y-%m-%d").date()
     today = datetime.now().date()
-    
+
     if start <= today:
         raise ValueError("Start date must be in the future")
     if end <= start:
@@ -348,19 +349,7 @@ def validate_dates(from_date: str, to_date: str, min_stay: int, max_stay: int):
     if min_stay > max_stay:
         raise ValueError("Minimum stay cannot be greater than maximum stay")
 
-# Create flight segments for date search
-segments = [
-    FlightSegment(
-        departure_airport=[[Airport.JFK, 0]],
-        arrival_airport=[[Airport.LAX, 0]],
-        time_restrictions=TimeRestrictions(
-            earliest_departure=9,   # 9 AM
-            latest_departure=18,    # 6 PM
-        )
-    )
-]
 
-# Validate and create filters
 from_date = "2024-06-01"
 to_date = "2024-06-30"
 min_stay = 2
@@ -368,44 +357,63 @@ max_stay = 4
 
 validate_dates(from_date, to_date, min_stay, max_stay)
 
-filters = DateSearchFilters(
-    trip_type=TripType.ROUND_TRIP,
-    passenger_info=PassengerInfo(adults=1),
-    flight_segments=segments,
-    from_date=from_date,
-    to_date=to_date,
-    min_stay_days=min_stay,
-    max_stay_days=max_stay,
-    seat_type=SeatType.ECONOMY
-)
-
+stay_lengths = range(min_stay, max_stay + 1)
 search = SearchDates()
-results = search.search(filters)
-
-# Process results with weekend filtering
 weekend_trips = []
-for trip in results:
-    outbound = datetime.strptime(trip.outbound_date, "%Y-%m-%d")
-    return_date = datetime.strptime(trip.return_date, "%Y-%m-%d")
-    
-    # Check if outbound is on weekend (5 = Saturday, 6 = Sunday)
-    if outbound.weekday() >= 5:
-        stay_duration = (return_date - outbound).days
-        weekend_trips.append({
-            'outbound': trip.outbound_date,
-            'return': trip.return_date,
-            'duration': stay_duration,
-            'price': trip.total_price
-        })
 
-# Sort by price
-weekend_trips.sort(key=lambda x: x['price'])
+for duration in stay_lengths:
+    outbound_date = from_date
+    return_date = (
+        datetime.strptime(outbound_date, "%Y-%m-%d") + timedelta(days=duration)
+    ).strftime("%Y-%m-%d")
 
-# Display results
+    flight_segments = [
+        FlightSegment(
+            departure_airport=[[Airport.JFK, 0]],
+            arrival_airport=[[Airport.LAX, 0]],
+            travel_date=outbound_date,
+            time_restrictions=TimeRestrictions(
+                earliest_departure=9,   # 9 AM
+                latest_departure=18,    # 6 PM
+            ),
+        ),
+        FlightSegment(
+            departure_airport=[[Airport.LAX, 0]],
+            arrival_airport=[[Airport.JFK, 0]],
+            travel_date=return_date,
+        ),
+    ]
+
+    filters = DateSearchFilters(
+        trip_type=TripType.ROUND_TRIP,
+        passenger_info=PassengerInfo(adults=1),
+        flight_segments=flight_segments,
+        from_date=from_date,
+        to_date=to_date,
+        duration=duration,
+        seat_type=SeatType.ECONOMY,
+    )
+
+    results = search.search(filters)
+    if not results:
+        continue
+
+    for trip in results:
+        outbound, inbound = trip.date
+        if outbound.weekday() >= 5:  # Saturday = 5, Sunday = 6
+            weekend_trips.append({
+                "outbound": outbound.strftime("%Y-%m-%d"),
+                "return": inbound.strftime("%Y-%m-%d"),
+                "duration": duration,
+                "price": trip.price,
+            })
+
+weekend_trips.sort(key=lambda x: x["price"])
+
 for trip in weekend_trips:
-    print(f"\nWeekend Trip:")
+    print("\nWeekend Trip:")
     print(f"Outbound: {trip['outbound']} (Weekend)")
     print(f"Return: {trip['return']}")
     print(f"Duration: {trip['duration']} days")
-    print(f"Total Price: ${trip['price']}") 
+    print(f"Total Price: ${trip['price']}")
 ```
