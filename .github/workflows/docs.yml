@@ -26,7 +26,7 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v7
         with:
           version: "latest"
 
