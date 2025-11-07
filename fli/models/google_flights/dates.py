@@ -1,7 +1,9 @@
 import json
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
+MAX_PAST_FROM_DATE_DAYS = 6
+
 
 from pydantic import (
     BaseModel,
@@ -126,7 +128,9 @@ class DateSearchFilters(BaseModel):
         current_date = datetime.now().date()
 
         if from_date < current_date:
-            self.from_date = current_date.strftime("%Y-%m-%d")
+            delta = current_date - from_date
+            if delta > timedelta(days=MAX_PAST_FROM_DATE_DAYS):
+                self.from_date = current_date.strftime("%Y-%m-%d")
 
         return self
 

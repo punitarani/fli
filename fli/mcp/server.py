@@ -291,8 +291,22 @@ def resolve_enum(enum_cls, name: str):
         raise ValueError("Invalid parameter value") from e
 
 
+def _apply_flight_defaults(request: FlightSearchRequest) -> FlightSearchRequest:
+    """Apply configuration defaults to a flight search request."""
+    if request.passengers < 1:
+        request.passengers = CONFIG.default_passengers
+    if not request.seat_class:
+        request.seat_class = CONFIG.default_seat_class
+    if not request.sort_by:
+        request.sort_by = CONFIG.default_sort_by
+    if not request.time_range and CONFIG.default_time_range:
+        request.time_range = CONFIG.default_time_range
+    return request
+
+
 def _execute_flight_search(request: FlightSearchRequest) -> dict[str, Any]:
     """Perform the flight search and format the results."""
+    request = _apply_flight_defaults(request)
     try:
         # Parse airports
         departure_airport = resolve_enum(Airport, request.from_airport)
@@ -310,8 +324,9 @@ def _execute_flight_search(request: FlightSearchRequest) -> dict[str, Any]:
 
         # Parse time restrictions
         time_restrictions = None
-        if request.time_range:
-            start_hour, end_hour = parse_time_range(request.time_range)
+        time_range = request.time_range or CONFIG.default_time_range
+        if time_range:
+            start_hour, end_hour = parse_time_range(time_range)
             time_restrictions = TimeRestrictions(
                 earliest_departure=start_hour,
                 latest_departure=end_hour,
@@ -463,8 +478,20 @@ def _execute_flight_search(request: FlightSearchRequest) -> dict[str, Any]:
         }
 
 
+def _apply_date_defaults(request: CheapFlightSearchRequest) -> CheapFlightSearchRequest:
+    """Apply configuration defaults to a date search request."""
+    if request.passengers < 1:
+        request.passengers = CONFIG.default_passengers
+    if not request.seat_class:
+        request.seat_class = CONFIG.default_seat_class
+    if not request.time_range and CONFIG.default_time_range:
+        request.time_range = CONFIG.default_time_range
+    return request
+
+
 def _execute_cheap_flight_search(request: CheapFlightSearchRequest) -> dict[str, Any]:
     """Perform the date search and format the results."""
+    request = _apply_date_defaults(request)
     try:
         departure_airport = resolve_enum(Airport, request.from_airport)
         arrival_airport = resolve_enum(Airport, request.to_airport)
@@ -475,8 +502,9 @@ def _execute_cheap_flight_search(request: CheapFlightSearchRequest) -> dict[str,
         airlines = parse_airlines(request.airlines)
 
         time_restrictions = None
-        if request.time_range:
-            start_hour, end_hour = parse_time_range(request.time_range)
+        time_range = request.time_range or CONFIG.default_time_range
+        if time_range:
+            start_hour, end_hour = parse_time_range(time_range)
             time_restrictions = TimeRestrictions(
                 earliest_departure=start_hour,
                 latest_departure=end_hour,
@@ -608,6 +636,14 @@ def search_flights(
     return _execute_flight_search(request)
 
 
+def _search_flights_from_request(request: FlightSearchRequest) -> dict[str, Any]:
+    """Compatibility wrapper for tests expecting the original request-based signature."""
+    return _execute_flight_search(request)
+
+
+search_flights.fn = _search_flights_from_request  # type: ignore[attr-defined]
+
+
 @mcp.tool(
     annotations={
         "title": "Find Cheapest Dates",
@@ -670,6 +706,14 @@ def search_cheap_flights(
         passengers=passengers or CONFIG.default_passengers,
     )
     return _execute_cheap_flight_search(request)
+
+
+def _search_cheap_flights_from_request(request: CheapFlightSearchRequest) -> dict[str, Any]:
+    """Compatibility wrapper for tests expecting the original request-based signature."""
+    return _execute_cheap_flight_search(request)
+
+
+search_cheap_flights.fn = _search_cheap_flights_from_request  # type: ignore[attr-defined]
 
 
 def _build_search_prompt(args: dict[str, str]) -> list[PromptMessage]:
