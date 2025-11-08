@@ -1,8 +1,9 @@
 import json
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Annotated, Callable
+from typing import Annotated, Any
 
 from fastmcp import FastMCP
 from mcp.types import (
@@ -87,6 +88,7 @@ class FliMCP(FastMCP):
     """Extended FastMCP server with prompt and annotation support."""
 
     def __init__(self, name: str | None = None, **settings: Any):
+        """Initialize the MCP server with metadata tracking for tools and prompts."""
         self._tool_annotations: dict[str, ToolAnnotations] = {}
         self._prompts: dict[str, PromptSpec] = {}
         super().__init__(name=name, **settings)
@@ -123,8 +125,7 @@ class FliMCP(FastMCP):
         description: str | None = None,
         annotations: dict[str, Any] | ToolAnnotations | None = None,
     ) -> Callable:
-        """Decorator to register a tool with optional annotations."""
-
+        """Register a tool with optional annotations."""
         if callable(name):
             raise TypeError(
                 "The @tool decorator was used incorrectly. "
@@ -654,7 +655,9 @@ search_flights.fn = _search_flights_from_request  # type: ignore[attr-defined]
 def search_cheap_flights(
     from_airport: Annotated[str, Field(description="Departure airport code (e.g., 'JFK')")],
     to_airport: Annotated[str, Field(description="Arrival airport code (e.g., 'LHR')")],
-    from_date: Annotated[str, Field(description="Start date for search range in YYYY-MM-DD format")],
+    from_date: Annotated[
+        str, Field(description="Start date for search range in YYYY-MM-DD format")
+    ],
     to_date: Annotated[str, Field(description="End date for search range in YYYY-MM-DD format")],
     duration: Annotated[
         int,
@@ -752,25 +755,63 @@ def _build_budget_prompt(args: dict[str, str]) -> list[PromptMessage]:
 
 mcp.add_prompt(
     name="search-direct-flight",
-    description="Generate a tool call to find direct flights between two airports on a target date.",
+    description=(
+        "Generate a tool call to find direct flights between two airports on a target date."
+    ),
     arguments=[
-        PromptArgument(name="from_airport", description="Departure airport code", required=True),
-        PromptArgument(name="to_airport", description="Arrival airport code", required=True),
-        PromptArgument(name="date", description="Departure date (YYYY-MM-DD)", required=False),
-        PromptArgument(name="prefer_non_stop", description="Set to true to prefer nonstop itineraries", required=False),
+        PromptArgument(
+            name="from_airport",
+            description="Departure airport code",
+            required=True,
+        ),
+        PromptArgument(
+            name="to_airport",
+            description="Arrival airport code",
+            required=True,
+        ),
+        PromptArgument(
+            name="date",
+            description="Departure date (YYYY-MM-DD)",
+            required=False,
+        ),
+        PromptArgument(
+            name="prefer_non_stop",
+            description="Set to true to prefer nonstop itineraries",
+            required=False,
+        ),
     ],
     build_messages=_build_search_prompt,
 )
 
 mcp.add_prompt(
     name="find-budget-window",
-    description="Suggest the cheapest travel dates for a route within a flexible window.",
+    description=("Suggest the cheapest travel dates for a route within a flexible window."),
     arguments=[
-        PromptArgument(name="from_airport", description="Departure airport code", required=True),
-        PromptArgument(name="to_airport", description="Arrival airport code", required=True),
-        PromptArgument(name="from_date", description="Start of the travel window (YYYY-MM-DD)", required=False),
-        PromptArgument(name="to_date", description="End of the travel window (YYYY-MM-DD)", required=False),
-        PromptArgument(name="duration", description="Desired trip length in days", required=False),
+        PromptArgument(
+            name="from_airport",
+            description="Departure airport code",
+            required=True,
+        ),
+        PromptArgument(
+            name="to_airport",
+            description="Arrival airport code",
+            required=True,
+        ),
+        PromptArgument(
+            name="from_date",
+            description="Start of the travel window (YYYY-MM-DD)",
+            required=False,
+        ),
+        PromptArgument(
+            name="to_date",
+            description="End of the travel window (YYYY-MM-DD)",
+            required=False,
+        ),
+        PromptArgument(
+            name="duration",
+            description="Desired trip length in days",
+            required=False,
+        ),
     ],
     build_messages=_build_budget_prompt,
 )
@@ -779,7 +820,10 @@ mcp.add_prompt(
 @mcp.resource(
     "resource://fli-mcp/configuration",
     name="Fli MCP Configuration",
-    description="Optional configuration defaults and environment variables for the Flight Search MCP server.",
+    description=(
+        "Optional configuration defaults and environment variables for the Flight "
+        "Search MCP server."
+    ),
     mime_type="application/json",
 )
 def configuration_resource() -> str:

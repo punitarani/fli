@@ -2,8 +2,6 @@ import json
 import urllib.parse
 from datetime import datetime, timedelta
 from enum import Enum
-MAX_PAST_FROM_DATE_DAYS = 6
-
 
 from pydantic import (
     BaseModel,
@@ -24,6 +22,8 @@ from fli.models.google_flights.base import (
     SeatType,
     TripType,
 )
+
+MAX_PAST_FROM_DATE_DAYS = 6
 
 
 class DateSearchFilters(BaseModel):
