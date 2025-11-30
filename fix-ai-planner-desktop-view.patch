@@ -1,0 +1,25 @@
+diff --git a/src/app/planner/page.tsx b/src/app/planner/page.tsx
+index e826126..c5fa960 100644
+--- a/src/app/planner/page.tsx
++++ b/src/app/planner/page.tsx
+@@ -149,7 +149,7 @@ export default function PlannerPage() {
+             {/* Conversation/Welcome Area */}
+             <div className="flex-1 overflow-y-auto">
+               {scene.view === "map" ? (
+-                // Map Scene: Show welcome message only (no conversation history)
++                // Map Scene: Show welcome message or conversation
+                 <div className="h-full">
+                   {messages.length === 0 && (
+                     <div className="flex items-center justify-center min-h-[400px]">
+@@ -165,9 +165,9 @@ export default function PlannerPage() {
+                       </div>
+                     </div>
+                   )}
+-                  {/* Show conversation on mobile for map scene */}
++                  {/* Show conversation when there are messages */}
+                   {messages.length > 0 && (
+-                    <Conversation className="h-full lg:hidden">
++                    <Conversation className="h-full">
+                       <ConversationContent className="flex flex-col space-y-2">
+                         {messages.map((message) => (
+                           <Message key={message.id} from={message.role}>
