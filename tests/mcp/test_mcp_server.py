@@ -216,9 +216,7 @@ class TestMCPServer:
         """Test FlightSearchParams validation."""
         # Valid params
         future_date = get_future_date(30)
-        params = FlightSearchRequest(
-            from_airport="JFK", to_airport="LHR", date=future_date
-        )
+        params = FlightSearchRequest(from_airport="JFK", to_airport="LHR", date=future_date)
         assert params.from_airport == "JFK"
         assert params.to_airport == "LHR"
         assert params.date == future_date
