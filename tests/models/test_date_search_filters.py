@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 import pytest
 
 from fli.models import (
@@ -12,6 +14,21 @@ from fli.models import (
     SeatType,
     TimeRestrictions,
 )
+
+
+def get_future_date(days: int = 30) -> str:
+    """Generate a future date string in YYYY-MM-DD format."""
+    return (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+
+
+# Generate dynamic future dates for tests
+TRAVEL_DATE = get_future_date(30)
+FROM_DATE_1 = get_future_date(20)
+TO_DATE_1 = get_future_date(40)
+FROM_DATE_2 = get_future_date(10)
+TO_DATE_2 = get_future_date(55)
+FROM_DATE_3 = get_future_date(5)
+TO_DATE_3 = get_future_date(70)
 
 TEST_CASES = [
     {
@@ -28,14 +45,14 @@ TEST_CASES = [
                     departure_airport=[[Airport.PHX, 0]],
                     arrival_airport=[[Airport.SFO, 0]],
                     time_restrictions=None,
-                    travel_date="2025-12-01",
+                    travel_date=TRAVEL_DATE,
                 )
             ],
             price_limit=None,
             stops=MaxStops.NON_STOP,
             seat_type=SeatType.PREMIUM_ECONOMY,
-            from_date="2025-11-20",
-            to_date="2025-12-10",
+            from_date=FROM_DATE_1,
+            to_date=TO_DATE_1,
         ),
         "formatted": [
             None,
@@ -61,7 +78,7 @@ TEST_CASES = [
                         1,
                         None,
                         None,
-                        "2025-12-01",
+                        TRAVEL_DATE,
                         None,
                         None,
                         None,
@@ -78,8 +95,8 @@ TEST_CASES = [
                 1,
             ],
             [
-                "2025-11-20",
-                "2025-12-10",
+                FROM_DATE_1,
+                TO_DATE_1,
             ],
         ],
         "encoded": None,
@@ -98,14 +115,14 @@ TEST_CASES = [
                     departure_airport=[[Airport.PHX, 0]],
                     arrival_airport=[[Airport.SFO, 0]],
                     time_restrictions=None,
-                    travel_date="2025-12-01",
+                    travel_date=TRAVEL_DATE,
                 ),
             ],
             price_limit=None,
             stops=MaxStops.ONE_STOP_OR_FEWER,
             seat_type=SeatType.FIRST,
-            from_date="2025-11-07",
-            to_date="2025-12-25",
+            from_date=FROM_DATE_2,
+            to_date=TO_DATE_2,
         ),
         "formatted": [
             None,
@@ -131,7 +148,7 @@ TEST_CASES = [
                         2,
                         None,
                         None,
-                        "2025-12-01",
+                        TRAVEL_DATE,
                         None,
                         None,
                         None,
@@ -148,8 +165,8 @@ TEST_CASES = [
                 1,
             ],
             [
-                "2025-11-07",
-                "2025-12-25",
+                FROM_DATE_2,
+                TO_DATE_2,
             ],
         ],
         "encoded": None,
@@ -176,7 +193,7 @@ TEST_CASES = [
                         earliest_arrival=13,
                         latest_arrival=21,
                     ),
-                    travel_date="2025-12-01",
+                    travel_date=TRAVEL_DATE,
                 )
             ],
             stops=MaxStops.ANY,
@@ -186,8 +203,8 @@ TEST_CASES = [
                 airports=[Airport.LAX],
                 max_duration=420,
             ),
-            from_date="2025-11-01",
-            to_date="2026-01-01",
+            from_date=FROM_DATE_3,
+            to_date=TO_DATE_3,
         ),
         "formatted": [
             None,
@@ -213,7 +230,7 @@ TEST_CASES = [
                         0,
                         ["AA", "F9", "UA"],
                         None,
-                        "2025-12-01",
+                        TRAVEL_DATE,
                         [660],
                         None,
                         ["LAX"],
@@ -230,8 +247,8 @@ TEST_CASES = [
                 1,
             ],
             [
-                "2025-11-01",
-                "2026-01-01",
+                FROM_DATE_3,
+                TO_DATE_3,
             ],
         ],
     },
