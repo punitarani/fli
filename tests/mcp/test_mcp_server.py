@@ -10,6 +10,11 @@ from fli.mcp.server import (
 )
 
 
+def get_future_date(days: int = 30) -> str:
+    """Generate a future date string in YYYY-MM-DD format."""
+    return (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+
+
 class TestMCPServer:
     """Test suite for MCP server tools."""
 
@@ -18,7 +23,7 @@ class TestMCPServer:
         params = FlightSearchRequest(
             from_airport="JFK",
             to_airport="LHR",
-            date="2025-12-25",
+            date=get_future_date(30),
             seat_class="ECONOMY",
             stops="ANY",
             sort_by="CHEAPEST",
@@ -41,8 +46,8 @@ class TestMCPServer:
         params = FlightSearchRequest(
             from_airport="LAX",
             to_airport="JFK",
-            date="2025-12-20",
-            return_date="2025-12-27",
+            date=get_future_date(30),
+            return_date=get_future_date(37),
             time_range="8-20",
             airlines=["AA", "DL"],
             seat_class="BUSINESS",
@@ -127,7 +132,9 @@ class TestMCPServer:
 
     def test_invalid_airport_code(self):
         """Test error handling for invalid airport code."""
-        params = FlightSearchRequest(from_airport="INVALID", to_airport="LHR", date="2025-12-25")
+        params = FlightSearchRequest(
+            from_airport="INVALID", to_airport="LHR", date=get_future_date(30)
+        )
 
         result = search_flights.fn(params)
 
@@ -142,7 +149,7 @@ class TestMCPServer:
         params = FlightSearchRequest(
             from_airport="JFK",
             to_airport="LHR",
-            date="2025-12-25",
+            date=get_future_date(30),
             time_range="invalid-time",
         )
 
@@ -159,7 +166,7 @@ class TestMCPServer:
         params = FlightSearchRequest(
             from_airport="JFK",
             to_airport="LHR",
-            date="2025-12-25",
+            date=get_future_date(30),
             seat_class="INVALID_CLASS",
         )
 
@@ -176,7 +183,7 @@ class TestMCPServer:
         params = FlightSearchRequest(
             from_airport="JFK",
             to_airport="LHR",
-            date="2025-12-25",
+            date=get_future_date(30),
             stops="INVALID_STOPS",
         )
 
@@ -193,7 +200,7 @@ class TestMCPServer:
         params = FlightSearchRequest(
             from_airport="JFK",
             to_airport="LHR",
-            date="2025-12-25",
+            date=get_future_date(30),
             airlines=["INVALID_AIRLINE"],
         )
 
@@ -208,10 +215,11 @@ class TestMCPServer:
     def test_flight_search_params_validation(self):
         """Test FlightSearchParams validation."""
         # Valid params
-        params = FlightSearchRequest(from_airport="JFK", to_airport="LHR", date="2025-12-25")
+        future_date = get_future_date(30)
+        params = FlightSearchRequest(from_airport="JFK", to_airport="LHR", date=future_date)
         assert params.from_airport == "JFK"
         assert params.to_airport == "LHR"
-        assert params.date == "2025-12-25"
+        assert params.date == future_date
         assert params.seat_class == "ECONOMY"  # default
         assert params.stops == "ANY"  # default
         assert params.sort_by == "CHEAPEST"  # default
@@ -219,16 +227,18 @@ class TestMCPServer:
     def test_cheap_flight_search_params_validation(self):
         """Test CheapFlightSearchParams validation."""
         # Valid params
+        from_date = get_future_date(30)
+        to_date = get_future_date(60)
         params = CheapFlightSearchRequest(
             from_airport="JFK",
             to_airport="LHR",
-            from_date="2025-11-01",
-            to_date="2025-11-30",
+            from_date=from_date,
+            to_date=to_date,
         )
         assert params.from_airport == "JFK"
         assert params.to_airport == "LHR"
-        assert params.from_date == "2025-11-01"
-        assert params.to_date == "2025-11-30"
+        assert params.from_date == from_date
+        assert params.to_date == to_date
         assert params.duration == 3  # default
         assert params.round_trip is False  # default
         assert params.seat_class == "ECONOMY"  # default
