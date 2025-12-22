@@ -21,7 +21,7 @@ from fli.models import (
 from fli.search import SearchFlights
 
 
-def search_flights_core(
+def _search_flights_core(
     origin: str,
     destination: str,
     departure_date: str,
@@ -74,14 +74,14 @@ def search_flights_core(
 
         # Perform search
         search_client = SearchFlights()
-        flights = search_client.search(filters)
+        results = search_client.search(filters)
 
-        if not flights:
+        if not results:
             typer.echo("No flights found.")
             raise typer.Exit(1)
 
         # Display results
-        display_flight_results(flights)
+        display_flight_results(results)
 
     except ParseError as e:
         typer.echo(f"Error: {str(e)}")
@@ -91,7 +91,7 @@ def search_flights_core(
         raise typer.Exit(1) from e
 
 
-def search(
+def flights(
     origin: Annotated[str, typer.Argument(help="Departure airport IATA code (e.g., JFK)")],
     destination: Annotated[str, typer.Argument(help="Arrival airport IATA code (e.g., LHR)")],
     departure_date: Annotated[
@@ -148,13 +148,13 @@ def search(
         ),
     ] = "CHEAPEST",
 ):
-    """Search for flights with flexible filtering options.
+    """Search for flights on a specific date.
 
     Example:
-        fli search JFK LHR 2025-10-25 --time 6-20 --airlines BA KL --stops NON_STOP
+        fli flights JFK LHR 2025-10-25 --time 6-20 --airlines BA KL --stops NON_STOP
 
     """
-    search_flights_core(
+    _search_flights_core(
         origin=origin,
         destination=destination,
         departure_date=departure_date,
@@ -165,3 +165,4 @@ def search(
         max_stops=max_stops,
         sort_by=sort_by,
     )
+

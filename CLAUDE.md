@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Fli is a Python library that provides programmatic access to Google Flights data through direct API interaction (reverse engineering). The project consists of:
 
-- **CLI interface** (`fli/cli/`) - Typer-based command line tool with `search` and `cheap` commands
+- **CLI interface** (`fli/cli/`) - Typer-based command line tool with `flights` and `dates` commands
 - **MCP server** (`fli/mcp/`) - Model Context Protocol server for AI assistant integration
 - **Core utilities** (`fli/core/`) - Shared parsing and building utilities
 - **Search engine** (`fli/search/`) - Flight and date search implementations using Google Flights API
@@ -80,8 +80,8 @@ uv run mkdocs build         # Build static docs
    - Configuration via environment variables
 
 6. **CLI Interface** (`fli/cli/`)
-   - Typer-based with two main commands: `search` and `cheap`
-   - Smart argument parsing (treats non-command args as search)
+   - Typer-based with two main commands: `flights` and `dates`
+   - Smart argument parsing (treats non-command args as flights)
    - Rich console output for flight results
 
 ### Key Design Patterns

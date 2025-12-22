@@ -141,7 +141,7 @@ The library is organized into several key modules:
   * `server.py`: FastMCP server with `search_flights` and `search_dates` tools
 
 * `cli/`: Command-line interface
-  * `commands/`: CLI commands (`search`, `cheap`)
+  * `commands/`: CLI commands (`flights`, `dates`)
   * `utils.py`: Display and validation utilities
 
 ## Contributing

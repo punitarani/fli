@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
+"""CLI entry point for the fli flight search tool."""
 
 import sys
 
 import typer
 
-from fli.cli.commands.cheap import cheap
-from fli.cli.commands.search import search
+from fli.cli.commands.dates import dates
+from fli.cli.commands.flights import flights
 
 app = typer.Typer(
     help="Search for flights using Google Flights data",
@@ -13,17 +14,16 @@ app = typer.Typer(
 )
 
 # Register commands
-app.command(name="cheap")(cheap)
-app.command(name="search")(search)
+app.command(name="flights")(flights)
+app.command(name="dates")(dates)
 
 
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context):
     """Search for flights using Google Flights data.
 
-    If no command is provided, the search command will be used.
+    If no command is provided, show help.
     """
-    # If no command is provided, show help
     if ctx.invoked_subcommand is None:
         ctx.get_help()
         raise typer.Exit()
@@ -36,9 +36,9 @@ def cli():
         sys.argv.append("--help")
         args.append("--help")
 
-    # If the first argument isn't a command, treat as search
-    if args[0] not in ["cheap", "search", "--help", "-h"]:
-        sys.argv.insert(1, "search")
+    # If the first argument isn't a command, treat as flights search
+    if args[0] not in ["flights", "dates", "--help", "-h"]:
+        sys.argv.insert(1, "flights")
 
     app()
 

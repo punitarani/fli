@@ -129,14 +129,14 @@ fli --help
 
 ## CLI Usage
 
-### Search for Specific Flights
+### Search for Flights
 
 ```bash
-# Basic search
-fli search JFK LHR 2025-10-25
+# Basic flight search
+fli flights JFK LHR 2025-10-25
 
 # Advanced search with filters
-fli search JFK LHR 2025-10-25 \
+fli flights JFK LHR 2025-10-25 \
     --time 6-20 \             # Departure time window (6 AM - 8 PM)
     --airlines BA KL \        # Airlines (British Airways, KLM)
     --class BUSINESS \        # Cabin class
@@ -147,11 +147,11 @@ fli search JFK LHR 2025-10-25 \
 ### Find Cheapest Dates
 
 ```bash
-# Basic search for cheapest dates
-fli cheap JFK LHR
+# Basic date search
+fli dates JFK LHR
 
 # Advanced search with date range
-fli cheap JFK LHR \
+fli dates JFK LHR \
     --from 2025-01-01 \
     --to 2025-02-01 \
     --monday --friday      # Only Mondays and Fridays
@@ -159,7 +159,7 @@ fli cheap JFK LHR \
 
 ### CLI Options
 
-#### Search Command (`fli search`)
+#### Flights Command (`fli flights`)
 
 | Option           | Description              | Example                |
 |------------------|--------------------------|------------------------|
@@ -169,7 +169,7 @@ fli cheap JFK LHR \
 | `--stops, -s`    | Maximum stops            | `NON_STOP`, `ONE_STOP` |
 | `--sort, -o`     | Sort results by          | `CHEAPEST`, `DURATION` |
 
-#### Cheap Command (`fli cheap`)
+#### Dates Command (`fli dates`)
 
 | Option        | Description          | Example                |
 |---------------|----------------------|------------------------|

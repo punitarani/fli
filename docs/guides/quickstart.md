@@ -23,19 +23,19 @@ pipx install flights
 1. Search for one-way flights:
 
 ```bash
-fli search JFK LHR 2025-06-01
+fli flights JFK LHR 2025-06-01
 ```
 
 2. Search for round trip flights:
 
 ```bash
-fli search JFK LHR 2025-06-01 --return 2025-06-15
+fli flights JFK LHR 2025-06-01 --return 2025-06-15
 ```
 
 3. Search with filters:
 
 ```bash
-fli search JFK LHR 2025-06-01 \
+fli flights JFK LHR 2025-06-01 \
     --time 6-20 \             # Departure window (6 AM - 8 PM)
     --airlines BA KL \        # Airlines (British Airways, KLM)
     --class BUSINESS \        # Cabin class
@@ -45,7 +45,7 @@ fli search JFK LHR 2025-06-01 \
 4. Find cheapest dates:
 
 ```bash
-fli cheap JFK LHR --from 2025-06-01 --to 2025-06-30
+fli dates JFK LHR --from 2025-06-01 --to 2025-06-30
 ```
 
 ### MCP Server (for AI Assistants)

@@ -1,4 +1,4 @@
-"""Cheap flights (date search) CLI command."""
+"""Date search CLI command for finding cheapest travel dates."""
 
 from datetime import datetime, timedelta
 from typing import Annotated
@@ -29,7 +29,7 @@ from fli.models import (
 from fli.search import SearchDates
 
 
-def cheap(
+def dates(
     origin: Annotated[str, typer.Argument(help="Departure airport IATA code (e.g., JFK)")],
     destination: Annotated[str, typer.Argument(help="Arrival airport IATA code (e.g., LHR)")],
     start_date: Annotated[
@@ -154,7 +154,7 @@ def cheap(
     """Find the cheapest dates to fly between two airports.
 
     Example:
-        fli cheap LAX MIA --class BUSINESS --stops NON_STOP --friday
+        fli dates LAX MIA --class BUSINESS --stops NON_STOP --friday
 
     """
     try:
@@ -205,9 +205,9 @@ def cheap(
 
         # Perform search
         search_client = SearchDates()
-        dates = search_client.search(filters)
+        results = search_client.search(filters)
 
-        if not dates:
+        if not results:
             typer.echo("No flights found for these dates.")
             raise typer.Exit(1)
 
@@ -229,18 +229,18 @@ def cheap(
             selected_days.append(DayOfWeek.SUNDAY)
 
         if selected_days:
-            dates = filter_dates_by_days(dates, selected_days, trip_type)
+            results = filter_dates_by_days(results, selected_days, trip_type)
 
-        if not dates:
+        if not results:
             typer.echo("No flights found for the selected days.")
             raise typer.Exit(1)
 
         # Sort dates by price if sort flag is enabled
         if sort_by_price:
-            dates.sort(key=lambda x: x.price)
+            results.sort(key=lambda x: x.price)
 
         # Display results
-        display_date_results(dates, trip_type)
+        display_date_results(results, trip_type)
 
     except ParseError as e:
         typer.echo(f"Error: {str(e)}")
@@ -250,3 +250,4 @@ def cheap(
             raise
         typer.echo(f"Error: {str(e)}")
         raise typer.Exit(1) from e
+
