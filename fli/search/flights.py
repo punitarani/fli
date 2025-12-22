@@ -110,7 +110,7 @@ class SearchFlights:
 
         """
         flight = FlightResult(
-            price=data[1][0][-1],
+            price=SearchFlights._parse_price(data),
             duration=data[0][9],
             stops=len(data[0][2]) - 1,
             legs=[
@@ -127,6 +127,24 @@ class SearchFlights:
             ],
         )
         return flight
+
+    @staticmethod
+    def _parse_price(data: list) -> float:
+        """Extract price from raw flight data.
+
+        Args:
+            data: Raw flight data from the API response
+
+        Returns:
+            Flight price, or 0.0 if price data is unavailable
+
+        """
+        try:
+            if data[1] and data[1][0]:
+                return data[1][0][-1]
+        except (IndexError, TypeError):
+            pass
+        return 0.0
 
     @staticmethod
     def _parse_datetime(date_arr: list[int], time_arr: list[int]) -> datetime:

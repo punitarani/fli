@@ -251,3 +251,37 @@ def test_round_trip_result_structure(search, search_params_fixture, request):
             assert hasattr(flight, "stops")
             assert hasattr(flight, "legs")
             assert len(flight.legs) > 0
+
+
+class TestParsePrice:
+    """Tests for _parse_price method handling missing/malformed price data."""
+
+    def test_parse_price_valid_data(self):
+        """Test _parse_price with valid price data."""
+        data = [None, [[100, 200, 299.99]]]
+        assert SearchFlights._parse_price(data) == 299.99
+
+    def test_parse_price_empty_inner_list(self):
+        """Test _parse_price returns 0.0 when inner price list is empty."""
+        data = [None, [[]]]
+        assert SearchFlights._parse_price(data) == 0.0
+
+    def test_parse_price_empty_outer_list(self):
+        """Test _parse_price returns 0.0 when outer price list is empty."""
+        data = [None, []]
+        assert SearchFlights._parse_price(data) == 0.0
+
+    def test_parse_price_none_price_section(self):
+        """Test _parse_price returns 0.0 when price section is None."""
+        data = [None, None]
+        assert SearchFlights._parse_price(data) == 0.0
+
+    def test_parse_price_missing_price_section(self):
+        """Test _parse_price returns 0.0 when data has no price section."""
+        data = [None]
+        assert SearchFlights._parse_price(data) == 0.0
+
+    def test_parse_price_inner_list_none(self):
+        """Test _parse_price returns 0.0 when inner list is None."""
+        data = [None, [None]]
+        assert SearchFlights._parse_price(data) == 0.0
