@@ -2,6 +2,7 @@
 
 from datetime import datetime
 
+import plotext as plt
 import typer
 from click import Context, Parameter
 from rich import box
@@ -169,7 +170,7 @@ def display_flight_results(flights: list):
         for idx, flight in enumerate(flight_segments):
             direction = "Outbound" if idx == 0 else "Return" if is_round_trip else ""
             segments = Table(
-                title=f"{direction} Flight Segments" if direction else "Flight Segments",
+                title=(f"{direction} Flight Segments" if direction else "Flight Segments"),
                 box=box.ROUNDED,
             )
             segments.add_column("Airline", style="cyan")
@@ -210,11 +211,41 @@ def display_flight_results(flights: list):
 
 
 def display_date_results(dates: list, trip_type: TripType):
-    """Display date search results in a beautiful format."""
+    """Display date search results with sparkline chart and table."""
     if not dates:
         console.print(Panel("No flights found for these dates", style="red"))
         return
 
+    # Sort dates chronologically for proper trend visualization
+    sorted_dates = sorted(dates, key=lambda x: x.date[0])
+
+    # Extract data for chart
+    date_labels = [d.date[0].strftime("%m/%d") for d in sorted_dates]
+    prices = [d.price for d in sorted_dates]
+
+    # Render sparkline chart
+    plt.clear_figure()
+    plt.plot(prices, marker="braille")
+    plt.title("Price Trend")
+    plt.xlabel("Date")
+    plt.ylabel("Price ($)")
+
+    # Set x-axis labels (show subset if too many dates)
+    if len(date_labels) <= 10:
+        plt.xticks(range(len(date_labels)), date_labels)
+    else:
+        # Show every nth label to avoid crowding
+        step = len(date_labels) // 8
+        indices = list(range(0, len(date_labels), step))
+        plt.xticks(indices, [date_labels[i] for i in indices])
+
+    plt.theme("pro")
+    plt.plotsize(80, 12)
+    plt.show()
+
+    console.print()  # Add spacing between chart and table
+
+    # Build the table (using original order, not sorted)
     table = Table(title="Cheapest Dates to Fly", box=box.ROUNDED)
     table.add_column("Departure", style="cyan")
     table.add_column("Day", style="yellow")
