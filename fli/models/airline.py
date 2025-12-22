@@ -848,6 +848,7 @@ class Airline(Enum):
     YW = "Air Nostrum"
     YX = "Republic Airline"
     YZ = "Alas Uruguay"
+    Z0 = "Norse Atlantic Airways"
     Z2 = "AirAsia Zest"
     Z3 = "PM Air"
     Z4 = "Zagrosjet"
