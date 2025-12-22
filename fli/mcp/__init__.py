@@ -1,19 +1,19 @@
 """MCP module for the fli package."""
 
 from fli.mcp.server import (
-    CheapFlightSearchRequest,
-    FlightSearchRequest,
+    DateSearchParams,
+    FlightSearchParams,
     mcp,
     run,
     run_http,
-    search_cheap_flights,
+    search_dates,
     search_flights,
 )
 
 __all__ = [
-    "CheapFlightSearchRequest",
-    "FlightSearchRequest",
-    "search_cheap_flights",
+    "DateSearchParams",
+    "FlightSearchParams",
+    "search_dates",
     "search_flights",
     "mcp",
     "run",

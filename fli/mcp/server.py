@@ -1,3 +1,10 @@
+"""Flight Search MCP Server.
+
+This module provides an MCP (Model Context Protocol) server for flight search
+functionality, enabling AI assistants to search for flights and find cheapest
+travel dates.
+"""
+
 import json
 import os
 from collections.abc import Callable
@@ -21,17 +28,21 @@ from mcp.types import (
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from fli.core import (
+    build_date_search_segments,
+    build_flight_segments,
+    build_time_restrictions,
+    parse_airlines,
+    parse_cabin_class,
+    parse_max_stops,
+    parse_sort_by,
+    resolve_airport,
+)
+from fli.core.parsers import ParseError
 from fli.models import (
-    Airline,
-    Airport,
     DateSearchFilters,
     FlightSearchFilters,
-    FlightSegment,
-    MaxStops,
     PassengerInfo,
-    SeatType,
-    SortBy,
-    TimeRestrictions,
     TripType,
 )
 from fli.search import SearchDates, SearchFlights
@@ -53,7 +64,7 @@ class FlightSearchConfig(BaseSettings):
         max_length=3,
         description="Three-letter currency code returned with search results.",
     )
-    default_seat_class: str = Field(
+    default_cabin_class: str = Field(
         "ECONOMY",
         description="Default cabin class used when none is provided.",
     )
@@ -61,7 +72,7 @@ class FlightSearchConfig(BaseSettings):
         "CHEAPEST",
         description="Default sorting strategy for flight results.",
     )
-    default_time_range: str | None = Field(
+    default_departure_window: str | None = Field(
         None,
         description="Optional default departure window in 'HH-HH' 24-hour format.",
     )
@@ -96,8 +107,7 @@ class FliMCP(FastMCP):
 
     def _setup_handlers(self) -> None:
         """Register MCP protocol handlers including prompts."""
-        super()._setup_handlers()  # Set up standard handlers from parent
-        # Override only the handlers that FliMCP customizes
+        super()._setup_handlers()
         self._mcp_server.list_tools()(self.list_tools)
         self._mcp_server.list_prompts()(self.list_prompts)
         self._mcp_server.get_prompt()(self.get_prompt)
@@ -195,175 +205,160 @@ class FliMCP(FastMCP):
 mcp = FliMCP("Flight Search MCP Server")
 
 
-class FlightSearchRequest(BaseModel):
-    """Search for flights between two airports on a specific date."""
+# =============================================================================
+# Request/Response Models
+# =============================================================================
 
-    from_airport: str = Field(description="Departure airport code (e.g., 'JFK')")
-    to_airport: str = Field(description="Arrival airport code (e.g., 'LHR')")
-    date: str = Field(description="Travel date in YYYY-MM-DD format")
+
+class FlightSearchParams(BaseModel):
+    """Parameters for searching flights on a specific date."""
+
+    origin: str = Field(description="Departure airport IATA code (e.g., 'JFK', 'LAX')")
+    destination: str = Field(description="Arrival airport IATA code (e.g., 'LHR', 'NRT')")
+    departure_date: str = Field(description="Outbound travel date in YYYY-MM-DD format")
     return_date: str | None = Field(
-        None, description="Return date in YYYY-MM-DD format for round trips"
+        None, description="Return date in YYYY-MM-DD format (omit for one-way)"
     )
-    time_range: str | None = Field(None, description="Time range in 24h format (e.g., '6-20')")
+    departure_window: str | None = Field(
+        None, description="Preferred departure time window in 'HH-HH' 24h format (e.g., '6-20')"
+    )
     airlines: list[str] | None = Field(
-        None, description="List of airline codes (e.g., ['BA', 'KL'])"
+        None, description="Filter by airline IATA codes (e.g., ['BA', 'AA'])"
     )
-    seat_class: str = Field(
-        CONFIG.default_seat_class,
-        description="Seat type: ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST",
+    cabin_class: str = Field(
+        CONFIG.default_cabin_class,
+        description="Cabin class: ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST",
     )
-    stops: str = Field("ANY", description="Maximum stops: ANY, NON_STOP, ONE_STOP, TWO_PLUS_STOPS")
+    max_stops: str = Field(
+        "ANY", description="Maximum stops: ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS"
+    )
     sort_by: str = Field(
         CONFIG.default_sort_by,
-        description="Sort by: CHEAPEST, DURATION, DEPARTURE_TIME, ARRIVAL_TIME",
+        description="Sort results by: CHEAPEST, DURATION, DEPARTURE_TIME, or ARRIVAL_TIME",
     )
     passengers: int = Field(
         CONFIG.default_passengers,
         ge=1,
-        description="Number of adult passengers to include in the search.",
+        description="Number of adult passengers",
     )
 
 
-class CheapFlightSearchRequest(BaseModel):
-    """Search for the cheapest flights between two airports over a date range."""
+class DateSearchParams(BaseModel):
+    """Parameters for finding the cheapest travel dates within a range."""
 
-    from_airport: str = Field(description="Departure airport code (e.g., 'JFK')")
-    to_airport: str = Field(description="Arrival airport code (e.g., 'LHR')")
-    from_date: str = Field(description="Start date for search range in YYYY-MM-DD format")
-    to_date: str = Field(description="End date for search range in YYYY-MM-DD format")
-    duration: int = Field(3, description="Duration of trip in days for round trips")
-    round_trip: bool = Field(False, description="Whether to search for round-trip flights")
+    origin: str = Field(description="Departure airport IATA code (e.g., 'JFK', 'LAX')")
+    destination: str = Field(description="Arrival airport IATA code (e.g., 'LHR', 'NRT')")
+    start_date: str = Field(description="Start of date range in YYYY-MM-DD format")
+    end_date: str = Field(description="End of date range in YYYY-MM-DD format")
+    trip_duration: int = Field(
+        3, ge=1, description="Trip duration in days (for round-trip searches)"
+    )
+    is_round_trip: bool = Field(False, description="Search for round-trip flights")
     airlines: list[str] | None = Field(
-        None, description="List of airline codes (e.g., ['BA', 'KL'])"
+        None, description="Filter by airline IATA codes (e.g., ['BA', 'AA'])"
     )
-    seat_class: str = Field(
-        CONFIG.default_seat_class,
-        description="Seat type: ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST",
+    cabin_class: str = Field(
+        CONFIG.default_cabin_class,
+        description="Cabin class: ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST",
     )
-    stops: str = Field("ANY", description="Maximum stops: ANY, NON_STOP, ONE_STOP, TWO_PLUS_STOPS")
-    time_range: str | None = Field(None, description="Time range in 24h format (e.g., '6-20')")
-    sort_by_price: bool = Field(False, description="Sort results by price (lowest to highest)")
+    max_stops: str = Field(
+        "ANY", description="Maximum stops: ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS"
+    )
+    departure_window: str | None = Field(
+        None, description="Preferred departure time window in 'HH-HH' 24h format (e.g., '6-20')"
+    )
+    sort_by_price: bool = Field(False, description="Sort results by price (lowest first)")
     passengers: int = Field(
         CONFIG.default_passengers,
         ge=1,
-        description="Number of adult passengers to include when evaluating prices.",
+        description="Number of adult passengers",
     )
 
 
-def parse_stops(stops: str) -> MaxStops:
-    """Parse stops parameter to MaxStops enum."""
-    stops_map = {
-        "ANY": MaxStops.ANY,
-        "NON_STOP": MaxStops.NON_STOP,
-        "ONE_STOP": MaxStops.ONE_STOP_OR_FEWER,
-        "TWO_PLUS_STOPS": MaxStops.TWO_OR_FEWER_STOPS,
+# =============================================================================
+# Result Serialization
+# =============================================================================
+
+
+def _serialize_flight_leg(leg: Any) -> dict[str, Any]:
+    """Serialize a single flight leg to a dictionary."""
+    return {
+        "departure_airport": leg.departure_airport,
+        "arrival_airport": leg.arrival_airport,
+        "departure_time": leg.departure_datetime,
+        "arrival_time": leg.arrival_datetime,
+        "duration": leg.duration,
+        "airline": leg.airline,
+        "flight_number": leg.flight_number,
     }
-    if stops.upper() not in stops_map:
-        raise ValueError(f"Invalid stops value: {stops}")
-    return stops_map[stops.upper()]
 
 
-def parse_time_range(time_range: str) -> tuple[int, int]:
-    """Parse time range string to start and end hours."""
-    start_str, end_str = time_range.split("-")
-    return int(start_str), int(end_str)
+def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[str, Any]:
+    """Serialize a flight result (or round-trip pair) to a dictionary."""
+    if is_round_trip and isinstance(flight, tuple):
+        outbound, return_flight = flight
+        return {
+            "price": outbound.price + return_flight.price,
+            "currency": CONFIG.default_currency,
+            "legs": [
+                *[_serialize_flight_leg(leg) for leg in outbound.legs],
+                *[_serialize_flight_leg(leg) for leg in return_flight.legs],
+            ],
+        }
+    else:
+        return {
+            "price": flight.price,
+            "currency": CONFIG.default_currency,
+            "legs": [_serialize_flight_leg(leg) for leg in flight.legs],
+        }
 
 
-def parse_airlines(airline_codes: list[str] | None) -> list[Airline] | None:
-    """Convert airline code strings to Airline enum objects."""
-    if not airline_codes:
-        return None
-
-    airlines = []
-    for code in airline_codes:
-        try:
-            airline = getattr(Airline, code.upper())
-            airlines.append(airline)
-        except AttributeError as e:
-            raise ValueError(f"Invalid airline code: {code}") from e
-
-    return airlines if airlines else None
+def _serialize_date_result(date_result: Any) -> dict[str, Any]:
+    """Serialize a date price result to a dictionary."""
+    return {
+        "date": date_result.date,
+        "price": date_result.price,
+        "currency": CONFIG.default_currency,
+        "return_date": getattr(date_result, "return_date", None),
+    }
 
 
-def resolve_enum(enum_cls, name: str):
-    """Resolve enum member name to enum value with normalized errors."""
+# =============================================================================
+# Search Execution
+# =============================================================================
+
+
+def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
+    """Execute a flight search and return formatted results."""
     try:
-        return getattr(enum_cls, name.upper())
-    except AttributeError as e:
-        raise ValueError("Invalid parameter value") from e
+        # Parse inputs using shared utilities
+        origin = resolve_airport(params.origin)
+        destination = resolve_airport(params.destination)
+        cabin_class = parse_cabin_class(params.cabin_class)
+        max_stops = parse_max_stops(params.max_stops)
+        sort_by = parse_sort_by(params.sort_by)
+        airlines = parse_airlines(params.airlines)
 
+        # Build time restrictions
+        departure_window = params.departure_window or CONFIG.default_departure_window
+        time_restrictions = build_time_restrictions(departure_window) if departure_window else None
 
-def _apply_flight_defaults(request: FlightSearchRequest) -> FlightSearchRequest:
-    """Apply configuration defaults to a flight search request."""
-    if request.passengers < 1:
-        request.passengers = CONFIG.default_passengers
-    if not request.seat_class:
-        request.seat_class = CONFIG.default_seat_class
-    if not request.sort_by:
-        request.sort_by = CONFIG.default_sort_by
-    if not request.time_range and CONFIG.default_time_range:
-        request.time_range = CONFIG.default_time_range
-    return request
-
-
-def _execute_flight_search(request: FlightSearchRequest) -> dict[str, Any]:
-    """Perform the flight search and format the results."""
-    request = _apply_flight_defaults(request)
-    try:
-        # Parse airports
-        departure_airport = resolve_enum(Airport, request.from_airport)
-        arrival_airport = resolve_enum(Airport, request.to_airport)
-
-        # Parse seat type and sort options
-        seat_type = resolve_enum(SeatType, request.seat_class)
-        sort_by = resolve_enum(SortBy, request.sort_by)
-
-        # Parse stops
-        max_stops = parse_stops(request.stops)
-
-        # Parse airlines
-        airlines = parse_airlines(request.airlines)
-
-        # Parse time restrictions
-        time_restrictions = None
-        time_range = request.time_range or CONFIG.default_time_range
-        if time_range:
-            start_hour, end_hour = parse_time_range(time_range)
-            time_restrictions = TimeRestrictions(
-                earliest_departure=start_hour,
-                latest_departure=end_hour,
-            )
-
-        # Create flight segments
-        flight_segments = [
-            FlightSegment(
-                departure_airport=[[departure_airport, 0]],
-                arrival_airport=[[arrival_airport, 0]],
-                travel_date=request.date,
-                time_restrictions=time_restrictions,
-            )
-        ]
-
-        # Add return segment if round trip
-        trip_type = TripType.ONE_WAY
-        if request.return_date:
-            trip_type = TripType.ROUND_TRIP
-            flight_segments.append(
-                FlightSegment(
-                    departure_airport=[[arrival_airport, 0]],
-                    arrival_airport=[[departure_airport, 0]],
-                    travel_date=request.return_date,
-                    time_restrictions=time_restrictions,
-                )
-            )
+        # Build flight segments
+        segments, trip_type = build_flight_segments(
+            origin=origin,
+            destination=destination,
+            departure_date=params.departure_date,
+            return_date=params.return_date,
+            time_restrictions=time_restrictions,
+        )
 
         # Create search filters
         filters = FlightSearchFilters(
             trip_type=trip_type,
-            passenger_info=PassengerInfo(adults=request.passengers),
-            flight_segments=flight_segments,
+            passenger_info=PassengerInfo(adults=params.passengers),
+            flight_segments=segments,
             stops=max_stops,
-            seat_type=seat_type,
+            seat_type=cabin_class,
             airlines=airlines,
             sort_by=sort_by,
         )
@@ -373,62 +368,11 @@ def _execute_flight_search(request: FlightSearchRequest) -> dict[str, Any]:
         flights = search_client.search(filters)
 
         if not flights:
-            return {"error": "No flights found", "flights": []}
+            return {"success": True, "flights": [], "count": 0, "trip_type": trip_type.name}
 
-        # Convert flights to serializable format
-        flight_results = []
-        for flight in flights:
-            if isinstance(flight, tuple):
-                outbound, return_flight = flight
-                flight_data = {
-                    "price": outbound.price + return_flight.price,
-                    "currency": CONFIG.default_currency,
-                    "legs": [],
-                }
-
-                for leg in outbound.legs:
-                    leg_data = {
-                        "departure_airport": leg.departure_airport,
-                        "arrival_airport": leg.arrival_airport,
-                        "departure_time": leg.departure_datetime,
-                        "arrival_time": leg.arrival_datetime,
-                        "duration": leg.duration,
-                        "airline": leg.airline,
-                        "flight_number": leg.flight_number,
-                    }
-                    flight_data["legs"].append(leg_data)
-
-                for leg in return_flight.legs:
-                    leg_data = {
-                        "departure_airport": leg.departure_airport,
-                        "arrival_airport": leg.arrival_airport,
-                        "departure_time": leg.departure_datetime,
-                        "arrival_time": leg.arrival_datetime,
-                        "duration": leg.duration,
-                        "airline": leg.airline,
-                        "flight_number": leg.flight_number,
-                    }
-                    flight_data["legs"].append(leg_data)
-            else:
-                flight_data = {
-                    "price": flight.price,
-                    "currency": CONFIG.default_currency,
-                    "legs": [],
-                }
-
-                for leg in flight.legs:
-                    leg_data = {
-                        "departure_airport": leg.departure_airport,
-                        "arrival_airport": leg.arrival_airport,
-                        "departure_time": leg.departure_datetime,
-                        "arrival_time": leg.arrival_datetime,
-                        "duration": leg.duration,
-                        "airline": leg.airline,
-                        "flight_number": leg.flight_number,
-                    }
-                    flight_data["legs"].append(leg_data)
-
-            flight_results.append(flight_data)
+        # Serialize results
+        is_round_trip = trip_type == TripType.ROUND_TRIP
+        flight_results = [_serialize_flight_result(f, is_round_trip) for f in flights]
 
         if CONFIG.max_results:
             flight_results = flight_results[: CONFIG.max_results]
@@ -440,130 +384,70 @@ def _execute_flight_search(request: FlightSearchRequest) -> dict[str, Any]:
             "trip_type": trip_type.name,
         }
 
-    except ValueError as e:
-        error_msg = str(e)
-        if (
-            "Invalid time range" in error_msg
-            or "split" in error_msg
-            or "invalid literal for int()" in error_msg
-        ):
-            return {
-                "success": False,
-                "error": "Invalid time range format",
-                "flights": [],
-            }
-        if "Invalid airline code" in error_msg:
-            return {"success": False, "error": "Invalid airline code", "flights": []}
-        if "Invalid stops value" in error_msg:
-            return {"success": False, "error": "Invalid parameter value", "flights": []}
-        return {"success": False, "error": "Invalid parameter value", "flights": []}
+    except ParseError as e:
+        return {"success": False, "error": str(e), "flights": []}
     except Exception as e:
         error_msg = str(e)
-        if (
-            "Invalid time range" in error_msg
-            or "split" in error_msg
-            or "invalid literal for int()" in error_msg
-        ):
-            return {
-                "success": False,
-                "error": "Invalid time range format",
-                "flights": [],
-            }
-        if "validation error" in error_msg and (
-            "Airport" in error_msg or "airline" in error_msg.lower()
-        ):
+        if "validation error" in error_msg.lower():
             return {"success": False, "error": "Invalid parameter value", "flights": []}
-        return {
-            "success": False,
-            "error": f"Search failed: {error_msg}",
-            "flights": [],
-        }
+        return {"success": False, "error": f"Search failed: {error_msg}", "flights": []}
 
 
-def _apply_date_defaults(request: CheapFlightSearchRequest) -> CheapFlightSearchRequest:
-    """Apply configuration defaults to a date search request."""
-    if request.passengers < 1:
-        request.passengers = CONFIG.default_passengers
-    if not request.seat_class:
-        request.seat_class = CONFIG.default_seat_class
-    if not request.time_range and CONFIG.default_time_range:
-        request.time_range = CONFIG.default_time_range
-    return request
-
-
-def _execute_cheap_flight_search(request: CheapFlightSearchRequest) -> dict[str, Any]:
-    """Perform the date search and format the results."""
-    request = _apply_date_defaults(request)
+def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
+    """Execute a date search and return formatted results."""
     try:
-        departure_airport = resolve_enum(Airport, request.from_airport)
-        arrival_airport = resolve_enum(Airport, request.to_airport)
+        # Parse inputs using shared utilities
+        origin = resolve_airport(params.origin)
+        destination = resolve_airport(params.destination)
+        cabin_class = parse_cabin_class(params.cabin_class)
+        max_stops = parse_max_stops(params.max_stops)
+        airlines = parse_airlines(params.airlines)
 
-        trip_type = TripType.ROUND_TRIP if request.round_trip else TripType.ONE_WAY
-        seat_type = resolve_enum(SeatType, request.seat_class)
-        max_stops = parse_stops(request.stops)
-        airlines = parse_airlines(request.airlines)
+        # Build time restrictions
+        departure_window = params.departure_window or CONFIG.default_departure_window
+        time_restrictions = build_time_restrictions(departure_window) if departure_window else None
 
-        time_restrictions = None
-        time_range = request.time_range or CONFIG.default_time_range
-        if time_range:
-            start_hour, end_hour = parse_time_range(time_range)
-            time_restrictions = TimeRestrictions(
-                earliest_departure=start_hour,
-                latest_departure=end_hour,
-                earliest_arrival=None,
-                latest_arrival=None,
-            )
-
-        flight_segment = FlightSegment(
-            departure_airport=[[departure_airport, 0]],
-            arrival_airport=[[arrival_airport, 0]],
-            travel_date=request.from_date,
+        # Build flight segments
+        segments, trip_type = build_date_search_segments(
+            origin=origin,
+            destination=destination,
+            start_date=params.start_date,
+            trip_duration=params.trip_duration,
+            is_round_trip=params.is_round_trip,
             time_restrictions=time_restrictions,
         )
 
-        flight_segments = [flight_segment]
-        if trip_type == TripType.ROUND_TRIP:
-            return_flight_segment = FlightSegment(
-                departure_airport=[[arrival_airport, 0]],
-                arrival_airport=[[departure_airport, 0]],
-                travel_date=(
-                    datetime.strptime(flight_segment.travel_date, "%Y-%m-%d")
-                    + timedelta(days=request.duration)
-                ).strftime("%Y-%m-%d"),
-                time_restrictions=time_restrictions,
-            )
-            flight_segments.append(return_flight_segment)
-
+        # Create search filters
         filters = DateSearchFilters(
             trip_type=trip_type,
-            passenger_info=PassengerInfo(adults=request.passengers),
-            flight_segments=flight_segments,
+            passenger_info=PassengerInfo(adults=params.passengers),
+            flight_segments=segments,
             stops=max_stops,
-            seat_type=seat_type,
+            seat_type=cabin_class,
             airlines=airlines,
-            from_date=request.from_date,
-            to_date=request.to_date,
-            duration=request.duration if trip_type == TripType.ROUND_TRIP else None,
+            from_date=params.start_date,
+            to_date=params.end_date,
+            duration=params.trip_duration if params.is_round_trip else None,
         )
 
+        # Perform search
         search_client = SearchDates()
         dates = search_client.search(filters)
 
         if not dates:
-            return {"error": "No flights found for these dates", "dates": []}
+            return {
+                "success": True,
+                "dates": [],
+                "count": 0,
+                "trip_type": trip_type.name,
+                "date_range": f"{params.start_date} to {params.end_date}",
+            }
 
-        if request.sort_by_price:
+        if params.sort_by_price:
             dates.sort(key=lambda x: x.price)
 
-        date_results = []
-        for date_result in dates:
-            date_data = {
-                "date": date_result.date,
-                "price": date_result.price,
-                "currency": CONFIG.default_currency,
-                "return_date": getattr(date_result, "return_date", None),
-            }
-            date_results.append(date_data)
+        # Serialize results
+        date_results = [_serialize_date_result(d) for d in dates]
 
         if CONFIG.max_results:
             date_results = date_results[: CONFIG.max_results]
@@ -573,12 +457,19 @@ def _execute_cheap_flight_search(request: CheapFlightSearchRequest) -> dict[str,
             "dates": date_results,
             "count": len(date_results),
             "trip_type": trip_type.name,
-            "date_range": f"{request.from_date} to {request.to_date}",
-            "duration": request.duration if trip_type == TripType.ROUND_TRIP else None,
+            "date_range": f"{params.start_date} to {params.end_date}",
+            "duration": params.trip_duration if params.is_round_trip else None,
         }
 
+    except ParseError as e:
+        return {"success": False, "error": str(e), "dates": []}
     except Exception as e:
-        return {"error": f"Date search failed: {str(e)}", "dates": []}
+        return {"success": False, "error": f"Search failed: {str(e)}", "dates": []}
+
+
+# =============================================================================
+# MCP Tools
+# =============================================================================
 
 
 @mcp.tool(
@@ -589,26 +480,26 @@ def _execute_cheap_flight_search(request: CheapFlightSearchRequest) -> dict[str,
     },
 )
 def search_flights(
-    from_airport: Annotated[str, Field(description="Departure airport code (e.g., 'JFK')")],
-    to_airport: Annotated[str, Field(description="Arrival airport code (e.g., 'LHR')")],
-    date: Annotated[str, Field(description="Travel date in YYYY-MM-DD format")],
+    origin: Annotated[str, Field(description="Departure airport IATA code (e.g., 'JFK')")],
+    destination: Annotated[str, Field(description="Arrival airport IATA code (e.g., 'LHR')")],
+    departure_date: Annotated[str, Field(description="Travel date in YYYY-MM-DD format")],
     return_date: Annotated[
         str | None,
-        Field(description="Return date in YYYY-MM-DD format for round trips"),
+        Field(description="Return date in YYYY-MM-DD format (omit for one-way)"),
     ] = None,
-    time_range: Annotated[
+    departure_window: Annotated[
         str | None,
-        Field(description="Preferred departure window in 'HH-HH' 24-hour format"),
+        Field(description="Departure time window in 'HH-HH' 24h format (e.g., '6-20')"),
     ] = None,
     airlines: Annotated[
         list[str] | None,
-        Field(description="List of airline codes (e.g., ['BA', 'KL'])"),
+        Field(description="Filter by airline IATA codes (e.g., ['BA', 'AA'])"),
     ] = None,
-    seat_class: Annotated[
+    cabin_class: Annotated[
         str,
-        Field(description="Seat type: ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST"),
-    ] = CONFIG.default_seat_class,
-    stops: Annotated[
+        Field(description="Cabin class: ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST"),
+    ] = CONFIG.default_cabin_class,
+    max_stops: Annotated[
         str,
         Field(description="Maximum stops: ANY, NON_STOP, ONE_STOP, TWO_PLUS_STOPS"),
     ] = "ANY",
@@ -618,121 +509,130 @@ def search_flights(
     ] = CONFIG.default_sort_by,
     passengers: Annotated[
         int | None,
-        Field(description="Override the default number of adult passengers.", ge=1),
+        Field(description="Number of adult passengers", ge=1),
     ] = None,
 ) -> dict[str, Any]:
-    """Search for flights with flexible filtering options."""
-    effective_time_range = time_range or CONFIG.default_time_range
-    request = FlightSearchRequest(
-        from_airport=from_airport,
-        to_airport=to_airport,
-        date=date,
+    """Search for flights between two airports on a specific date.
+
+    Returns a list of available flights with prices, durations, and leg details.
+    Supports one-way and round-trip searches with various filtering options.
+    """
+    effective_departure_window = departure_window or CONFIG.default_departure_window
+    params = FlightSearchParams(
+        origin=origin,
+        destination=destination,
+        departure_date=departure_date,
         return_date=return_date,
-        time_range=effective_time_range,
+        departure_window=effective_departure_window,
         airlines=airlines,
-        seat_class=seat_class,
-        stops=stops,
+        cabin_class=cabin_class,
+        max_stops=max_stops,
         sort_by=sort_by,
         passengers=passengers or CONFIG.default_passengers,
     )
-    return _execute_flight_search(request)
+    return _execute_flight_search(params)
 
 
-def _search_flights_from_request(request: FlightSearchRequest) -> dict[str, Any]:
-    """Compatibility wrapper for tests expecting the original request-based signature."""
-    return _execute_flight_search(request)
+def _search_flights_from_params(params: FlightSearchParams) -> dict[str, Any]:
+    """Compatibility wrapper for tests expecting the params-based signature."""
+    return _execute_flight_search(params)
 
 
-search_flights.fn = _search_flights_from_request  # type: ignore[attr-defined]
+search_flights.fn = _search_flights_from_params  # type: ignore[attr-defined]
 
 
 @mcp.tool(
     annotations={
-        "title": "Find Cheapest Dates",
+        "title": "Search Dates",
         "readOnlyHint": True,
         "idempotentHint": True,
     },
 )
-def search_cheap_flights(
-    from_airport: Annotated[str, Field(description="Departure airport code (e.g., 'JFK')")],
-    to_airport: Annotated[str, Field(description="Arrival airport code (e.g., 'LHR')")],
-    from_date: Annotated[
-        str, Field(description="Start date for search range in YYYY-MM-DD format")
-    ],
-    to_date: Annotated[str, Field(description="End date for search range in YYYY-MM-DD format")],
-    duration: Annotated[
+def search_dates(
+    origin: Annotated[str, Field(description="Departure airport IATA code (e.g., 'JFK')")],
+    destination: Annotated[str, Field(description="Arrival airport IATA code (e.g., 'LHR')")],
+    start_date: Annotated[str, Field(description="Start of date range in YYYY-MM-DD format")],
+    end_date: Annotated[str, Field(description="End of date range in YYYY-MM-DD format")],
+    trip_duration: Annotated[
         int,
-        Field(description="Duration of trip in days for round trips", ge=1),
+        Field(description="Trip duration in days for round-trips", ge=1),
     ] = 3,
-    round_trip: Annotated[
+    is_round_trip: Annotated[
         bool,
-        Field(description="Whether to search for round-trip flights"),
+        Field(description="Search for round-trip flights"),
     ] = False,
     airlines: Annotated[
         list[str] | None,
-        Field(description="List of airline codes (e.g., ['BA', 'KL'])"),
+        Field(description="Filter by airline IATA codes (e.g., ['BA', 'AA'])"),
     ] = None,
-    seat_class: Annotated[
+    cabin_class: Annotated[
         str,
-        Field(description="Seat type: ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST"),
-    ] = CONFIG.default_seat_class,
-    stops: Annotated[
+        Field(description="Cabin class: ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST"),
+    ] = CONFIG.default_cabin_class,
+    max_stops: Annotated[
         str,
         Field(description="Maximum stops: ANY, NON_STOP, ONE_STOP, TWO_PLUS_STOPS"),
     ] = "ANY",
-    time_range: Annotated[
+    departure_window: Annotated[
         str | None,
-        Field(description="Preferred departure window in 'HH-HH' 24-hour format"),
+        Field(description="Departure time window in 'HH-HH' 24h format (e.g., '6-20')"),
     ] = None,
     sort_by_price: Annotated[
         bool,
-        Field(description="Sort the resulting dates by price (lowest to highest)"),
+        Field(description="Sort results by price (lowest first)"),
     ] = False,
     passengers: Annotated[
         int | None,
-        Field(description="Override the default number of adult passengers.", ge=1),
+        Field(description="Number of adult passengers", ge=1),
     ] = None,
 ) -> dict[str, Any]:
-    """Find the cheapest travel dates between two airports."""
-    effective_time_range = time_range or CONFIG.default_time_range
-    request = CheapFlightSearchRequest(
-        from_airport=from_airport,
-        to_airport=to_airport,
-        from_date=from_date,
-        to_date=to_date,
-        duration=duration,
-        round_trip=round_trip,
+    """Find the cheapest travel dates between two airports within a date range.
+
+    Returns a list of dates with their prices, useful for flexible travel planning.
+    Supports both one-way and round-trip searches.
+    """
+    effective_departure_window = departure_window or CONFIG.default_departure_window
+    params = DateSearchParams(
+        origin=origin,
+        destination=destination,
+        start_date=start_date,
+        end_date=end_date,
+        trip_duration=trip_duration,
+        is_round_trip=is_round_trip,
         airlines=airlines,
-        seat_class=seat_class,
-        stops=stops,
-        time_range=effective_time_range,
+        cabin_class=cabin_class,
+        max_stops=max_stops,
+        departure_window=effective_departure_window,
         sort_by_price=sort_by_price,
         passengers=passengers or CONFIG.default_passengers,
     )
-    return _execute_cheap_flight_search(request)
+    return _execute_date_search(params)
 
 
-def _search_cheap_flights_from_request(
-    request: CheapFlightSearchRequest,
-) -> dict[str, Any]:
-    """Compatibility wrapper for tests expecting the original request-based signature."""
-    return _execute_cheap_flight_search(request)
+def _search_dates_from_params(params: DateSearchParams) -> dict[str, Any]:
+    """Compatibility wrapper for tests expecting the params-based signature."""
+    return _execute_date_search(params)
 
 
-search_cheap_flights.fn = _search_cheap_flights_from_request  # type: ignore[attr-defined]
+search_dates.fn = _search_dates_from_params  # type: ignore[attr-defined]
+
+
+# =============================================================================
+# Prompts
+# =============================================================================
 
 
 def _build_search_prompt(args: dict[str, str]) -> list[PromptMessage]:
     """Create a helper prompt to guide flight searches."""
-    from_airport = args.get("from_airport", "JFK").upper()
-    to_airport = args.get("to_airport", "LHR").upper()
+    origin = args.get("origin", "JFK").upper()
+    destination = args.get("destination", "LHR").upper()
     date = args.get("date") or datetime.utcnow().date().isoformat()
     prefer_non_stop = args.get("prefer_non_stop", "true").lower()
-    stops_hint = "NON_STOP" if prefer_non_stop in {"true", "1", "yes"} else "ANY"
+    max_stops_hint = "NON_STOP" if prefer_non_stop in {"true", "1", "yes"} else "ANY"
     text = (
         "Use the `search_flights` tool to look for flights from "
-        f"{from_airport} to {to_airport} departing on {date}. "
-        f"Set `stops` to '{stops_hint}' and highlight the three most affordable options."
+        f"{origin} to {destination} departing on {date}. "
+        f"Set `max_stops` to '{max_stops_hint}' and highlight the three most affordable options."
     )
     return [
         PromptMessage(role=Role.USER, content=TextContent(type="text", text=text)),
@@ -741,15 +641,17 @@ def _build_search_prompt(args: dict[str, str]) -> list[PromptMessage]:
 
 def _build_budget_prompt(args: dict[str, str]) -> list[PromptMessage]:
     """Create a helper prompt to guide flexible date searches."""
-    from_airport = args.get("from_airport", "SFO").upper()
-    to_airport = args.get("to_airport", "NRT").upper()
-    from_date = args.get("from_date") or (datetime.utcnow().date() + timedelta(days=30)).isoformat()
-    to_date = args.get("to_date") or (datetime.utcnow().date() + timedelta(days=90)).isoformat()
+    origin = args.get("origin", "SFO").upper()
+    destination = args.get("destination", "NRT").upper()
+    start_date = (
+        args.get("start_date") or (datetime.utcnow().date() + timedelta(days=30)).isoformat()
+    )
+    end_date = args.get("end_date") or (datetime.utcnow().date() + timedelta(days=90)).isoformat()
     duration = args.get("duration", "7")
     text = (
-        "Use the `search_cheap_flights` tool to find the lowest fares between "
-        f"{from_airport} and {to_airport} for trips between {from_date} and {to_date}. "
-        f"Limit the duration to {duration} days and sort the results by price."
+        "Use the `search_dates` tool to find the lowest fares between "
+        f"{origin} and {destination} for trips between {start_date} and {end_date}. "
+        f"Set trip_duration to {duration} days and sort the results by price."
     )
     return [
         PromptMessage(role=Role.USER, content=TextContent(type="text", text=text)),
@@ -763,13 +665,13 @@ mcp.add_prompt(
     ),
     arguments=[
         PromptArgument(
-            name="from_airport",
-            description="Departure airport code",
+            name="origin",
+            description="Departure airport IATA code",
             required=True,
         ),
         PromptArgument(
-            name="to_airport",
-            description="Arrival airport code",
+            name="destination",
+            description="Arrival airport IATA code",
             required=True,
         ),
         PromptArgument(
@@ -791,22 +693,22 @@ mcp.add_prompt(
     description=("Suggest the cheapest travel dates for a route within a flexible window."),
     arguments=[
         PromptArgument(
-            name="from_airport",
-            description="Departure airport code",
+            name="origin",
+            description="Departure airport IATA code",
             required=True,
         ),
         PromptArgument(
-            name="to_airport",
-            description="Arrival airport code",
+            name="destination",
+            description="Arrival airport IATA code",
             required=True,
         ),
         PromptArgument(
-            name="from_date",
+            name="start_date",
             description="Start of the travel window (YYYY-MM-DD)",
             required=False,
         ),
         PromptArgument(
-            name="to_date",
+            name="end_date",
             description="End of the travel window (YYYY-MM-DD)",
             required=False,
         ),
@@ -818,6 +720,11 @@ mcp.add_prompt(
     ],
     build_messages=_build_budget_prompt,
 )
+
+
+# =============================================================================
+# Resources
+# =============================================================================
 
 
 @mcp.resource(
@@ -839,14 +746,19 @@ def configuration_resource() -> str:
             "variables": {
                 "FLI_MCP_DEFAULT_PASSENGERS": "Adjust the default passenger count.",
                 "FLI_MCP_DEFAULT_CURRENCY": "Override the currency code returned with results.",
-                "FLI_MCP_DEFAULT_SEAT_CLASS": "Set a default seat class.",
+                "FLI_MCP_DEFAULT_CABIN_CLASS": "Set a default cabin class.",
                 "FLI_MCP_DEFAULT_SORT_BY": "Set the default result sorting strategy.",
-                "FLI_MCP_DEFAULT_TIME_RANGE": "Provide a default departure window (HH-HH).",
+                "FLI_MCP_DEFAULT_DEPARTURE_WINDOW": "Provide a default departure window (HH-HH).",
                 "FLI_MCP_MAX_RESULTS": "Limit the maximum number of results returned by tools.",
             },
         },
     }
     return json.dumps(payload, indent=2)
+
+
+# =============================================================================
+# Entry Points
+# =============================================================================
 
 
 def run():

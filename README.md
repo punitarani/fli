@@ -42,6 +42,47 @@ fli-mcp-http  # serves at http://127.0.0.1:8000/mcp/
 > **Note**: Replace `<user>` with your actual username.
 > You can also find the path to the MCP server by running `which fli-mcp` in your terminal.
 
+### MCP Tools Available
+
+The MCP server provides two main tools:
+
+| Tool | Description |
+|------|-------------|
+| **`search_flights`** | Search for flights on a specific date with detailed filters |
+| **`search_dates`** | Find the cheapest travel dates across a flexible date range |
+
+#### `search_flights` Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `origin` | string | Departure airport IATA code (e.g., 'JFK') |
+| `destination` | string | Arrival airport IATA code (e.g., 'LHR') |
+| `departure_date` | string | Travel date in YYYY-MM-DD format |
+| `return_date` | string | Return date for round trips (optional) |
+| `cabin_class` | string | ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST |
+| `max_stops` | string | ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS |
+| `departure_window` | string | Time window in 'HH-HH' format (e.g., '6-20') |
+| `airlines` | list | Filter by airline codes (e.g., ['BA', 'AA']) |
+| `sort_by` | string | CHEAPEST, DURATION, DEPARTURE_TIME, or ARRIVAL_TIME |
+| `passengers` | int | Number of adult passengers |
+
+#### `search_dates` Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `origin` | string | Departure airport IATA code (e.g., 'JFK') |
+| `destination` | string | Arrival airport IATA code (e.g., 'LHR') |
+| `start_date` | string | Start of date range in YYYY-MM-DD format |
+| `end_date` | string | End of date range in YYYY-MM-DD format |
+| `trip_duration` | int | Trip duration in days (for round-trips) |
+| `is_round_trip` | bool | Whether to search for round-trip flights |
+| `cabin_class` | string | ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST |
+| `max_stops` | string | ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS |
+| `departure_window` | string | Time window in 'HH-HH' format (e.g., '6-20') |
+| `airlines` | list | Filter by airline codes (e.g., ['BA', 'AA']) |
+| `sort_by_price` | bool | Sort results by price (lowest first) |
+| `passengers` | int | Number of adult passengers |
+
 ## Quick Start
 
 ```bash
@@ -96,11 +137,11 @@ fli search JFK LHR 2025-10-25
 
 # Advanced search with filters
 fli search JFK LHR 2025-10-25 \
-    -t 6-20 \              # Time range (6 AM - 8 PM)
-    -a BA KL \             # Airlines (British Airways, KLM)
-    -s BUSINESS \          # Seat type
-    -x NON_STOP \          # Non-stop flights only
-    -o DURATION            # Sort by duration
+    --time 6-20 \             # Departure time window (6 AM - 8 PM)
+    --airlines BA KL \        # Airlines (British Airways, KLM)
+    --class BUSINESS \        # Cabin class
+    --stops NON_STOP \        # Non-stop flights only
+    --sort DURATION           # Sort by duration
 ```
 
 ### Find Cheapest Dates
@@ -120,23 +161,23 @@ fli cheap JFK LHR \
 
 #### Search Command (`fli search`)
 
-| Option           | Description             | Example                |
-|------------------|-------------------------|------------------------|
-| `-t, --time`     | Time range (24h format) | `6-20`                 |
-| `-a, --airlines` | Airline codes           | `BA KL`                |
-| `-s, --seat`     | Cabin class             | `ECONOMY`, `BUSINESS`  |
-| `-x, --stops`    | Maximum stops           | `NON_STOP`, `ONE_STOP` |
-| `-o, --sort`     | Sort results by         | `CHEAPEST`, `DURATION` |
+| Option           | Description              | Example                |
+|------------------|--------------------------|------------------------|
+| `--time, -t`     | Departure time window    | `6-20`                 |
+| `--airlines, -a` | Airline IATA codes       | `BA KL`                |
+| `--class, -c`    | Cabin class              | `ECONOMY`, `BUSINESS`  |
+| `--stops, -s`    | Maximum stops            | `NON_STOP`, `ONE_STOP` |
+| `--sort, -o`     | Sort results by          | `CHEAPEST`, `DURATION` |
 
 #### Cheap Command (`fli cheap`)
 
-| Option        | Description   | Example                |
-|---------------|---------------|------------------------|
-| `--from`      | Start date    | `2025-01-01`           |
-| `--to`        | End date      | `2025-02-01`           |
-| `-s, --seat`  | Cabin class   | `ECONOMY`, `BUSINESS`  |
-| `-x, --stops` | Maximum stops | `NON_STOP`, `ONE_STOP` |
-| `--[day]`     | Day filters   | `--monday`, `--friday` |
+| Option        | Description          | Example                |
+|---------------|----------------------|------------------------|
+| `--from`      | Start date           | `2025-01-01`           |
+| `--to`        | End date             | `2025-02-01`           |
+| `--class, -c` | Cabin class          | `ECONOMY`, `BUSINESS`  |
+| `--stops, -s` | Maximum stops        | `NON_STOP`, `ONE_STOP` |
+| `--[day]`     | Day filters          | `--monday`, `--friday` |
 
 ## MCP Server Integration
 
@@ -182,13 +223,6 @@ After adding this configuration:
    * "Find flights from JFK to LAX on December 25th"
    * "What are the cheapest dates to fly from NYC to London in January?"
    * "Search for business class flights from SFO to NRT with no stops"
-
-### MCP Tools Available
-
-The MCP server provides two main tools:
-
-* **`search_flights`**: Search for specific flights with detailed filters
-* **`search_cheap_flights`**: Find the cheapest dates across a flexible date range
 
 ## Python API Usage
 

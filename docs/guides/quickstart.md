@@ -23,30 +23,44 @@ pipx install flights
 1. Search for one-way flights:
 
 ```bash
-fli search JFK LHR 2024-06-01
+fli search JFK LHR 2025-06-01
 ```
 
 2. Search for round trip flights:
 
 ```bash
-fli search JFK LHR 2024-06-01 --return 2024-06-15
+fli search JFK LHR 2025-06-01 --return 2025-06-15
 ```
 
 3. Search with filters:
 
 ```bash
-fli search JFK LHR 2024-06-01 \
-    -t 6-20 \              # Time range (6 AM - 8 PM)
-    -a BA KL \             # Airlines (British Airways, KLM)
-    -c BUSINESS \          # Seat type
-    -s 0                   # Non-stop flights only
+fli search JFK LHR 2025-06-01 \
+    --time 6-20 \             # Departure window (6 AM - 8 PM)
+    --airlines BA KL \        # Airlines (British Airways, KLM)
+    --class BUSINESS \        # Cabin class
+    --stops NON_STOP          # Non-stop flights only
 ```
 
 4. Find cheapest dates:
 
 ```bash
-fli cheap JFK LHR --from 2024-06-01 --to 2024-06-30
+fli cheap JFK LHR --from 2025-06-01 --to 2025-06-30
 ```
+
+### MCP Server (for AI Assistants)
+
+Run the MCP server for use with Claude Desktop or other MCP clients:
+
+```bash
+# Run on STDIO (for Claude Desktop)
+fli-mcp
+
+# Run over HTTP (for web integrations)
+fli-mcp-http
+```
+
+See the [MCP Guide](mcp.md) for detailed configuration.
 
 ### Python API
 
@@ -64,7 +78,7 @@ flight_segments = [
     FlightSegment(
         departure_airport=[[Airport.JFK, 0]],
         arrival_airport=[[Airport.LAX, 0]],
-        travel_date="2024-06-01"
+        travel_date="2025-06-01"
     )
 ]
 
@@ -102,12 +116,12 @@ flight_segments = [
     FlightSegment(
         departure_airport=[[Airport.JFK, 0]],
         arrival_airport=[[Airport.LAX, 0]],
-        travel_date="2024-06-01"
+        travel_date="2025-06-01"
     ),
     FlightSegment(
         departure_airport=[[Airport.LAX, 0]],
         arrival_airport=[[Airport.JFK, 0]],
-        travel_date="2024-06-15"
+        travel_date="2025-06-15"
     )
 ]
 
@@ -122,21 +136,19 @@ filters = FlightSearchFilters(
 search = SearchFlights()
 results = search.search(filters)
 
-# Process results
-for flight in results:
+# Process results - round trips return tuples of (outbound, return)
+for outbound, return_flight in results:
     print(f"\nOutbound Flight:")
-    for leg in flight.outbound.legs:
-        print(f"Flight: {leg.airline.value} {leg.flight_number}")
-        print(f"Departure: {leg.departure_datetime}")
-        print(f"Arrival: {leg.arrival_datetime}")
+    for leg in outbound.legs:
+        print(f"  {leg.airline.value} {leg.flight_number}")
+        print(f"  {leg.departure_datetime} -> {leg.arrival_datetime}")
     
     print(f"\nReturn Flight:")
-    for leg in flight.return_flight.legs:
-        print(f"Flight: {leg.airline.value} {leg.flight_number}")
-        print(f"Departure: {leg.departure_datetime}")
-        print(f"Arrival: {leg.arrival_datetime}")
+    for leg in return_flight.legs:
+        print(f"  {leg.airline.value} {leg.flight_number}")
+        print(f"  {leg.departure_datetime} -> {leg.arrival_datetime}")
     
-    print(f"\nTotal Price: ${flight.total_price}")
+    print(f"\nTotal Price: ${outbound.price + return_flight.price}")
 ```
 
 3. Date Range Search:
@@ -152,11 +164,11 @@ filters = DateSearchFilters(
         FlightSegment(
             departure_airport=[[Airport.JFK, 0]],
             arrival_airport=[[Airport.LAX, 0]],
-            travel_date="2024-06-01",
+            travel_date="2025-06-01",
         )
     ],
-    from_date="2024-06-01",
-    to_date="2024-06-30"
+    from_date="2025-06-01",
+    to_date="2025-06-30"
 )
 
 # Search dates
@@ -165,7 +177,7 @@ results = search.search(filters)
 
 # Process results
 for date_price in results:
-    print(f"Date: {date_price.date}, Price: ${date_price.price}")
+    print(f"Date: {date_price.date[0]}, Price: ${date_price.price}")
 ```
 
 ### Running Complete Examples
@@ -197,4 +209,5 @@ python examples/basic_one_way_search.py
 
 * Check out the [API Reference](../api/models.md) for detailed documentation
 * See [Advanced Examples](../examples/advanced.md) for more complex use cases
+* Read the [MCP Guide](mcp.md) for AI assistant integration
 * Read about [Rate Limiting and Error Handling](../api/search.md#http-client)

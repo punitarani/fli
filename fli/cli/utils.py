@@ -1,3 +1,5 @@
+"""CLI utility functions for display and validation."""
+
 from datetime import datetime
 
 import typer
@@ -10,11 +12,14 @@ from rich.text import Text
 
 from fli.cli.console import console
 from fli.cli.enums import DayOfWeek
+from fli.core.parsers import ParseError
+from fli.core.parsers import parse_airlines as core_parse_airlines
+from fli.core.parsers import parse_max_stops as core_parse_max_stops
 from fli.models import Airline, Airport, MaxStops, TripType
 
 
 def validate_date(ctx: Context, param: Parameter, value: str) -> str | None:
-    """Validate date format."""
+    """Validate date format for typer callbacks."""
     if value is None:
         return None
 
@@ -28,7 +33,7 @@ def validate_date(ctx: Context, param: Parameter, value: str) -> str | None:
 def validate_time_range(
     ctx: Context, param: Parameter, value: str | None
 ) -> tuple[int, int] | None:
-    """Validate and parse time range in format 'start-end' (24h format)."""
+    """Validate and parse time range in format 'start-end' (24h format) for typer callbacks."""
     if not value:
         return None
 
@@ -42,37 +47,28 @@ def validate_time_range(
 
 
 def parse_airlines(airlines: list[str] | None) -> list[Airline] | None:
-    """Parse airlines from list of airline codes."""
+    """Parse airlines from list of airline codes.
+
+    Delegates to core parser but wraps errors for CLI.
+    """
     if not airlines:
         return None
 
     try:
-        return [
-            getattr(Airline, airline.strip().upper()) for airline in airlines if airline.strip()
-        ]
-    except AttributeError as e:
-        raise typer.BadParameter(f"Invalid airline code: {str(e)}") from e
+        return core_parse_airlines(airlines)
+    except ParseError as e:
+        raise typer.BadParameter(str(e)) from e
 
 
 def parse_stops(stops: str) -> MaxStops:
-    """Convert stops parameter to MaxStops enum."""
-    # Try parsing as integer first
+    """Convert stops parameter to MaxStops enum.
+
+    Delegates to core parser but wraps errors for CLI.
+    """
     try:
-        stops_int = int(stops)
-        if stops_int == 0:
-            return MaxStops.NON_STOP
-        elif stops_int == 1:
-            return MaxStops.ONE_STOP_OR_FEWER
-        elif stops_int >= 2:
-            return MaxStops.TWO_OR_FEWER_STOPS
-        else:
-            return MaxStops.ANY
-    except ValueError:
-        # If not an integer, try as enum string
-        try:
-            return getattr(MaxStops, stops.upper())
-        except AttributeError as e:
-            raise typer.BadParameter(f"Invalid stops value: {stops}") from e
+        return core_parse_max_stops(stops)
+    except ParseError as e:
+        raise typer.BadParameter(str(e)) from e
 
 
 def parse_trip_type(trip_type: str) -> TripType:
