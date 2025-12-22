@@ -3,9 +3,9 @@
 from datetime import datetime, timedelta
 
 from fli.mcp.server import (
-    CheapFlightSearchRequest,
-    FlightSearchRequest,
-    search_cheap_flights,
+    DateSearchParams,
+    FlightSearchParams,
+    search_dates,
     search_flights,
 )
 
@@ -20,12 +20,12 @@ class TestMCPServer:
 
     def test_search_flights_one_way(self):
         """Test one-way flight search."""
-        params = FlightSearchRequest(
-            from_airport="JFK",
-            to_airport="LHR",
-            date=get_future_date(30),
-            seat_class="ECONOMY",
-            stops="ANY",
+        params = FlightSearchParams(
+            origin="JFK",
+            destination="LHR",
+            departure_date=get_future_date(30),
+            cabin_class="ECONOMY",
+            max_stops="ANY",
             sort_by="CHEAPEST",
         )
 
@@ -43,15 +43,15 @@ class TestMCPServer:
 
     def test_search_flights_round_trip(self):
         """Test round-trip flight search."""
-        params = FlightSearchRequest(
-            from_airport="LAX",
-            to_airport="JFK",
-            date=get_future_date(30),
+        params = FlightSearchParams(
+            origin="LAX",
+            destination="JFK",
+            departure_date=get_future_date(30),
             return_date=get_future_date(37),
-            time_range="8-20",
+            departure_window="8-20",
             airlines=["AA", "DL"],
-            seat_class="BUSINESS",
-            stops="NON_STOP",
+            cabin_class="BUSINESS",
+            max_stops="NON_STOP",
             sort_by="DURATION",
         )
 
@@ -67,23 +67,23 @@ class TestMCPServer:
             assert "count" in result
             assert isinstance(result["flights"], list)
 
-    def test_search_cheap_flights_one_way(self):
-        """Test one-way cheap flight search."""
+    def test_search_dates_one_way(self):
+        """Test one-way date search."""
         start_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
         end_date = (datetime.now() + timedelta(days=60)).strftime("%Y-%m-%d")
 
-        params = CheapFlightSearchRequest(
-            from_airport="JFK",
-            to_airport="LHR",
-            from_date=start_date,
-            to_date=end_date,
-            round_trip=False,
-            seat_class="ECONOMY",
-            stops="ANY",
+        params = DateSearchParams(
+            origin="JFK",
+            destination="LHR",
+            start_date=start_date,
+            end_date=end_date,
+            is_round_trip=False,
+            cabin_class="ECONOMY",
+            max_stops="ANY",
             sort_by_price=True,
         )
 
-        result = search_cheap_flights.fn(params)
+        result = search_dates.fn(params)
 
         assert isinstance(result, dict)
         assert "success" in result
@@ -96,27 +96,26 @@ class TestMCPServer:
             assert "date_range" in result
             assert isinstance(result["dates"], list)
 
-    def test_search_cheap_flights_round_trip(self):
-        """Test round-trip cheap flight search."""
+    def test_search_dates_round_trip(self):
+        """Test round-trip date search."""
         start_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
         end_date = (datetime.now() + timedelta(days=60)).strftime("%Y-%m-%d")
 
-        params = CheapFlightSearchRequest(
-            from_airport="LAX",
-            to_airport="MIA",
-            from_date=start_date,
-            to_date=end_date,
-            duration=7,
-            round_trip=True,
+        params = DateSearchParams(
+            origin="LAX",
+            destination="MIA",
+            start_date=start_date,
+            end_date=end_date,
+            trip_duration=7,
+            is_round_trip=True,
             airlines=["AA", "B6"],
-            seat_class="PREMIUM_ECONOMY",
-            stops="ONE_STOP",
-            time_range="6-22",
-            days_of_week=["friday", "saturday"],
+            cabin_class="PREMIUM_ECONOMY",
+            max_stops="ONE_STOP",
+            departure_window="6-22",
             sort_by_price=True,
         )
 
-        result = search_cheap_flights.fn(params)
+        result = search_dates.fn(params)
 
         assert isinstance(result, dict)
         assert "success" in result
@@ -132,8 +131,8 @@ class TestMCPServer:
 
     def test_invalid_airport_code(self):
         """Test error handling for invalid airport code."""
-        params = FlightSearchRequest(
-            from_airport="INVALID", to_airport="LHR", date=get_future_date(30)
+        params = FlightSearchParams(
+            origin="INVALID", destination="LHR", departure_date=get_future_date(30)
         )
 
         result = search_flights.fn(params)
@@ -141,16 +140,16 @@ class TestMCPServer:
         assert isinstance(result, dict)
         assert result["success"] is False
         assert "error" in result
-        assert "Invalid parameter value" in result["error"]
+        assert "Invalid airport code" in result["error"]
         assert result["flights"] == []
 
-    def test_invalid_time_range(self):
-        """Test error handling for invalid time range."""
-        params = FlightSearchRequest(
-            from_airport="JFK",
-            to_airport="LHR",
-            date=get_future_date(30),
-            time_range="invalid-time",
+    def test_invalid_departure_window(self):
+        """Test error handling for invalid departure window."""
+        params = FlightSearchParams(
+            origin="JFK",
+            destination="LHR",
+            departure_date=get_future_date(30),
+            departure_window="invalid-time",
         )
 
         result = search_flights.fn(params)
@@ -158,16 +157,16 @@ class TestMCPServer:
         assert isinstance(result, dict)
         assert result["success"] is False
         assert "error" in result
-        assert "Invalid time range format" in result["error"]
+        assert "time range" in result["error"].lower()
         assert result["flights"] == []
 
-    def test_invalid_seat_class(self):
-        """Test error handling for invalid seat class."""
-        params = FlightSearchRequest(
-            from_airport="JFK",
-            to_airport="LHR",
-            date=get_future_date(30),
-            seat_class="INVALID_CLASS",
+    def test_invalid_cabin_class(self):
+        """Test error handling for invalid cabin class."""
+        params = FlightSearchParams(
+            origin="JFK",
+            destination="LHR",
+            departure_date=get_future_date(30),
+            cabin_class="INVALID_CLASS",
         )
 
         result = search_flights.fn(params)
@@ -175,16 +174,16 @@ class TestMCPServer:
         assert isinstance(result, dict)
         assert result["success"] is False
         assert "error" in result
-        assert "Invalid parameter value" in result["error"]
+        assert "cabin_class" in result["error"].lower()
         assert result["flights"] == []
 
     def test_invalid_max_stops(self):
         """Test error handling for invalid max stops."""
-        params = FlightSearchRequest(
-            from_airport="JFK",
-            to_airport="LHR",
-            date=get_future_date(30),
-            stops="INVALID_STOPS",
+        params = FlightSearchParams(
+            origin="JFK",
+            destination="LHR",
+            departure_date=get_future_date(30),
+            max_stops="INVALID_STOPS",
         )
 
         result = search_flights.fn(params)
@@ -192,15 +191,15 @@ class TestMCPServer:
         assert isinstance(result, dict)
         assert result["success"] is False
         assert "error" in result
-        assert "Invalid parameter value" in result["error"]
+        assert "max_stops" in result["error"].lower()
         assert result["flights"] == []
 
     def test_invalid_airline_code(self):
         """Test error handling for invalid airline code."""
-        params = FlightSearchRequest(
-            from_airport="JFK",
-            to_airport="LHR",
-            date=get_future_date(30),
+        params = FlightSearchParams(
+            origin="JFK",
+            destination="LHR",
+            departure_date=get_future_date(30),
             airlines=["INVALID_AIRLINE"],
         )
 
@@ -209,38 +208,36 @@ class TestMCPServer:
         assert isinstance(result, dict)
         assert result["success"] is False
         assert "error" in result
-        assert "Invalid airline code" in result["error"]
+        assert "airline" in result["error"].lower()
         assert result["flights"] == []
 
     def test_flight_search_params_validation(self):
         """Test FlightSearchParams validation."""
-        # Valid params
         future_date = get_future_date(30)
-        params = FlightSearchRequest(from_airport="JFK", to_airport="LHR", date=future_date)
-        assert params.from_airport == "JFK"
-        assert params.to_airport == "LHR"
-        assert params.date == future_date
-        assert params.seat_class == "ECONOMY"  # default
-        assert params.stops == "ANY"  # default
+        params = FlightSearchParams(origin="JFK", destination="LHR", departure_date=future_date)
+        assert params.origin == "JFK"
+        assert params.destination == "LHR"
+        assert params.departure_date == future_date
+        assert params.cabin_class == "ECONOMY"  # default
+        assert params.max_stops == "ANY"  # default
         assert params.sort_by == "CHEAPEST"  # default
 
-    def test_cheap_flight_search_params_validation(self):
-        """Test CheapFlightSearchParams validation."""
-        # Valid params
-        from_date = get_future_date(30)
-        to_date = get_future_date(60)
-        params = CheapFlightSearchRequest(
-            from_airport="JFK",
-            to_airport="LHR",
-            from_date=from_date,
-            to_date=to_date,
+    def test_date_search_params_validation(self):
+        """Test DateSearchParams validation."""
+        start_date = get_future_date(30)
+        end_date = get_future_date(60)
+        params = DateSearchParams(
+            origin="JFK",
+            destination="LHR",
+            start_date=start_date,
+            end_date=end_date,
         )
-        assert params.from_airport == "JFK"
-        assert params.to_airport == "LHR"
-        assert params.from_date == from_date
-        assert params.to_date == to_date
-        assert params.duration == 3  # default
-        assert params.round_trip is False  # default
-        assert params.seat_class == "ECONOMY"  # default
-        assert params.stops == "ANY"  # default
+        assert params.origin == "JFK"
+        assert params.destination == "LHR"
+        assert params.start_date == start_date
+        assert params.end_date == end_date
+        assert params.trip_duration == 3  # default
+        assert params.is_round_trip is False  # default
+        assert params.cabin_class == "ECONOMY"  # default
+        assert params.max_stops == "ANY"  # default
         assert params.sort_by_price is False  # default

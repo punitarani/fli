@@ -1,6 +1,6 @@
 [project]
 name = "flights"
-version = "0.6.1"
+version = "0.7.0"
 description = "A Python wrapper for Google Flights API"
 authors = [
     { name = "Punit Arani", email = "punit@joinslash.com" }
@@ -28,6 +28,7 @@ dependencies = [
     "fastmcp>=0.1.0",
     "httpx>=0.28.1",
     "pandas>=2.2.3",
+    "plotext>=5.3.2",
     "pydantic>=2.10.4",
     "python-dotenv>=1.0.1",
     "ratelimit>=2.2.1",

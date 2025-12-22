@@ -1,5 +1,8 @@
+"""CLI utility functions for display and validation."""
+
 from datetime import datetime
 
+import plotext as plt
 import typer
 from click import Context, Parameter
 from rich import box
@@ -10,11 +13,14 @@ from rich.text import Text
 
 from fli.cli.console import console
 from fli.cli.enums import DayOfWeek
+from fli.core.parsers import ParseError
+from fli.core.parsers import parse_airlines as core_parse_airlines
+from fli.core.parsers import parse_max_stops as core_parse_max_stops
 from fli.models import Airline, Airport, MaxStops, TripType
 
 
 def validate_date(ctx: Context, param: Parameter, value: str) -> str | None:
-    """Validate date format."""
+    """Validate date format for typer callbacks."""
     if value is None:
         return None
 
@@ -28,7 +34,7 @@ def validate_date(ctx: Context, param: Parameter, value: str) -> str | None:
 def validate_time_range(
     ctx: Context, param: Parameter, value: str | None
 ) -> tuple[int, int] | None:
-    """Validate and parse time range in format 'start-end' (24h format)."""
+    """Validate and parse time range in format 'start-end' (24h format) for typer callbacks."""
     if not value:
         return None
 
@@ -42,37 +48,28 @@ def validate_time_range(
 
 
 def parse_airlines(airlines: list[str] | None) -> list[Airline] | None:
-    """Parse airlines from list of airline codes."""
+    """Parse airlines from list of airline codes.
+
+    Delegates to core parser but wraps errors for CLI.
+    """
     if not airlines:
         return None
 
     try:
-        return [
-            getattr(Airline, airline.strip().upper()) for airline in airlines if airline.strip()
-        ]
-    except AttributeError as e:
-        raise typer.BadParameter(f"Invalid airline code: {str(e)}") from e
+        return core_parse_airlines(airlines)
+    except ParseError as e:
+        raise typer.BadParameter(str(e)) from e
 
 
 def parse_stops(stops: str) -> MaxStops:
-    """Convert stops parameter to MaxStops enum."""
-    # Try parsing as integer first
+    """Convert stops parameter to MaxStops enum.
+
+    Delegates to core parser but wraps errors for CLI.
+    """
     try:
-        stops_int = int(stops)
-        if stops_int == 0:
-            return MaxStops.NON_STOP
-        elif stops_int == 1:
-            return MaxStops.ONE_STOP_OR_FEWER
-        elif stops_int >= 2:
-            return MaxStops.TWO_OR_FEWER_STOPS
-        else:
-            return MaxStops.ANY
-    except ValueError:
-        # If not an integer, try as enum string
-        try:
-            return getattr(MaxStops, stops.upper())
-        except AttributeError as e:
-            raise typer.BadParameter(f"Invalid stops value: {stops}") from e
+        return core_parse_max_stops(stops)
+    except ParseError as e:
+        raise typer.BadParameter(str(e)) from e
 
 
 def parse_trip_type(trip_type: str) -> TripType:
@@ -173,7 +170,7 @@ def display_flight_results(flights: list):
         for idx, flight in enumerate(flight_segments):
             direction = "Outbound" if idx == 0 else "Return" if is_round_trip else ""
             segments = Table(
-                title=f"{direction} Flight Segments" if direction else "Flight Segments",
+                title=(f"{direction} Flight Segments" if direction else "Flight Segments"),
                 box=box.ROUNDED,
             )
             segments.add_column("Airline", style="cyan")
@@ -214,11 +211,41 @@ def display_flight_results(flights: list):
 
 
 def display_date_results(dates: list, trip_type: TripType):
-    """Display date search results in a beautiful format."""
+    """Display date search results with sparkline chart and table."""
     if not dates:
         console.print(Panel("No flights found for these dates", style="red"))
         return
 
+    # Sort dates chronologically for proper trend visualization
+    sorted_dates = sorted(dates, key=lambda x: x.date[0])
+
+    # Extract data for chart
+    date_labels = [d.date[0].strftime("%m/%d") for d in sorted_dates]
+    prices = [d.price for d in sorted_dates]
+
+    # Render sparkline chart
+    plt.clear_figure()
+    plt.plot(prices, marker="braille")
+    plt.title("Price Trend")
+    plt.xlabel("Date")
+    plt.ylabel("Price ($)")
+
+    # Set x-axis labels (show subset if too many dates)
+    if len(date_labels) <= 10:
+        plt.xticks(range(len(date_labels)), date_labels)
+    else:
+        # Show every nth label to avoid crowding
+        step = len(date_labels) // 8
+        indices = list(range(0, len(date_labels), step))
+        plt.xticks(indices, [date_labels[i] for i in indices])
+
+    plt.theme("pro")
+    plt.plotsize(80, 12)
+    plt.show()
+
+    console.print()  # Add spacing between chart and table
+
+    # Build the table (using original order, not sorted)
     table = Table(title="Cheapest Dates to Fly", box=box.ROUNDED)
     table.add_column("Departure", style="cyan")
     table.add_column("Day", style="yellow")

@@ -13,6 +13,13 @@ flights and analyze pricing data.
 * Less prone to breaking from UI changes
 * Clean, modular architecture
 
+### 🤖 MCP Server Integration
+
+* Model Context Protocol server for AI assistants
+* Natural language flight search with Claude
+* Two powerful tools: `search_flights` and `search_dates`
+* Easy configuration with environment variables
+
 ### 🔍 Search Capabilities
 
 * One-way and round-trip flight searches
@@ -40,6 +47,18 @@ pip install flights
 # Or install using pipx (recommended for CLI usage)
 pipx install flights
 ```
+
+### MCP Server (for AI Assistants)
+
+```bash
+# Run the MCP server
+fli-mcp
+
+# Or run over HTTP
+fli-mcp-http
+```
+
+See the [MCP Guide](guides/mcp.md) for Claude Desktop configuration.
 
 ### Basic Usage
 
@@ -104,6 +123,10 @@ python examples/basic_one_way_search.py
 
 The library is organized into several key modules:
 
+* `core/`: Shared utilities
+  * `parsers.py`: Parameter parsing (airports, airlines, stops, etc.)
+  * `builders.py`: Filter building utilities
+
 * `models/`: Data models and enums
   * `google_flights`: Core data models specific to Google Flights
   * `airline.py`: Airline enums and data
@@ -114,6 +137,13 @@ The library is organized into several key modules:
   * `dates.py`: Date-based price search
   * `client.py`: HTTP client with rate limiting
 
+* `mcp/`: MCP server
+  * `server.py`: FastMCP server with `search_flights` and `search_dates` tools
+
+* `cli/`: Command-line interface
+  * `commands/`: CLI commands (`flights`, `dates`)
+  * `utils.py`: Display and validation utilities
+
 ## Contributing
 
 We welcome contributions! Here's how you can help:
@@ -121,7 +151,7 @@ We welcome contributions! Here's how you can help:
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Run tests: `poetry run pytest`
+4. Run tests: `uv run pytest`
 5. Submit a pull request
 
 ## License

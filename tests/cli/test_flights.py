@@ -1,3 +1,5 @@
+"""Tests for the flights CLI command."""
+
 from datetime import datetime, timedelta
 
 import pytest
@@ -13,19 +15,19 @@ def runner():
     return CliRunner()
 
 
-def test_basic_search(runner, mock_search_flights, mock_console):
+def test_basic_flights_search(runner, mock_search_flights, mock_console):
     """Test basic flight search with required parameters."""
-    result = runner.invoke(app, ["search", "JFK", "LAX", datetime.now().strftime("%Y-%m-%d")])
+    result = runner.invoke(app, ["flights", "JFK", "LAX", datetime.now().strftime("%Y-%m-%d")])
     assert result.exit_code == 0
     mock_search_flights.search.assert_called_once()
 
 
-def test_search_with_time_filter(runner, mock_search_flights, mock_console):
-    """Test search with time filter."""
+def test_flights_with_time_filter(runner, mock_search_flights, mock_console):
+    """Test flights search with time filter."""
     result = runner.invoke(
         app,
         [
-            "search",
+            "flights",
             "JFK",
             "LAX",
             datetime.now().strftime("%Y-%m-%d"),
@@ -37,12 +39,12 @@ def test_search_with_time_filter(runner, mock_search_flights, mock_console):
     mock_search_flights.search.assert_called_once()
 
 
-def test_search_with_airlines(runner, mock_search_flights, mock_console):
-    """Test search with airline filter."""
+def test_flights_with_airlines(runner, mock_search_flights, mock_console):
+    """Test flights search with airline filter."""
     result = runner.invoke(
         app,
         [
-            "search",
+            "flights",
             "JFK",
             "LAX",
             datetime.now().strftime("%Y-%m-%d"),
@@ -56,12 +58,12 @@ def test_search_with_airlines(runner, mock_search_flights, mock_console):
     mock_search_flights.search.assert_called_once()
 
 
-def test_search_with_seat_type(runner, mock_search_flights, mock_console):
-    """Test search with seat type."""
+def test_flights_with_cabin_class(runner, mock_search_flights, mock_console):
+    """Test flights search with cabin class."""
     result = runner.invoke(
         app,
         [
-            "search",
+            "flights",
             "JFK",
             "LAX",
             datetime.now().strftime("%Y-%m-%d"),
@@ -73,12 +75,12 @@ def test_search_with_seat_type(runner, mock_search_flights, mock_console):
     mock_search_flights.search.assert_called_once()
 
 
-def test_search_with_stops(runner, mock_search_flights, mock_console):
-    """Test search with stops filter."""
+def test_flights_with_stops(runner, mock_search_flights, mock_console):
+    """Test flights search with stops filter."""
     result = runner.invoke(
         app,
         [
-            "search",
+            "flights",
             "JFK",
             "LAX",
             datetime.now().strftime("%Y-%m-%d"),
@@ -90,37 +92,36 @@ def test_search_with_stops(runner, mock_search_flights, mock_console):
     mock_search_flights.search.assert_called_once()
 
 
-def test_search_invalid_airport(runner, mock_search_flights, mock_console):
-    """Test search with invalid airport code."""
+def test_flights_invalid_airport(runner, mock_search_flights, mock_console):
+    """Test flights search with invalid airport code."""
     result = runner.invoke(
         app,
-        ["search", "XXX", "LAX", datetime.now().strftime("%Y-%m-%d")],
+        ["flights", "XXX", "LAX", datetime.now().strftime("%Y-%m-%d")],
     )
     assert result.exit_code == 1
     assert "Error" in result.stdout
 
 
-def test_search_invalid_date(runner, mock_search_flights, mock_console):
-    """Test search with invalid date format."""
-    result = runner.invoke(app, ["search", "JFK", "LAX", "2024-13-45"])
+def test_flights_invalid_date(runner, mock_search_flights, mock_console):
+    """Test flights search with invalid date format."""
+    result = runner.invoke(app, ["flights", "JFK", "LAX", "2024-13-45"])
     assert result.exit_code == 2
     assert "Error" in result.output
 
 
-def test_search_no_results(runner, mock_search_flights, mock_console):
-    """Test search with no results."""
-    # Override the mock to return no results
+def test_flights_no_results(runner, mock_search_flights, mock_console):
+    """Test flights search with no results."""
     mock_search_flights.search.return_value = []
 
     result = runner.invoke(
         app,
-        ["search", "JFK", "LAX", datetime.now().strftime("%Y-%m-%d")],
+        ["flights", "JFK", "LAX", datetime.now().strftime("%Y-%m-%d")],
     )
     assert result.exit_code == 1
     assert "No flights found" in result.stdout
 
 
-def test_basic_round_trip_search(runner, mock_search_flights, mock_console):
+def test_basic_round_trip_flights(runner, mock_search_flights, mock_console):
     """Test basic round-trip flight search."""
     outbound_date = datetime.now().strftime("%Y-%m-%d")
     return_date = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
@@ -128,7 +129,7 @@ def test_basic_round_trip_search(runner, mock_search_flights, mock_console):
     result = runner.invoke(
         app,
         [
-            "search",
+            "flights",
             "JFK",
             "LAX",
             outbound_date,
@@ -141,14 +142,14 @@ def test_basic_round_trip_search(runner, mock_search_flights, mock_console):
 
 
 def test_round_trip_with_filters(runner, mock_search_flights, mock_console):
-    """Test round-trip search with additional filters."""
+    """Test round-trip flights search with additional filters."""
     outbound_date = datetime.now().strftime("%Y-%m-%d")
     return_date = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
 
     result = runner.invoke(
         app,
         [
-            "search",
+            "flights",
             "JFK",
             "LAX",
             outbound_date,
@@ -164,20 +165,19 @@ def test_round_trip_with_filters(runner, mock_search_flights, mock_console):
     )
     assert result.exit_code == 0
     mock_search_flights.search.assert_called_once()
-    # Verify the trip type was set to ROUND_TRIP
     args, kwargs = mock_search_flights.search.call_args
     assert args[0].trip_type == TripType.ROUND_TRIP
 
 
 def test_round_trip_invalid_dates(runner, mock_search_flights, mock_console):
-    """Test round-trip search with return date before outbound date."""
+    """Test round-trip flights search with return date before outbound date."""
     outbound_date = datetime.now().strftime("%Y-%m-%d")
     return_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
     result = runner.invoke(
         app,
         [
-            "search",
+            "flights",
             "JFK",
             "LAX",
             outbound_date,
