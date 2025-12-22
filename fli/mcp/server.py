@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Annotated, Any
 
 from fastmcp import FastMCP
+from fastmcp.tools import Tool as FastMCPTool
 from mcp.types import (
     GetPromptResult,
     ListPromptsResult,
@@ -95,10 +96,9 @@ class FliMCP(FastMCP):
 
     def _setup_handlers(self) -> None:
         """Register MCP protocol handlers including prompts."""
+        super()._setup_handlers()  # Set up standard handlers from parent
+        # Override only the handlers that FliMCP customizes
         self._mcp_server.list_tools()(self.list_tools)
-        self._mcp_server.call_tool()(self.call_tool)
-        self._mcp_server.list_resources()(self.list_resources)
-        self._mcp_server.read_resource()(self.read_resource)
         self._mcp_server.list_prompts()(self.list_prompts)
         self._mcp_server.get_prompt()(self.get_prompt)
 
@@ -110,7 +110,8 @@ class FliMCP(FastMCP):
         annotations: dict[str, Any] | ToolAnnotations | None = None,
     ) -> None:
         """Register a tool with optional annotations."""
-        super().add_tool(func, name=name, description=description)
+        tool = FastMCPTool.from_function(fn=func, name=name, description=description)
+        self._tool_manager.add_tool(tool)
         tool_name = name or func.__name__
         if annotations:
             self._tool_annotations[tool_name] = (
@@ -711,7 +712,9 @@ def search_cheap_flights(
     return _execute_cheap_flight_search(request)
 
 
-def _search_cheap_flights_from_request(request: CheapFlightSearchRequest) -> dict[str, Any]:
+def _search_cheap_flights_from_request(
+    request: CheapFlightSearchRequest,
+) -> dict[str, Any]:
     """Compatibility wrapper for tests expecting the original request-based signature."""
     return _execute_cheap_flight_search(request)
 
