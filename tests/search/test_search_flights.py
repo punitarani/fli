@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta
 
 import pytest
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from fli.models import (
     Airport,
@@ -15,6 +16,15 @@ from fli.models import (
 )
 from fli.models.google_flights.base import TripType
 from fli.search import SearchFlights
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), reraise=True)
+def search_with_retry(search: SearchFlights, search_params):
+    """Search with retry logic for flaky API responses."""
+    results = search.search(search_params)
+    if not results:
+        raise ValueError("Empty results, retrying...")
+    return results
 
 
 @pytest.fixture
@@ -234,7 +244,7 @@ def test_round_trip_with_selected_outbound(search, round_trip_search_params):
 def test_round_trip_result_structure(search, search_params_fixture, request):
     """Test the structure of round trip search results with different parameters."""
     search_params = request.getfixturevalue(search_params_fixture)
-    results = search.search(search_params)
+    results = search_with_retry(search, search_params)
 
     assert isinstance(results, list)
     assert len(results) > 0
