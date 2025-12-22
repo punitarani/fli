@@ -187,4 +187,3 @@ def test_round_trip_invalid_dates(runner, mock_search_flights, mock_console):
     )
     assert result.exit_code == 1
     assert "Error" in result.stdout
-

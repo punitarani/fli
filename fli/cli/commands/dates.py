@@ -33,7 +33,8 @@ def dates(
     origin: Annotated[str, typer.Argument(help="Departure airport IATA code (e.g., JFK)")],
     destination: Annotated[str, typer.Argument(help="Arrival airport IATA code (e.g., LHR)")],
     start_date: Annotated[
-        str, typer.Option("--from", help="Start date (YYYY-MM-DD)", callback=validate_date)
+        str,
+        typer.Option("--from", help="Start date (YYYY-MM-DD)", callback=validate_date),
     ] = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d"),
     end_date: Annotated[
         str, typer.Option("--to", help="End date (YYYY-MM-DD)", callback=validate_date)
@@ -250,4 +251,3 @@ def dates(
             raise
         typer.echo(f"Error: {str(e)}")
         raise typer.Exit(1) from e
-

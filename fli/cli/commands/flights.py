@@ -165,4 +165,3 @@ def flights(
         max_stops=max_stops,
         sort_by=sort_by,
     )
-

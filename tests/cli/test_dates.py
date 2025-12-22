@@ -217,4 +217,3 @@ def test_dates_round_trip_with_duration(runner, mock_search_dates, mock_console)
     args, _ = mock_search_dates.search.call_args
     assert args[0].trip_type == TripType.ROUND_TRIP
     assert args[0].duration == 14
-
