@@ -86,11 +86,14 @@ class SearchFlights:
             # Call the search again with the return flight data
             for selected_flight in flights[:top_n]:
                 selected_flight_filters = deepcopy(filters)
-                selected_flight_filters.flight_segments[0].selected_flight = selected_flight
+                selected_flight_filters.flight_segments[0].selected_flight = (
+                    selected_flight
+                )
                 return_flights = self.search(selected_flight_filters, top_n=top_n)
                 if return_flights is not None:
                     flight_pairs.extend(
-                        (selected_flight, return_flight) for return_flight in return_flights
+                        (selected_flight, return_flight)
+                        for return_flight in return_flights
                     )
 
             return flight_pairs
@@ -110,7 +113,7 @@ class SearchFlights:
 
         """
         flight = FlightResult(
-            price=data[1][0][-1],
+            price=SearchFlights._parse_price(data),
             duration=data[0][9],
             stops=len(data[0][2]) - 1,
             legs=[
@@ -129,6 +132,24 @@ class SearchFlights:
         return flight
 
     @staticmethod
+    def _parse_price(data: list) -> float:
+        """Extract price from raw flight data.
+
+        Args:
+            data: Raw flight data from the API response
+
+        Returns:
+            Flight price, or 0.0 if price data is unavailable
+
+        """
+        try:
+            if data[1] and data[1][0]:
+                return data[1][0][-1]
+        except (IndexError, TypeError):
+            pass
+        return 0.0
+
+    @staticmethod
     def _parse_datetime(date_arr: list[int], time_arr: list[int]) -> datetime:
         """Convert date and time arrays to datetime.
 
@@ -143,8 +164,12 @@ class SearchFlights:
             ValueError: If arrays contain only None values
 
         """
-        if not any(x is not None for x in date_arr) or not any(x is not None for x in time_arr):
-            raise ValueError("Date and time arrays must contain at least one non-None value")
+        if not any(x is not None for x in date_arr) or not any(
+            x is not None for x in time_arr
+        ):
+            raise ValueError(
+                "Date and time arrays must contain at least one non-None value"
+            )
 
         return datetime(*(x or 0 for x in date_arr), *(x or 0 for x in time_arr))
 
