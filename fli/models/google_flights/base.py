@@ -5,7 +5,7 @@ Models are designed to match Google Flights' APIs while providing a clean python
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import Enum, StrEnum
 
 from pydantic import (
     BaseModel,
@@ -60,7 +60,7 @@ class MaxStops(Enum):
     TWO_OR_FEWER_STOPS = 3
 
 
-class Currency(Enum):
+class Currency(StrEnum):
     """Supported currencies for pricing. Currently only USD."""
 
     USD = "USD"
