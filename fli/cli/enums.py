@@ -1,7 +1,7 @@
-from enum import StrEnum
+from enum import Enum
 
 
-class DayOfWeek(StrEnum):
+class DayOfWeek(str, Enum):
     """Days of the week."""
 
     MONDAY = "monday"
