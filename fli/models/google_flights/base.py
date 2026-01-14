@@ -4,6 +4,7 @@ This module contains all the data models used for flight searches and results.
 Models are designed to match Google Flights' APIs while providing a clean pythonic interface.
 """
 
+import sys
 from datetime import datetime
 from enum import Enum, StrEnum
 
@@ -19,6 +20,12 @@ from pydantic import (
 
 from fli.models.airline import Airline
 from fli.models.airport import Airport
+
+# Python 3.10 compatibility: StrEnum was added in Python 3.11
+if sys.version_info < (3, 11):
+    class StrEnum(str, Enum):
+        """String Enum for Python 3.10 compatibility."""
+        pass
 
 
 class SeatType(Enum):
