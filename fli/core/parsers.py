@@ -4,41 +4,13 @@ This module provides parsing functions used by both the CLI and MCP interfaces
 to convert user input into domain model objects.
 """
 
-from enum import Enum
-from typing import TypeVar
-
 from fli.models import Airline, Airport, MaxStops, SeatType, SortBy
-
-T = TypeVar("T", bound=Enum)
 
 
 class ParseError(ValueError):
     """Error raised when parsing fails."""
 
     pass
-
-
-def resolve_enum(enum_cls: type[T], name: str) -> T:
-    """Resolve an enum member by name with normalized errors.
-
-    Args:
-        enum_cls: The enum class to resolve from
-        name: The name of the enum member (case-insensitive)
-
-    Returns:
-        The resolved enum member
-
-    Raises:
-        ParseError: If the name is not a valid enum member
-
-    """
-    try:
-        return getattr(enum_cls, name.upper())
-    except AttributeError as e:
-        valid_values = [m.name for m in enum_cls]
-        raise ParseError(
-            f"Invalid {enum_cls.__name__} value: '{name}'. Valid values: {', '.join(valid_values)}"
-        ) from e
 
 
 def resolve_airport(code: str) -> Airport:
