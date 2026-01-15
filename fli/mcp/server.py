@@ -648,8 +648,7 @@ def _build_budget_prompt(args: dict[str, str]) -> list[PromptMessage]:
         or (datetime.now(timezone.utc).date() + timedelta(days=30)).isoformat()
     )
     end_date = (
-        args.get("end_date")
-        or (datetime.now(timezone.utc).date() + timedelta(days=90)).isoformat()
+        args.get("end_date") or (datetime.now(timezone.utc).date() + timedelta(days=90)).isoformat()
     )
     duration = args.get("duration", "7")
     text = (
