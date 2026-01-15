@@ -46,42 +46,42 @@ fli-mcp-http  # serves at http://127.0.0.1:8000/mcp/
 
 The MCP server provides two main tools:
 
-| Tool | Description |
-|------|-------------|
+| Tool                 | Description                                                 |
+|----------------------|-------------------------------------------------------------|
 | **`search_flights`** | Search for flights on a specific date with detailed filters |
-| **`search_dates`** | Find the cheapest travel dates across a flexible date range |
+| **`search_dates`**   | Find the cheapest travel dates across a flexible date range |
 
 #### `search_flights` Parameters
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `origin` | string | Departure airport IATA code (e.g., 'JFK') |
-| `destination` | string | Arrival airport IATA code (e.g., 'LHR') |
-| `departure_date` | string | Travel date in YYYY-MM-DD format |
-| `return_date` | string | Return date for round trips (optional) |
-| `cabin_class` | string | ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST |
-| `max_stops` | string | ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS |
-| `departure_window` | string | Time window in 'HH-HH' format (e.g., '6-20') |
-| `airlines` | list | Filter by airline codes (e.g., ['BA', 'AA']) |
-| `sort_by` | string | CHEAPEST, DURATION, DEPARTURE_TIME, or ARRIVAL_TIME |
-| `passengers` | int | Number of adult passengers |
+| Parameter          | Type   | Description                                         |
+|--------------------|--------|-----------------------------------------------------|
+| `origin`           | string | Departure airport IATA code (e.g., 'JFK')           |
+| `destination`      | string | Arrival airport IATA code (e.g., 'LHR')             |
+| `departure_date`   | string | Travel date in YYYY-MM-DD format                    |
+| `return_date`      | string | Return date for round trips (optional)              |
+| `cabin_class`      | string | ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST        |
+| `max_stops`        | string | ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS          |
+| `departure_window` | string | Time window in 'HH-HH' format (e.g., '6-20')        |
+| `airlines`         | list   | Filter by airline codes (e.g., ['BA', 'AA'])        |
+| `sort_by`          | string | CHEAPEST, DURATION, DEPARTURE_TIME, or ARRIVAL_TIME |
+| `passengers`       | int    | Number of adult passengers                          |
 
 #### `search_dates` Parameters
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `origin` | string | Departure airport IATA code (e.g., 'JFK') |
-| `destination` | string | Arrival airport IATA code (e.g., 'LHR') |
-| `start_date` | string | Start of date range in YYYY-MM-DD format |
-| `end_date` | string | End of date range in YYYY-MM-DD format |
-| `trip_duration` | int | Trip duration in days (for round-trips) |
-| `is_round_trip` | bool | Whether to search for round-trip flights |
-| `cabin_class` | string | ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST |
-| `max_stops` | string | ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS |
+| Parameter          | Type   | Description                                  |
+|--------------------|--------|----------------------------------------------|
+| `origin`           | string | Departure airport IATA code (e.g., 'JFK')    |
+| `destination`      | string | Arrival airport IATA code (e.g., 'LHR')      |
+| `start_date`       | string | Start of date range in YYYY-MM-DD format     |
+| `end_date`         | string | End of date range in YYYY-MM-DD format       |
+| `trip_duration`    | int    | Trip duration in days (for round-trips)      |
+| `is_round_trip`    | bool   | Whether to search for round-trip flights     |
+| `cabin_class`      | string | ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST |
+| `max_stops`        | string | ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS   |
 | `departure_window` | string | Time window in 'HH-HH' format (e.g., '6-20') |
-| `airlines` | list | Filter by airline codes (e.g., ['BA', 'AA']) |
-| `sort_by_price` | bool | Sort results by price (lowest first) |
-| `passengers` | int | Number of adult passengers |
+| `airlines`         | list   | Filter by airline codes (e.g., ['BA', 'AA']) |
+| `sort_by_price`    | bool   | Sort results by price (lowest first)         |
+| `passengers`       | int    | Number of adult passengers                   |
 
 ## Quick Start
 
@@ -102,30 +102,30 @@ fli --help
 ## Features
 
 * 🔍 **Powerful Search**
-  * One-way flight searches
-  * Flexible departure times
-  * Multi-airline support
-  * Cabin class selection
-  * Stop preferences
-  * Custom result sorting
+    * One-way flight searches
+    * Flexible departure times
+    * Multi-airline support
+    * Cabin class selection
+    * Stop preferences
+    * Custom result sorting
 
 * 💺 **Cabin Classes**
-  * Economy
-  * Premium Economy
-  * Business
-  * First
+    * Economy
+    * Premium Economy
+    * Business
+    * First
 
 * 🎯 **Smart Sorting**
-  * Price
-  * Duration
-  * Departure Time
-  * Arrival Time
+    * Price
+    * Duration
+    * Departure Time
+    * Arrival Time
 
 * 🛡️ **Built-in Protection**
-  * Rate limiting
-  * Automatic retries
-  * Comprehensive error handling
-  * Input validation
+    * Rate limiting
+    * Automatic retries
+    * Comprehensive error handling
+    * Input validation
 
 ## CLI Usage
 
@@ -161,27 +161,28 @@ fli dates JFK LHR \
 
 #### Flights Command (`fli flights`)
 
-| Option           | Description              | Example                |
-|------------------|--------------------------|------------------------|
-| `--time, -t`     | Departure time window    | `6-20`                 |
-| `--airlines, -a` | Airline IATA codes       | `BA KL`                |
-| `--class, -c`    | Cabin class              | `ECONOMY`, `BUSINESS`  |
-| `--stops, -s`    | Maximum stops            | `NON_STOP`, `ONE_STOP` |
-| `--sort, -o`     | Sort results by          | `CHEAPEST`, `DURATION` |
+| Option           | Description           | Example                |
+|------------------|-----------------------|------------------------|
+| `--time, -t`     | Departure time window | `6-20`                 |
+| `--airlines, -a` | Airline IATA codes    | `BA KL`                |
+| `--class, -c`    | Cabin class           | `ECONOMY`, `BUSINESS`  |
+| `--stops, -s`    | Maximum stops         | `NON_STOP`, `ONE_STOP` |
+| `--sort, -o`     | Sort results by       | `CHEAPEST`, `DURATION` |
 
 #### Dates Command (`fli dates`)
 
-| Option        | Description          | Example                |
-|---------------|----------------------|------------------------|
-| `--from`      | Start date           | `2025-01-01`           |
-| `--to`        | End date             | `2025-02-01`           |
-| `--class, -c` | Cabin class          | `ECONOMY`, `BUSINESS`  |
-| `--stops, -s` | Maximum stops        | `NON_STOP`, `ONE_STOP` |
-| `--[day]`     | Day filters          | `--monday`, `--friday` |
+| Option        | Description   | Example                |
+|---------------|---------------|------------------------|
+| `--from`      | Start date    | `2025-01-01`           |
+| `--to`        | End date      | `2025-02-01`           |
+| `--class, -c` | Cabin class   | `ECONOMY`, `BUSINESS`  |
+| `--stops, -s` | Maximum stops | `NON_STOP`, `ONE_STOP` |
+| `--[day]`     | Day filters   | `--monday`, `--friday` |
 
 ## MCP Server Integration
 
-Fli includes a Model Context Protocol (MCP) server that allows AI assistants like Claude to search for flights directly. This enables natural language flight search through conversation.
+Fli includes a Model Context Protocol (MCP) server that allows AI assistants like Claude to search for flights directly.
+This enables natural language flight search through conversation.
 
 ### Running the MCP Server
 
@@ -220,9 +221,9 @@ After adding this configuration:
 
 1. Restart Claude Desktop
 2. You can now ask Claude to search for flights naturally:
-   * "Find flights from JFK to LAX on December 25th"
-   * "What are the cheapest dates to fly from NYC to London in January?"
-   * "Search for business class flights from SFO to NRT with no stops"
+    * "Find flights from JFK to LAX on December 25th"
+    * "What are the cheapest dates to fly from NYC to London in January?"
+    * "Search for business class flights from SFO to NRT with no stops"
 
 ## Python API Usage
 
@@ -301,7 +302,8 @@ python examples/basic_one_way_search.py
 * `complex_round_trip_validation.py` - Advanced round-trip with validation
 * `advanced_date_search_validation.py` - Complex date search with filtering
 
-> 💡 **Tip**: Examples include automatic dependency checking and will show helpful installation instructions if dependencies are missing.
+> 💡 **Tip**: Examples include automatic dependency checking and will show helpful installation instructions if
+> dependencies are missing.
 
 ## Examples
 
@@ -352,6 +354,34 @@ make install-all  # Install all dependencies
 make test         # Run tests
 make lint         # Check code style
 make format       # Format code
+```
+
+### Docker Development
+
+```bash
+# Build the devcontainer
+docker build -t fli-dev -f .devcontainer/Dockerfile .
+
+# Run CI inside the container
+docker run --rm fli-dev make lint test-all
+
+# Or run lint and tests separately
+docker run --rm fli-dev make lint
+docker run --rm fli-dev make test-all
+```
+
+### Running CI Locally with act
+
+To run GitHub Actions locally, install [act](https://github.com/nektos/act):
+
+```bash
+brew install act
+
+# Run CI locally (lint + tests on Python 3.10-3.13)
+make ci
+
+# Or run CI inside Docker (no local act installation needed)
+make ci-docker
 ```
 
 ## Contributing

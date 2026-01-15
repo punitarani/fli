@@ -42,7 +42,7 @@ jobs:
           FORCE_COLOR: 1
 
       - name: Upload Test Results
-        if: always()
+        if: always() && !env.ACT
         uses: actions/upload-artifact@v6
         with:
           name: Test Results (Python ${{ matrix.python-version }})
