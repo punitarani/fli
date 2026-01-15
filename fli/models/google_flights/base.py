@@ -23,8 +23,10 @@ from fli.models.airport import Airport
 
 # Python 3.10 compatibility: StrEnum was added in Python 3.11
 if sys.version_info < (3, 11):
+
     class StrEnum(str, Enum):
         """String Enum for Python 3.10 compatibility."""
+
         pass
 
 
