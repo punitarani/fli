@@ -20,6 +20,7 @@ except ImportError:
         def __format__(self, format_spec):
             return str(self.value).__format__(format_spec)
 
+
 from pydantic import (
     BaseModel,
     NonNegativeFloat,
