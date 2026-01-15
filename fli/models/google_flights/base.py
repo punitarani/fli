@@ -5,7 +5,16 @@ Models are designed to match Google Flights' APIs while providing a clean python
 """
 
 from datetime import datetime
-from enum import Enum, StrEnum
+from enum import Enum
+
+try:
+    from enum import StrEnum
+except ImportError:
+    class StrEnum(str, Enum):
+        """Backport of StrEnum for Python < 3.11."""
+
+        def __str__(self):
+            return str(self.value)
 
 from pydantic import (
     BaseModel,
