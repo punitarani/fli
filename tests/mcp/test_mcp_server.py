@@ -1,10 +1,12 @@
 """Test MCP server functionality."""
 
+import pytest
 from datetime import datetime, timedelta
 
 from fli.mcp.server import (
     DateSearchParams,
     FlightSearchParams,
+    mcp,
     search_dates,
     search_flights,
 )
@@ -241,3 +243,65 @@ class TestMCPServer:
         assert params.cabin_class == "ECONOMY"  # default
         assert params.max_stops == "ANY"  # default
         assert params.sort_by_price is False  # default
+
+
+class TestMCPProtocol:
+    """Test MCP protocol methods to ensure tools are properly exposed."""
+
+    @pytest.mark.asyncio
+    async def test_list_tools_returns_expected_tools(self):
+        """Test that list_tools returns both search_flights and search_dates tools."""
+        tools = await mcp.list_tools()
+
+        tool_names = {tool.name for tool in tools}
+        assert "search_flights" in tool_names
+        assert "search_dates" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_list_tools_returns_tool_objects(self):
+        """Test that list_tools returns proper Tool objects with required fields."""
+        tools = await mcp.list_tools()
+
+        assert len(tools) >= 2
+
+        for tool in tools:
+            assert tool.name is not None
+            assert tool.description is not None
+            assert tool.inputSchema is not None
+
+    @pytest.mark.asyncio
+    async def test_search_flights_tool_has_correct_schema(self):
+        """Test that search_flights tool has the expected input schema."""
+        tools = await mcp.list_tools()
+
+        search_flights_tool = next(t for t in tools if t.name == "search_flights")
+
+        schema = search_flights_tool.inputSchema
+        assert "properties" in schema
+
+        required_params = {"origin", "destination", "departure_date"}
+        assert required_params.issubset(set(schema["properties"].keys()))
+
+    @pytest.mark.asyncio
+    async def test_search_dates_tool_has_correct_schema(self):
+        """Test that search_dates tool has the expected input schema."""
+        tools = await mcp.list_tools()
+
+        search_dates_tool = next(t for t in tools if t.name == "search_dates")
+
+        schema = search_dates_tool.inputSchema
+        assert "properties" in schema
+
+        required_params = {"origin", "destination", "start_date", "end_date"}
+        assert required_params.issubset(set(schema["properties"].keys()))
+
+    @pytest.mark.asyncio
+    async def test_tools_have_annotations(self):
+        """Test that tools have the expected annotations."""
+        tools = await mcp.list_tools()
+
+        for tool in tools:
+            if tool.name in {"search_flights", "search_dates"}:
+                assert tool.annotations is not None
+                assert tool.annotations.readOnlyHint is True
+                assert tool.annotations.idempotentHint is True
