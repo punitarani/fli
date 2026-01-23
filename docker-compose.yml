@@ -1,0 +1,21 @@
+# Docker Compose for Fli MCP Server
+# Usage: docker compose up -d
+# MCP endpoint: http://localhost:8000/mcp/
+
+services:
+  fli-mcp:
+    image: ashayc/fli-mcp:latest
+    # To build locally instead of using pre-built image, comment out 'image' and uncomment 'build':
+    # build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      # Optional MCP server configuration:
+      # - FLI_MCP_DEFAULT_PASSENGERS=1
+      # - FLI_MCP_DEFAULT_CURRENCY=USD
+      # - FLI_MCP_DEFAULT_CABIN_CLASS=ECONOMY
+      # - FLI_MCP_DEFAULT_SORT_BY=CHEAPEST
+      # - FLI_MCP_MAX_RESULTS=10
+    restart: unless-stopped

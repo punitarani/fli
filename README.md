@@ -370,6 +370,22 @@ docker run --rm fli-dev make lint
 docker run --rm fli-dev make test-all
 ```
 
+### Running MCP Server with Docker
+
+```bash
+# Using Docker Compose (recommended)
+docker compose up -d
+
+# Or run directly with docker
+docker run -d -p 8000:8000 ashayc/fli-mcp:latest
+
+# Or build and run locally
+docker build -t fli-mcp .
+docker run -d -p 8000:8000 fli-mcp
+```
+
+The MCP server will be available at `http://localhost:8000/mcp/`
+
 ### Running CI Locally with act
 
 To run GitHub Actions locally, install [act](https://github.com/nektos/act):
