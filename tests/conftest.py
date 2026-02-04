@@ -4,7 +4,6 @@ import pytest
 def pytest_addoption(parser) -> None:
     """Add options to pytest."""
     parser.addoption("--fuzz", action="store_true", help="Run fuzz tests")
-    parser.addoption("--mcp", action="store_true", help="Run MCP tests")
     parser.addoption("--all", action="store_true", help="Run all tests")
 
 
@@ -18,10 +17,7 @@ def pytest_runtest_setup(item) -> None:
 
 def pytest_collection_modifyitems(config, items) -> None:
     """Modify collection based on custom flags."""
-    if config.getoption("--mcp"):
-        # Only keep MCP tests when --mcp flag is used
-        items[:] = [item for item in items if "mcp" in item.nodeid]
-    elif config.getoption("--fuzz"):
+    if config.getoption("--fuzz"):
         # Only keep fuzz tests when --fuzz flag is used (and not --all)
         if not config.getoption("--all"):
             items[:] = [item for item in items if item.get_closest_marker("fuzz")]
