@@ -13,6 +13,7 @@ from fli.models import (
     PriceLimit,
     SeatType,
     SortBy,
+    TicketType,
     TimeRestrictions,
 )
 
@@ -243,6 +244,137 @@ TEST_CASES = [
             2,
         ],
         "encoded": None,  # Dynamic date makes encoded string non-deterministic
+    },
+    {
+        "name": "Test 4: Exclude Basic Economy (TicketType.STANDARD)",
+        "search": FlightSearchFilters(
+            passenger_info=PassengerInfo(
+                adults=1,
+                children=0,
+                infants_in_seat=0,
+                infants_on_lap=0,
+            ),
+            flight_segments=[
+                FlightSegment(
+                    departure_airport=[[Airport.DTW, 0]],
+                    arrival_airport=[[Airport.MCO, 0]],
+                    time_restrictions=None,
+                    travel_date=TRAVEL_DATE,
+                )
+            ],
+            stops=MaxStops.NON_STOP,
+            seat_type=SeatType.ECONOMY,
+            ticket_type=TicketType.STANDARD,
+        ),
+        "formatted": [
+            [],
+            [
+                None,
+                None,
+                2,
+                None,
+                [],
+                1,
+                [1, 0, 0, 0],
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                [
+                    [
+                        [[["DTW", 0]]],
+                        [[["MCO", 0]]],
+                        None,
+                        1,
+                        None,
+                        None,
+                        TRAVEL_DATE,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        3,
+                    ]
+                ],
+                None,
+                None,
+                None,
+                1,
+                None, None, None, None, None, None, None, None, None, None,  # [18]-[27]
+                2,  # [28] ticket_type = STANDARD
+            ],
+            0,
+            0,
+            0,
+            2,
+        ],
+        "encoded": None,
+    },
+    {
+        "name": "Test 5: TicketType.ANY (default, no extra fields)",
+        "search": FlightSearchFilters(
+            passenger_info=PassengerInfo(adults=1),
+            flight_segments=[
+                FlightSegment(
+                    departure_airport=[[Airport.DTW, 0]],
+                    arrival_airport=[[Airport.MCO, 0]],
+                    travel_date=TRAVEL_DATE,
+                )
+            ],
+            stops=MaxStops.NON_STOP,
+            ticket_type=TicketType.ANY,
+        ),
+        "formatted": [
+            [],
+            [
+                None,
+                None,
+                2,
+                None,
+                [],
+                1,
+                [1, 0, 0, 0],
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                [
+                    [
+                        [[["DTW", 0]]],
+                        [[["MCO", 0]]],
+                        None,
+                        1,
+                        None,
+                        None,
+                        TRAVEL_DATE,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        3,
+                    ]
+                ],
+                None,
+                None,
+                None,
+                1,
+            ],
+            0,
+            0,
+            0,
+            2,
+        ],
+        "encoded": None,
     },
 ]
 

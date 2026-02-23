@@ -17,6 +17,7 @@ from fli.models.google_flights.base import (
     PriceLimit,
     SeatType,
     SortBy,
+    TicketType,
     TripType,
 )
 
@@ -37,6 +38,7 @@ class FlightSearchFilters(BaseModel):
     max_duration: PositiveInt | None = None
     layover_restrictions: LayoverRestrictions | None = None
     sort_by: SortBy = SortBy.NONE
+    ticket_type: TicketType = TicketType.ANY
 
     def format(self) -> list:
         """Format filters into Google Flights API structure.
@@ -146,33 +148,42 @@ class FlightSearchFilters(BaseModel):
             formatted_segments.append(segment_formatted)
 
         # Create the main filters structure
+        inner_filters = [
+            None,  # [0] placeholder
+            None,  # [1] placeholder
+            serialize(self.trip_type.value),  # [2]
+            None,  # [3] placeholder
+            [],  # [4] empty array
+            serialize(self.seat_type.value),  # [5]
+            [  # [6] passengers
+                self.passenger_info.adults,
+                self.passenger_info.children,
+                self.passenger_info.infants_on_lap,
+                self.passenger_info.infants_in_seat,
+            ],
+            [None, self.price_limit.max_price] if self.price_limit else None,  # [7]
+            None,  # [8] placeholder
+            None,  # [9] placeholder
+            None,  # [10] placeholder
+            None,  # [11] placeholder
+            None,  # [12] placeholder
+            formatted_segments,  # [13]
+            None,  # [14] placeholder
+            None,  # [15] placeholder
+            None,  # [16] placeholder
+            1,  # [17] placeholder (hardcoded to 1)
+        ]
+
+        # Ticket type filter at position [28]
+        # Only extend the array when filtering (STANDARD excludes Basic Economy)
+        if self.ticket_type != TicketType.ANY:
+            while len(inner_filters) <= 28:
+                inner_filters.append(None)
+            inner_filters[28] = serialize(self.ticket_type.value)
+
         filters = [
             [],  # empty array at start
-            [
-                None,  # placeholder
-                None,  # placeholder
-                serialize(self.trip_type.value),
-                None,  # placeholder
-                [],  # empty array
-                serialize(self.seat_type.value),
-                [
-                    self.passenger_info.adults,
-                    self.passenger_info.children,
-                    self.passenger_info.infants_on_lap,
-                    self.passenger_info.infants_in_seat,
-                ],
-                [None, self.price_limit.max_price] if self.price_limit else None,
-                None,  # placeholder
-                None,  # placeholder
-                None,  # placeholder
-                None,  # placeholder
-                None,  # placeholder
-                formatted_segments,
-                None,  # placeholder
-                None,  # placeholder
-                None,  # placeholder
-                1,  # placeholder (hardcoded to 1)
-            ],
+            inner_filters,
             serialize(self.sort_by.value),
             0,  # constant
             0,  # constant

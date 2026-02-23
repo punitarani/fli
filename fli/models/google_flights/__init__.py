@@ -8,6 +8,7 @@ from .base import (
     PriceLimit,
     SeatType,
     SortBy,
+    TicketType,
     TimeRestrictions,
     TripType,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "PriceLimit",
     "SeatType",
     "SortBy",
+    "TicketType",
     "TimeRestrictions",
     "TripType",
 ]

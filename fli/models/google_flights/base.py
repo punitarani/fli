@@ -30,6 +30,17 @@ class SeatType(Enum):
     FIRST = 4
 
 
+class TicketType(Enum):
+    """Ticket type filter for flight search.
+
+    Controls whether Basic Economy fares are included in results.
+    Corresponds to the "Ticket type" dropdown on Google Flights.
+    """
+
+    ANY = 1  # Includes all fare types (Basic Economy + Standard)
+    STANDARD = 2  # Excludes Basic Economy fares
+
+
 class SortBy(Enum):
     """Available sorting options for flight results."""
 
