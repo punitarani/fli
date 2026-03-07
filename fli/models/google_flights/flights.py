@@ -176,10 +176,12 @@ class FlightSearchFilters(BaseModel):
 
         # Ticket type filter at position [28]
         # Only extend the array when filtering (STANDARD excludes Basic Economy)
+        TICKET_TYPE_INDEX = 28
         if self.ticket_type != TicketType.ANY:
-            while len(inner_filters) <= 28:
-                inner_filters.append(None)
-            inner_filters[28] = serialize(self.ticket_type.value)
+            padding = TICKET_TYPE_INDEX + 1 - len(inner_filters)
+            if padding > 0:
+                inner_filters.extend([None] * padding)
+            inner_filters[TICKET_TYPE_INDEX] = serialize(self.ticket_type.value)
 
         filters = [
             [],  # empty array at start
