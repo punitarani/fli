@@ -305,7 +305,16 @@ TEST_CASES = [
                 None,
                 None,
                 1,
-                None, None, None, None, None, None, None, None, None, None,  # [18]-[27]
+                None,  # [18]
+                None,  # [19]
+                None,  # [20]
+                None,  # [21]
+                None,  # [22]
+                None,  # [23]
+                None,  # [24]
+                None,  # [25]
+                None,  # [26]
+                None,  # [27]
                 2,  # [28] ticket_type = STANDARD
             ],
             0,
