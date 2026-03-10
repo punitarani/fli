@@ -184,9 +184,9 @@ def display_flight_results(flights: list):
                 segments.add_row(
                     airline_flight,
                     format_airport(leg.departure_airport),
-                    leg.departure_datetime.strftime("%H:%M %b %d"),
+                    leg.departure_datetime.strftime("%H:%M %d-%b"),
                     format_airport(leg.arrival_airport),
-                    leg.arrival_datetime.strftime("%H:%M %b %d"),
+                    leg.arrival_datetime.strftime("%H:%M %d-%b"),
                 )
             all_segments.extend([segments, Text("")])
 
