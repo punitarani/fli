@@ -180,7 +180,7 @@ def display_flight_results(flights: list):
             segments.add_column("Arrive", style="green", no_wrap=True)
 
             for leg in flight.legs:
-                airline_flight = f"{leg.airline.value} {leg.flight_number}"
+                airline_flight = f"{leg.airline.name} {leg.flight_number}"
                 segments.add_row(
                     airline_flight,
                     format_airport(leg.departure_airport),
