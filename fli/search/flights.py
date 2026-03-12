@@ -75,25 +75,34 @@ class SearchFlights:
             ]
             flights = [self._parse_flights_data(flight) for flight in flights_data]
 
-            if (
-                filters.trip_type == TripType.ONE_WAY
-                or filters.flight_segments[0].selected_flight is not None
-            ):
+            if filters.trip_type == TripType.ONE_WAY:
                 return flights
 
-            # Get the return flights if round-trip
-            flight_pairs = []
-            # Call the search again with the return flight data
-            for selected_flight in flights[:top_n]:
-                selected_flight_filters = deepcopy(filters)
-                selected_flight_filters.flight_segments[0].selected_flight = selected_flight
-                return_flights = self.search(selected_flight_filters, top_n=top_n)
-                if return_flights is not None:
-                    flight_pairs.extend(
-                        (selected_flight, return_flight) for return_flight in return_flights
-                    )
+            # For round-trip and multi-city, iteratively select each leg
+            # and fetch the next leg's options with combined pricing.
+            num_segments = len(filters.flight_segments)
+            selected_count = sum(
+                1 for s in filters.flight_segments if s.selected_flight is not None
+            )
 
-            return flight_pairs
+            # If all previous segments are selected, we're on the last leg
+            if selected_count >= num_segments - 1:
+                return flights
+
+            # Select each flight option and fetch the next leg
+            flight_combos = []
+            for selected_flight in flights[:top_n]:
+                next_filters = deepcopy(filters)
+                next_filters.flight_segments[selected_count].selected_flight = selected_flight
+                next_results = self.search(next_filters, top_n=top_n)
+                if next_results is not None:
+                    for next_result in next_results:
+                        if isinstance(next_result, tuple):
+                            flight_combos.append((selected_flight,) + next_result)
+                        else:
+                            flight_combos.append((selected_flight, next_result))
+
+            return flight_combos
 
         except Exception as e:
             raise Exception(f"Search failed: {str(e)}") from e

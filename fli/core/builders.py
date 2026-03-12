@@ -113,6 +113,33 @@ def build_flight_segments(
     return segments, trip_type
 
 
+def build_multi_city_segments(
+    legs: list[tuple[Airport, Airport, str]],
+    time_restrictions: TimeRestrictions | None = None,
+) -> tuple[list[FlightSegment], TripType]:
+    """Build flight segments for a multi-city search.
+
+    Args:
+        legs: List of (origin, destination, date) tuples for each leg
+        time_restrictions: Time restrictions to apply to all segments
+
+    Returns:
+        Tuple of (list of FlightSegment objects, TripType.MULTI_CITY)
+
+    """
+    segments = [
+        FlightSegment(
+            departure_airport=[[origin, 0]],
+            arrival_airport=[[destination, 0]],
+            travel_date=date,
+            time_restrictions=time_restrictions,
+        )
+        for origin, destination, date in legs
+    ]
+
+    return segments, TripType.MULTI_CITY
+
+
 def build_date_search_segments(
     origin: Airport,
     destination: Airport,
