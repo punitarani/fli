@@ -4283,7 +4283,7 @@ class Airport(Enum):
     KTF = "Takaka"
     KTG = "Ketapang Airport"
     KTH = "SPB"
-    KTI = "Kratie"
+    KTI = "Techo International Airport"  # Phnom Penh, Cambodia — opened Sep 2025, replaced PNH
     KTJ = "Kichwa Tembo Airport"
     KTK = "Kanua"
     KTL = "Kitale Airport"
@@ -7171,6 +7171,7 @@ class Airport(Enum):
     SAF = "Santa Fe"
     SAG = "Shirdi"
     SAH = "Sana'a International Airport"
+    SAI = "Siem Reap-Angkor International Airport"  # Siem Reap, Cambodia — opened Oct 2023, replaced REP
     SAK = "Saudarkrokur"
     SAL = "El Salvador International Airport"
     SAM = "Salamo"
