@@ -7171,7 +7171,7 @@ class Airport(Enum):
     SAF = "Santa Fe"
     SAG = "Shirdi"
     SAH = "Sana'a International Airport"
-    SAI = "Siem Reap-Angkor International Airport"  # Siem Reap, Cambodia — opened Oct 2023, replaced REP
+    SAI = "Siem Reap-Angkor International Airport"
     SAK = "Saudarkrokur"
     SAL = "El Salvador International Airport"
     SAM = "Salamo"
