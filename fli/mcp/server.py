@@ -151,7 +151,7 @@ class FliMCP(FastMCP):
 
     async def list_tools(self) -> list[Tool]:
         """List all available tools with annotations."""
-        tools = self._tool_manager.list_tools()
+        tools_dict = await self._tool_manager.get_tools()
         return [
             Tool(
                 name=info.name,
@@ -159,7 +159,7 @@ class FliMCP(FastMCP):
                 inputSchema=info.parameters,
                 annotations=self._tool_annotations.get(info.name),
             )
-            for info in tools
+            for info in tools_dict.values()
         ]
 
     def add_prompt(
@@ -298,7 +298,7 @@ def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[s
     if is_round_trip and isinstance(flight, tuple):
         outbound, return_flight = flight
         return {
-            "price": outbound.price + return_flight.price,
+            "price": outbound.price,  # Google Flights already returns the combined RT price on the outbound leg
             "currency": CONFIG.default_currency,
             "legs": [
                 *[_serialize_flight_leg(leg) for leg in outbound.legs],
