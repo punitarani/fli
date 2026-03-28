@@ -40,7 +40,7 @@ def generate_airport_enum():
 
     # Read airport entries from CSV
     try:
-        with open(airport_csv_path, encoding="utf-8") as csv_file:
+        with open(airport_csv_path, encoding="utf-8", newline="") as csv_file:
             reader = csv.DictReader(csv_file)
             entries = [(row["Code"].strip().upper(), row["Name"].strip()) for row in reader]
     except (KeyError, csv.Error) as e:
@@ -50,16 +50,25 @@ def generate_airport_enum():
     airport_enum_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Write the Enum class to the output file
+    written = 0
     with open(airport_enum_path, "w", encoding="utf-8") as output_file:
-        output_file.write("from enum import Enum\n\n")
+        output_file.write("from enum import Enum\n\n\n")
         output_file.write("class Airport(Enum):\n")
+        output_file.write('    """Airport IATA codes.\n\n')
+        output_file.write("    This is auto-generated from data/airports.csv.\n")
+        output_file.write('    """\n\n')
 
         for code, name in entries:
             # Sanitize enum key to ensure valid Python identifier
             sanitized_code = "".join(c if c.isalnum() else "_" for c in code)
-            output_file.write(f'    {sanitized_code} = "{name}"\n')
+            if '"' in name:
+                output_file.write(f"    {sanitized_code} = '{name}'\n")
+            else:
+                output_file.write(f'    {sanitized_code} = "{name}"\n')
+            written += 1
 
-    print(f"Generated {len(entries)} enums in {airport_enum_path}")
+    assert written == len(entries), f"Wrote {written} enums but expected {len(entries)}"
+    print(f"Generated {written} enums in {airport_enum_path}")
 
 
 def generate_airline_enum():
@@ -83,7 +92,7 @@ def generate_airline_enum():
 
     # Read airline entries from CSV
     try:
-        with open(airline_csv_path, encoding="utf-8") as csv_file:
+        with open(airline_csv_path, encoding="utf-8", newline="") as csv_file:
             reader = csv.DictReader(csv_file)
             entries = [(row["IATA"].strip().upper(), row["Airline"].strip()) for row in reader]
     except (KeyError, csv.Error) as e:
@@ -93,19 +102,27 @@ def generate_airline_enum():
     airline_enum_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Write the Enum class to the output file
+    written = 0
     with open(airline_enum_path, "w", encoding="utf-8") as output_file:
-        output_file.write("from enum import Enum\n\n")
+        output_file.write("from enum import Enum\n\n\n")
         output_file.write("class Airline(Enum):\n")
+        output_file.write('    """Airline IATA codes.\n\n')
+        output_file.write("    This is auto-generated from data/airlines.csv.\n")
+        output_file.write('    """\n\n')
 
         for code, name in entries:
             # Sanitize enum key to ensure valid Python identifier
             sanitized_code = "".join(c if c.isalnum() else "_" for c in code)
             if sanitized_code[0].isdigit():
-                output_file.write(f'    _{sanitized_code} = "{name}"\n')
+                sanitized_code = f"_{sanitized_code}"
+            if '"' in name:
+                output_file.write(f"    {sanitized_code} = '{name}'\n")
             else:
                 output_file.write(f'    {sanitized_code} = "{name}"\n')
+            written += 1
 
-    print(f"Generated {len(entries)} enums in {airline_enum_path}")
+    assert written == len(entries), f"Wrote {written} enums but expected {len(entries)}"
+    print(f"Generated {written} enums in {airline_enum_path}")
 
 
 if __name__ == "__main__":
