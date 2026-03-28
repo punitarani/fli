@@ -60,7 +60,8 @@ def generate_airport_enum():
         for code, name in entries:
             # Sanitize enum key to ensure valid Python identifier
             sanitized_code = "".join(c if c.isalnum() else "_" for c in code)
-            output_file.write(f'    {sanitized_code} = "{name}"\n')
+            escaped_name = name.replace('"', '\\"')
+            output_file.write(f'    {sanitized_code} = "{escaped_name}"\n')
 
     print(f"Generated {len(entries)} enums in {airport_enum_path}")
 
@@ -106,10 +107,11 @@ def generate_airline_enum():
         for code, name in entries:
             # Sanitize enum key to ensure valid Python identifier
             sanitized_code = "".join(c if c.isalnum() else "_" for c in code)
+            escaped_name = name.replace('"', '\\"')
             if sanitized_code[0].isdigit():
-                output_file.write(f'    _{sanitized_code} = "{name}"\n')
+                output_file.write(f'    _{sanitized_code} = "{escaped_name}"\n')
             else:
-                output_file.write(f'    {sanitized_code} = "{name}"\n')
+                output_file.write(f'    {sanitized_code} = "{escaped_name}"\n')
 
     print(f"Generated {len(entries)} enums in {airline_enum_path}")
 
