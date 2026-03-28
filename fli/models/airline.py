@@ -2,7 +2,7 @@ from enum import Enum
 
 
 class Airline(Enum):
-    """Airline codes for most airlines in the world.
+    """Airline IATA codes.
 
     This is auto-generated from data/airlines.csv.
     """

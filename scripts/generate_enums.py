@@ -51,8 +51,11 @@ def generate_airport_enum():
 
     # Write the Enum class to the output file
     with open(airport_enum_path, "w", encoding="utf-8") as output_file:
-        output_file.write("from enum import Enum\n\n")
+        output_file.write("from enum import Enum\n\n\n")
         output_file.write("class Airport(Enum):\n")
+        output_file.write('    """Airport codes for most airports in the world.\n\n')
+        output_file.write("    This is auto-generated from data/airports.csv.\n")
+        output_file.write('    """\n\n')
 
         for code, name in entries:
             # Sanitize enum key to ensure valid Python identifier
@@ -94,8 +97,11 @@ def generate_airline_enum():
 
     # Write the Enum class to the output file
     with open(airline_enum_path, "w", encoding="utf-8") as output_file:
-        output_file.write("from enum import Enum\n\n")
+        output_file.write("from enum import Enum\n\n\n")
         output_file.write("class Airline(Enum):\n")
+        output_file.write('    """Airline IATA codes.\n\n')
+        output_file.write("    This is auto-generated from data/airlines.csv.\n")
+        output_file.write('    """\n\n')
 
         for code, name in entries:
             # Sanitize enum key to ensure valid Python identifier
