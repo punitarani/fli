@@ -5079,7 +5079,7 @@ class Airport(Enum):
     PAN = "Pattani Airport"
     PAO = "Palo Alto Airport"
     PAP = "Toussaint Louverture International Airport"
-    PAQ = "Warren \"Bud\" Woods Palmer Municipal Airport"
+    PAQ = 'Warren "Bud" Woods Palmer Municipal Airport'
     PAS = "Paros Airport"
     PAT = "Lok Nayak Jayaprakash Airport"
     PAU = "Pauk Airport"
