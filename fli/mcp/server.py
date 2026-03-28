@@ -151,7 +151,7 @@ class FliMCP(FastMCP):
 
     async def list_tools(self) -> list[Tool]:
         """List all available tools with annotations."""
-        tools = self._tool_manager.list_tools()
+        tools = list((await self._tool_manager.get_tools()).values())
         return [
             Tool(
                 name=info.name,
