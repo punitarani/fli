@@ -2,7 +2,7 @@ from enum import Enum
 
 
 class Airport(Enum):
-    """Airport codes for most airports in the world.
+    """Airport IATA codes.
 
     This is auto-generated from data/airports.csv.
     """
