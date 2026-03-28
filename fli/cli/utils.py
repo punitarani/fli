@@ -1,7 +1,5 @@
 """CLI utility functions for display and validation."""
 
-from datetime import datetime
-
 import plotext as plt
 import typer
 from click import Context, Parameter
@@ -13,6 +11,7 @@ from rich.text import Text
 
 from fli.cli.console import console
 from fli.cli.enums import DayOfWeek
+from fli.core.builders import normalize_date
 from fli.core.parsers import ParseError
 from fli.core.parsers import parse_airlines as core_parse_airlines
 from fli.core.parsers import parse_max_stops as core_parse_max_stops
@@ -25,8 +24,7 @@ def validate_date(ctx: Context, param: Parameter, value: str) -> str | None:
         return None
 
     try:
-        parsed = datetime.strptime(value, "%Y-%m-%d")
-        return parsed.strftime("%Y-%m-%d")
+        return normalize_date(value)
     except ValueError as e:
         raise typer.BadParameter("Date must be in YYYY-MM-DD format") from e
 

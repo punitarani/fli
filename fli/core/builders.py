@@ -9,6 +9,22 @@ from datetime import datetime, timedelta
 from fli.models import Airport, FlightSegment, TimeRestrictions, TripType
 
 
+def normalize_date(date_str: str) -> str:
+    """Normalize a date string to zero-padded YYYY-MM-DD format.
+
+    Args:
+        date_str: Date string in YYYY-MM-DD format (e.g., '2026-4-2' or '2026-04-02')
+
+    Returns:
+        Zero-padded date string (e.g., '2026-04-02')
+
+    Raises:
+        ValueError: If the date string is not a valid date
+
+    """
+    return datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y-%m-%d")
+
+
 def build_time_restrictions(
     departure_window: str | None = None,
     arrival_window: str | None = None,
@@ -69,6 +85,8 @@ def build_flight_segments(
         Tuple of (list of FlightSegment objects, TripType)
 
     """
+    departure_date = normalize_date(departure_date)
+
     segments = [
         FlightSegment(
             departure_airport=[[origin, 0]],
@@ -81,6 +99,7 @@ def build_flight_segments(
     trip_type = TripType.ONE_WAY
 
     if return_date:
+        return_date = normalize_date(return_date)
         trip_type = TripType.ROUND_TRIP
         segments.append(
             FlightSegment(
@@ -116,6 +135,8 @@ def build_date_search_segments(
         Tuple of (list of FlightSegment objects, TripType)
 
     """
+    start_date = normalize_date(start_date)
+
     segments = [
         FlightSegment(
             departure_airport=[[origin, 0]],
