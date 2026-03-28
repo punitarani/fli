@@ -38,6 +38,13 @@ def test_validate_date_valid(mock_context, mock_param):
     assert result == date
 
 
+def test_validate_date_single_digit(mock_context, mock_param):
+    """Test date validation normalizes single-digit month and day."""
+    assert validate_date(mock_context, mock_param, "2026-4-2") == "2026-04-02"
+    assert validate_date(mock_context, mock_param, "2026-12-5") == "2026-12-05"
+    assert validate_date(mock_context, mock_param, "2026-1-15") == "2026-01-15"
+
+
 def test_validate_date_invalid(mock_context, mock_param):
     """Test date validation with invalid date."""
     with pytest.raises(BadParameter):

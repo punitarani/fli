@@ -25,8 +25,8 @@ def validate_date(ctx: Context, param: Parameter, value: str) -> str | None:
         return None
 
     try:
-        datetime.strptime(value, "%Y-%m-%d")
-        return value
+        parsed = datetime.strptime(value, "%Y-%m-%d")
+        return parsed.strftime("%Y-%m-%d")
     except ValueError as e:
         raise typer.BadParameter("Date must be in YYYY-MM-DD format") from e
 
