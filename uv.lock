@@ -600,7 +600,7 @@ dev = [
 requires-dist = [
     { name = "curl-cffi", specifier = ">=0.7.4" },
     { name = "fastapi", specifier = ">=0.115.6" },
-    { name = "fastmcp", specifier = ">=0.1.0" },
+    { name = "fastmcp", specifier = ">=2.0.0,<3.0.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "mkdocs-material", extras = ["imaging"], marker = "extra == 'dev'", specifier = ">=9.5.49" },
     { name = "mkdocstrings", extras = ["python"], marker = "extra == 'dev'", specifier = ">=0.27.0" },

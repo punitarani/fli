@@ -5,14 +5,11 @@ Covers:
   2. Round-trip price doubling (Google Flights returns combined RT price on outbound leg)
 """
 
-import asyncio
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from fli.mcp.server import FliMCP, _serialize_flight_result
-
 
 # ---------------------------------------------------------------------------
 # Bug 1: list_tools — FastMCP 2.x compatibility
@@ -48,7 +45,9 @@ class TestListTools:
 
         server._tool_manager.get_tools = AsyncMock(return_value={})
         # If the old sync path is called it would raise AttributeError on FastMCP 2.x
-        server._tool_manager.list_tools = MagicMock(side_effect=AttributeError("list_tools removed in FastMCP 2.x"))
+        server._tool_manager.list_tools = MagicMock(
+            side_effect=AttributeError("list_tools removed in FastMCP 2.x")
+        )
 
         # Should not raise
         tools = await server.list_tools()
@@ -109,7 +108,7 @@ class TestSerializeFlightResult:
 
         result = _serialize_flight_result((outbound, return_flight), is_round_trip=True)
 
-        assert result["price"] != 600.0, "Price must not be outbound + return (was doubled before fix)"
+        assert result["price"] != 600.0, "Price must not be doubled"
         assert result["price"] == 300.0
 
     def test_round_trip_includes_legs_from_both_directions(self):
