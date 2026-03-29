@@ -224,7 +224,7 @@ def flights(
         bool,
         typer.Option(
             "--exclude-basic",
-            "-eb",
+            "-e",
             help="Exclude basic economy fares",
         ),
     ] = False,
