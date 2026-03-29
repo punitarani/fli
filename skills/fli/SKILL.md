@@ -105,7 +105,7 @@ Do not tell users to run `pipx install fli`.
 Use:
 
 ```bash
-fli flights JFK LAX 2025-10-25
+fli flights JFK LAX 2026-10-25
 ```
 
 ### Cheapest-date search
@@ -113,7 +113,7 @@ fli flights JFK LAX 2025-10-25
 Use:
 
 ```bash
-fli dates JFK LAX --from 2025-01-01 --to 2025-01-31
+fli dates JFK LAX --from 2026-01-01 --to 2026-01-31
 ```
 
 ### Common filters
@@ -121,7 +121,7 @@ fli dates JFK LAX --from 2025-01-01 --to 2025-01-31
 Use filters like these when the user asks for them:
 
 ```bash
-fli flights JFK LHR 2025-10-25 \
+fli flights JFK LHR 2026-10-25 \
   --time 6-20 \
   --airlines BA KL \
   --class BUSINESS \
