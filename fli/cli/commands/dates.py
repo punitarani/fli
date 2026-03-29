@@ -239,10 +239,7 @@ def dates(
         # Build time restrictions from tuple
         time_restrictions = None
         if departure_window:
-            if isinstance(departure_window, tuple):
-                start_hour, end_hour = departure_window
-            else:
-                start_hour, end_hour = map(int, departure_window.split("-"))
+            start_hour, end_hour = departure_window
             time_restrictions = TimeRestrictions(
                 earliest_departure=start_hour,
                 latest_departure=end_hour,
@@ -325,7 +322,11 @@ def dates(
                         "is_round_trip": is_round_trip,
                         "cabin_class": cabin_class,
                         "max_stops": max_stops,
-                        "departure_window": departure_window,
+                        "departure_window": (
+                            f"{departure_window[0]}-{departure_window[1]}"
+                            if isinstance(departure_window, tuple)
+                            else departure_window
+                        ),
                         "airlines": airlines,
                         "sort_by_price": sort_by_price,
                         "days": [
@@ -364,7 +365,11 @@ def dates(
                         "is_round_trip": is_round_trip,
                         "cabin_class": cabin_class,
                         "max_stops": max_stops,
-                        "departure_window": departure_window,
+                        "departure_window": (
+                            f"{departure_window[0]}-{departure_window[1]}"
+                            if isinstance(departure_window, tuple)
+                            else departure_window
+                        ),
                         "airlines": airlines,
                         "sort_by_price": sort_by_price,
                         "days": [
