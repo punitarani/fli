@@ -1,6 +1,5 @@
 from fli.core import extract_currency_from_price_token, format_price, format_price_axis_label
 
-
 SHOPPING_TOKEN = (
     "CjRIQktCNmV1UjNqNjhBR043X0FCRy0tLS0tLS0tLS12dGpkN0FBQUFBR25JcWZNS2pGTTBBEgZV"
     "QTIyMDkaCgjcWxACGgNVU0Q4HHDcWw=="
