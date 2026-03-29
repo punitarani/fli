@@ -11,6 +11,7 @@ from rich.text import Text
 
 from fli.cli.console import console
 from fli.cli.enums import DayOfWeek
+from fli.core import format_price, format_price_axis_label
 from fli.core.builders import normalize_date
 from fli.core.parsers import ParseError
 from fli.core.parsers import parse_airlines as core_parse_airlines
@@ -151,7 +152,7 @@ def display_flight_results(flights: list):
 
         # Google Flights returns the full round-trip price on the outbound leg
         total_price = flight_segments[0].price
-        table.add_row("Total Price", f"${total_price:,.2f}")
+        table.add_row("Total Price", format_price(total_price, flight_segments[0].currency))
 
         total_duration = sum(flight.duration for flight in flight_segments)
         table.add_row("Total Duration", format_duration(total_duration))
@@ -221,7 +222,7 @@ def display_date_results(dates: list, trip_type: TripType):
     plt.plot(prices, marker="braille")
     plt.title("Price Trend")
     plt.xlabel("Date")
-    plt.ylabel("Price ($)")
+    plt.ylabel(format_price_axis_label(date.currency for date in sorted_dates))
 
     # Set x-axis labels (show subset if too many dates)
     if len(date_labels) <= 10:
@@ -252,7 +253,7 @@ def display_date_results(dates: list, trip_type: TripType):
             table.add_row(
                 date_price.date[0].strftime("%Y-%m-%d"),
                 date_price.date[0].strftime("%A"),
-                f"${date_price.price:,.2f}",
+                format_price(date_price.price, date_price.currency),
             )
         else:
             table.add_row(
@@ -260,7 +261,7 @@ def display_date_results(dates: list, trip_type: TripType):
                 date_price.date[0].strftime("%A"),
                 date_price.date[1].strftime("%Y-%m-%d"),
                 date_price.date[1].strftime("%A"),
-                f"${date_price.price:,.2f}",
+                format_price(date_price.price, date_price.currency),
             )
 
     console.print(table)

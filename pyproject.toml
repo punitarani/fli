@@ -23,6 +23,7 @@ classifiers = [
 ]
 
 dependencies = [
+    "babel>=2.17.0",
     "curl-cffi>=0.7.4",
     "fastapi>=0.115.6",
     "fastmcp>=2.0.0,<3.0.0",

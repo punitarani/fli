@@ -5,6 +5,7 @@ the CLI and MCP interfaces.
 """
 
 from .builders import build_date_search_segments, build_flight_segments, build_time_restrictions
+from .currency import extract_currency_from_price_token, format_price, format_price_axis_label
 from .parsers import (
     parse_airlines,
     parse_cabin_class,
@@ -28,4 +29,8 @@ __all__ = [
     "build_date_search_segments",
     "build_flight_segments",
     "build_time_restrictions",
+    # Currency
+    "extract_currency_from_price_token",
+    "format_price",
+    "format_price_axis_label",
 ]

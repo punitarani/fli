@@ -295,3 +295,27 @@ class TestParsePrice:
         """Test _parse_price returns 0.0 when inner list is None."""
         data = [None, [None]]
         assert SearchFlights._parse_price(data) == 0.0
+
+    def test_parse_currency_from_live_price_token(self):
+        """_parse_currency should decode the returned currency from a live token sample."""
+        data = [
+            None,
+            [
+                [None, 118],
+                "CjRIQktCNmV1UjNqNjhBR043X0FCRy0tLS0tLS0tLS12dGpkN0FBQUFBR25JcWZNS2pGTTBBEgZV"
+                "QTIyMDkaCgjcWxACGgNVU0Q4HHDcWw==",
+            ],
+        ]
+        assert SearchFlights._parse_currency(data) == "USD"
+
+    def test_parse_price_info_combines_price_and_currency(self):
+        """_parse_price_info should preserve price and extract the returned currency."""
+        data = [
+            None,
+            [
+                [None, 118],
+                "CjRIQktCNmV1UjNqNjhBR043X0FCRy0tLS0tLS0tLS12dGpkN0FBQUFBR25JcWZNS2pGTTBBEgZV"
+                "QTIyMDkaCgjcWxACGgNVU0Q4HHDcWw==",
+            ],
+        ]
+        assert SearchFlights._parse_price_info(data) == (118.0, "USD")
