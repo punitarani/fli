@@ -28,6 +28,7 @@ flights and analyze pricing data.
 * Various cabin classes
 * Stop preferences
 * Custom result sorting
+* Experimental JSON CLI output for agents and tools like `jq`
 
 ### 💰 Price Analysis
 
@@ -61,6 +62,16 @@ fli-mcp-http
 See the [MCP Guide](guides/mcp.md) for Claude Desktop configuration.
 
 ### Basic Usage
+
+### CLI JSON Output
+
+!!! warning "Experimental"
+    The `--format json` CLI output is experimental. The schema is intended for agents and tools such as `jq`, but may evolve in future releases.
+
+```bash
+fli flights JFK LHR 2025-06-01 --format json
+fli dates JFK LHR --from 2025-06-01 --to 2025-06-30 --format json
+```
 
 ```python
 from datetime import datetime, timedelta

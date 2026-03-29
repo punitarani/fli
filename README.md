@@ -144,6 +144,14 @@ fli flights JFK LHR 2025-10-25 \
     --sort DURATION           # Sort by duration
 ```
 
+> ⚠️ **Experimental**
+> `--format json` is experimental. The JSON schema may change while the machine-readable CLI contract settles.
+>
+> ```bash
+> # Return machine-readable flight results
+> fli flights JFK LHR 2025-10-25 --format json
+> ```
+
 ### Find Cheapest Dates
 
 ```bash
@@ -157,6 +165,14 @@ fli dates JFK LHR \
     --monday --friday      # Only Mondays and Fridays
 ```
 
+> ⚠️ **Experimental**
+> `--format json` is experimental for date searches as well.
+>
+> ```bash
+> # Return machine-readable date search results
+> fli dates JFK LHR --from 2025-01-01 --to 2025-02-01 --format json
+> ```
+
 ### CLI Options
 
 #### Flights Command (`fli flights`)
@@ -168,6 +184,7 @@ fli dates JFK LHR \
 | `--class, -c`    | Cabin class           | `ECONOMY`, `BUSINESS`  |
 | `--stops, -s`    | Maximum stops         | `NON_STOP`, `ONE_STOP` |
 | `--sort, -o`     | Sort results by       | `CHEAPEST`, `DURATION` |
+| `--format`       | Output format         | `text`, `json`         |
 
 #### Dates Command (`fli dates`)
 
@@ -178,6 +195,7 @@ fli dates JFK LHR \
 | `--class, -c` | Cabin class   | `ECONOMY`, `BUSINESS`  |
 | `--stops, -s` | Maximum stops | `NON_STOP`, `ONE_STOP` |
 | `--[day]`     | Day filters   | `--monday`, `--friday` |
+| `--format`    | Output format | `text`, `json`         |
 
 ## MCP Server Integration
 
