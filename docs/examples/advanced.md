@@ -296,17 +296,16 @@ filters = FlightSearchFilters(
 search = SearchFlights()
 results = search.search(filters)
 
-# Process results - round trips return tuples of (outbound, return)
-for outbound, return_flight in results:
-    print(f"\nOutbound Flight (${outbound.price}):")
-    for leg in outbound.legs:
+for outbound_result, return_result in results:
+    print(f"\nOutbound Flight (${outbound_result.price}):")
+    for leg in outbound_result.legs:
         print(f"  Flight: {leg.airline.value} {leg.flight_number}")
         print(f"  From: {leg.departure_airport.value} at {leg.departure_datetime}")
         print(f"  To: {leg.arrival_airport.value} at {leg.arrival_datetime}")
         print(f"  Duration: {leg.duration} minutes")
 
     print(f"\nReturn Flight:")
-    for leg in return_flight.legs:
+    for leg in return_result.legs:
         print(f"  Flight: {leg.airline.value} {leg.flight_number}")
         print(f"  From: {leg.departure_airport.value} at {leg.departure_datetime}")
         print(f"  To: {leg.arrival_airport.value} at {leg.arrival_datetime}")
