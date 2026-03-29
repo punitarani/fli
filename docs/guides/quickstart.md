@@ -148,7 +148,7 @@ for outbound, return_flight in results:
         print(f"  {leg.airline.value} {leg.flight_number}")
         print(f"  {leg.departure_datetime} -> {leg.arrival_datetime}")
     
-    print(f"\nTotal Price: ${outbound.price + return_flight.price}")
+    print(f"\nTotal Price: ${outbound.price}")
 ```
 
 3. Date Range Search:

@@ -298,7 +298,8 @@ def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[s
     if is_round_trip and isinstance(flight, tuple):
         outbound, return_flight = flight
         return {
-            "price": outbound.price + return_flight.price,
+            # Google Flights returns the full round-trip price on the outbound leg
+            "price": outbound.price,
             "currency": CONFIG.default_currency,
             "legs": [
                 *[_serialize_flight_leg(leg) for leg in outbound.legs],

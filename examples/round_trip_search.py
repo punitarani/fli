@@ -60,7 +60,7 @@ def main():
             print(f"Departure: {leg.departure_datetime}")
             print(f"Arrival: {leg.arrival_datetime}")
 
-        print(f"\nTotal Price: ${outbound.price + return_flight.price}")
+        print(f"\nTotal Price: ${outbound.price}")
 
 
 if __name__ == "__main__":

@@ -105,7 +105,7 @@ def main():
 
     for i, (outbound, return_flight) in enumerate(results[:3], 1):  # Show first 3 results
         print(f"\n{'=' * 50}")
-        print(f"Option {i}: Total Price: ${outbound.price + return_flight.price}")
+        print(f"Option {i}: Total Price: ${outbound.price}")
 
         print("\n🛫 Outbound Flight:")
         for leg in outbound.legs:

@@ -1,11 +1,14 @@
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock
+from io import StringIO
+from unittest.mock import MagicMock, patch
 
 import pytest
+from rich.console import Console
 from typer import BadParameter
 
 from fli.cli.enums import DayOfWeek
 from fli.cli.utils import (
+    display_flight_results,
     filter_dates_by_days,
     filter_flights_by_airlines,
     filter_flights_by_time,
@@ -193,3 +196,66 @@ def test_filter_dates_by_days():
     # No day filters should return all dates
     result = filter_dates_by_days(dates, [], TripType.ONE_WAY)
     assert len(result) == 2
+
+
+# ---------------------------------------------------------------------------
+# display_flight_results — round-trip price must not be doubled
+# ---------------------------------------------------------------------------
+
+
+def _make_flight_result(price: float, airline=Airline.DL, flight_number="DL123") -> FlightResult:
+    """Create a FlightResult for testing display."""
+    now = datetime.now()
+    return FlightResult(
+        price=price,
+        duration=300,
+        stops=0,
+        legs=[
+            FlightLeg(
+                airline=airline,
+                flight_number=flight_number,
+                departure_airport=Airport.JFK,
+                arrival_airport=Airport.LAX,
+                departure_datetime=now,
+                arrival_datetime=now + timedelta(hours=5),
+                duration=300,
+            )
+        ],
+    )
+
+
+def _capture_display(flights: list) -> str:
+    """Run display_flight_results and capture the rendered text."""
+    buf = StringIO()
+    test_console = Console(file=buf, width=120, force_terminal=True)
+    with patch("fli.cli.utils.console", test_console):
+        display_flight_results(flights)
+    return buf.getvalue()
+
+
+def test_display_one_way_price():
+    """One-way flight should display the flight price as-is."""
+    output = _capture_display([_make_flight_result(price=159.0)])
+    assert "$159.00" in output
+
+
+def test_display_round_trip_price_not_doubled():
+    """Round-trip display must use outbound price only (Google returns full RT price per leg)."""
+    outbound = _make_flight_result(price=317.0, flight_number="DL100")
+    return_flight = _make_flight_result(price=317.0, airline=Airline.DL, flight_number="DL200")
+
+    output = _capture_display([(outbound, return_flight)])
+
+    assert "$317.00" in output
+    assert "$634.00" not in output
+
+
+def test_display_round_trip_price_asymmetric():
+    """When leg prices differ, total should be the outbound price, not the sum."""
+    outbound = _make_flight_result(price=400.0)
+    return_flight = _make_flight_result(price=350.0)
+
+    output = _capture_display([(outbound, return_flight)])
+
+    assert "$400.00" in output
+    assert "$750.00" not in output
