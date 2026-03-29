@@ -9,7 +9,7 @@ import json
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
 
 from fastmcp import FastMCP
@@ -20,7 +20,6 @@ from mcp.types import (
     Prompt,
     PromptArgument,
     PromptMessage,
-    Role,
     TextContent,
     Tool,
     ToolAnnotations,
@@ -627,7 +626,7 @@ def _build_search_prompt(args: dict[str, str]) -> list[PromptMessage]:
     """Create a helper prompt to guide flight searches."""
     origin = args.get("origin", "JFK").upper()
     destination = args.get("destination", "LHR").upper()
-    date = args.get("date") or datetime.utcnow().date().isoformat()
+    date = args.get("date") or datetime.now(timezone.utc).date().isoformat()
     prefer_non_stop = args.get("prefer_non_stop", "true").lower()
     max_stops_hint = "NON_STOP" if prefer_non_stop in {"true", "1", "yes"} else "ANY"
     text = (
@@ -636,7 +635,7 @@ def _build_search_prompt(args: dict[str, str]) -> list[PromptMessage]:
         f"Set `max_stops` to '{max_stops_hint}' and highlight the three most affordable options."
     )
     return [
-        PromptMessage(role=Role.USER, content=TextContent(type="text", text=text)),
+        PromptMessage(role="user", content=TextContent(type="text", text=text)),
     ]
 
 
@@ -644,10 +643,9 @@ def _build_budget_prompt(args: dict[str, str]) -> list[PromptMessage]:
     """Create a helper prompt to guide flexible date searches."""
     origin = args.get("origin", "SFO").upper()
     destination = args.get("destination", "NRT").upper()
-    start_date = (
-        args.get("start_date") or (datetime.utcnow().date() + timedelta(days=30)).isoformat()
-    )
-    end_date = args.get("end_date") or (datetime.utcnow().date() + timedelta(days=90)).isoformat()
+    today = datetime.now(timezone.utc).date()
+    start_date = args.get("start_date") or (today + timedelta(days=30)).isoformat()
+    end_date = args.get("end_date") or (today + timedelta(days=90)).isoformat()
     duration = args.get("duration", "7")
     text = (
         "Use the `search_dates` tool to find the lowest fares between "
@@ -655,7 +653,7 @@ def _build_budget_prompt(args: dict[str, str]) -> list[PromptMessage]:
         f"Set trip_duration to {duration} days and sort the results by price."
     )
     return [
-        PromptMessage(role=Role.USER, content=TextContent(type="text", text=text)),
+        PromptMessage(role="user", content=TextContent(type="text", text=text)),
     ]
 
 

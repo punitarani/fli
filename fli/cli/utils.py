@@ -161,7 +161,7 @@ def display_flight_results(flights: list):
         # Create segments tables for each direction
         all_segments = []
         for idx, flight in enumerate(flight_segments):
-            direction = "Outbound" if idx == 0 else "Return" if is_round_trip else ""
+            direction = "" if not is_round_trip else ("Outbound" if idx == 0 else "Return")
             segments = Table(
                 title=(f"{direction} Flight Segments" if direction else "Flight Segments"),
                 box=box.ROUNDED,
