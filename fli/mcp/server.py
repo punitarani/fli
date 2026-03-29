@@ -61,7 +61,7 @@ class FlightSearchConfig(BaseSettings):
         "USD",
         min_length=3,
         max_length=3,
-        description="Three-letter currency code returned with search results.",
+        description="Fallback currency code when Google does not expose one in results.",
     )
     default_cabin_class: str = Field(
         "ECONOMY",
@@ -744,7 +744,7 @@ def configuration_resource() -> str:
             "prefix": "FLI_MCP_",
             "variables": {
                 "FLI_MCP_DEFAULT_PASSENGERS": "Adjust the default passenger count.",
-                "FLI_MCP_DEFAULT_CURRENCY": "Override the currency code returned with results.",
+                "FLI_MCP_DEFAULT_CURRENCY": "Override the fallback currency code for results.",
                 "FLI_MCP_DEFAULT_CABIN_CLASS": "Set a default cabin class.",
                 "FLI_MCP_DEFAULT_SORT_BY": "Set the default result sorting strategy.",
                 "FLI_MCP_DEFAULT_DEPARTURE_WINDOW": "Provide a default departure window (HH-HH).",
