@@ -113,7 +113,8 @@ class FlightSearchFilters(BaseModel):
 
             # Selected flight (to fetch return/next-leg flights)
             selected_flights = None
-            if self.trip_type in (TripType.ROUND_TRIP, TripType.MULTI_CITY) and segment.selected_flight is not None:
+            is_multi_leg = self.trip_type in (TripType.ROUND_TRIP, TripType.MULTI_CITY)
+            if is_multi_leg and segment.selected_flight is not None:
                 selected_flights = [
                     [
                         serialize(leg.departure_airport.name),
