@@ -318,7 +318,9 @@ If a query fails:
 
 Use these docs for product-facing guidance:
 
-- introduction: `https://www.mintlify.com/punitarani/fli/introduction`
+- introduction: `https://punitarani-fli.mintlify.app/introduction`
+- installation: `https://punitarani-fli.mintlify.app/installation`
+- MCP setup: `https://punitarani-fli.mintlify.app/mcp/setup`
 - docs index: `https://punitarani-fli.mintlify.app/llms.txt`
 
 Use product docs for examples and onboarding. Use the actual installed command names when writing instructions.
