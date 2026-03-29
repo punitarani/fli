@@ -198,8 +198,8 @@ from datetime import datetime, timedelta
 future_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
 
 # Date ranges
-from_date = "2024-06-01"
-to_date = "2024-06-30"
+from_date = "2026-06-01"
+to_date = "2026-06-30"
 ```
 
 ### Passenger Configuration

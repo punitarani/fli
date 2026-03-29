@@ -41,7 +41,7 @@ filters = FlightSearchFilters(
         FlightSegment(
             departure_airport=[[Airport.JFK, 0]],
             arrival_airport=[[Airport.LHR, 0]],
-            travel_date="2024-06-01",
+            travel_date="2026-06-01",
         )
     ],
     seat_type=SeatType.BUSINESS,
@@ -75,7 +75,7 @@ filters = FlightSearchFilters(
         FlightSegment(
             departure_airport=[[Airport.JFK, 0]],
             arrival_airport=[[Airport.LAX, 0]],
-            travel_date="2024-06-01",
+            travel_date="2026-06-01",
             time_restrictions=TimeRestrictions(
                 earliest_departure=6,  # 6 AM
                 latest_departure=10,  # 10 AM
@@ -110,11 +110,11 @@ filters = DateSearchFilters(
         FlightSegment(
             departure_airport=[[Airport.JFK, 0]],
             arrival_airport=[[Airport.LAX, 0]],
-            travel_date="2024-06-01",
+            travel_date="2026-06-01",
         )
     ],
-    from_date="2024-06-01",
-    to_date="2024-06-30",
+    from_date="2026-06-01",
+    to_date="2026-06-30",
     seat_type=SeatType.PREMIUM_ECONOMY
 )
 
@@ -145,11 +145,11 @@ def track_prices(days=7):
             FlightSegment(
                 departure_airport=[[Airport.JFK, 0]],
                 arrival_airport=[[Airport.LAX, 0]],
-                travel_date="2024-06-01",
+                travel_date="2026-06-01",
             )
         ],
-        from_date="2024-06-01",
-        to_date="2024-06-07"
+        from_date="2026-06-01",
+        to_date="2026-06-07"
     )
 
     search = SearchDates()
@@ -232,7 +232,7 @@ def analyze_results(results: List[FlightResult]) -> pd.DataFrame:
 from fli.models import (
     Airport, Airline, SeatType, MaxStops,
     PassengerInfo, TimeRestrictions, TripType,
-    FlightSegment, FlightSearchFilters
+    FlightSegment, FlightSearchFilters, LayoverRestrictions
 )
 from fli.search import SearchFlights
 from datetime import datetime, timedelta
@@ -241,7 +241,7 @@ from datetime import datetime, timedelta
 outbound = FlightSegment(
     departure_airport=[[Airport.JFK, 0]],
     arrival_airport=[[Airport.LHR, 0]],
-    travel_date="2024-06-01",
+    travel_date="2026-06-01",
     time_restrictions=TimeRestrictions(
         earliest_departure=6,  # 6 AM
         latest_departure=12,   # 12 PM
@@ -253,7 +253,7 @@ outbound = FlightSegment(
 return_flight = FlightSegment(
     departure_airport=[[Airport.LHR, 0]],
     arrival_airport=[[Airport.JFK, 0]],
-    travel_date="2024-06-15",
+    travel_date="2026-06-15",
     time_restrictions=TimeRestrictions(
         earliest_departure=14,  # 2 PM
         latest_departure=20,    # 8 PM
@@ -296,27 +296,21 @@ filters = FlightSearchFilters(
 search = SearchFlights()
 results = search.search(filters)
 
-# Process results with detailed information
-for flight in results:
-    print(f"\nTotal Price: ${flight.total_price}")
-    
-    print("\nOutbound Flight:")
-    for leg in flight.outbound.legs:
-        print(f"Flight: {leg.airline.value} {leg.flight_number}")
-        print(f"From: {leg.departure_airport.value} at {leg.departure_datetime}")
-        print(f"To: {leg.arrival_airport.value} at {leg.arrival_datetime}")
-        print(f"Duration: {leg.duration} minutes")
-        if leg.layover_duration:
-            print(f"Layover: {leg.layover_duration} minutes")
-    
-    print("\nReturn Flight:")
-    for leg in flight.return_flight.legs:
-        print(f"Flight: {leg.airline.value} {leg.flight_number}")
-        print(f"From: {leg.departure_airport.value} at {leg.departure_datetime}")
-        print(f"To: {leg.arrival_airport.value} at {leg.arrival_datetime}")
-        print(f"Duration: {leg.duration} minutes")
-        if leg.layover_duration:
-            print(f"Layover: {leg.layover_duration} minutes")
+# Process results - round trips return tuples of (outbound, return)
+for outbound, return_flight in results:
+    print(f"\nOutbound Flight (${outbound.price}):")
+    for leg in outbound.legs:
+        print(f"  Flight: {leg.airline.value} {leg.flight_number}")
+        print(f"  From: {leg.departure_airport.value} at {leg.departure_datetime}")
+        print(f"  To: {leg.arrival_airport.value} at {leg.arrival_datetime}")
+        print(f"  Duration: {leg.duration} minutes")
+
+    print(f"\nReturn Flight:")
+    for leg in return_flight.legs:
+        print(f"  Flight: {leg.airline.value} {leg.flight_number}")
+        print(f"  From: {leg.departure_airport.value} at {leg.departure_datetime}")
+        print(f"  To: {leg.arrival_airport.value} at {leg.arrival_datetime}")
+        print(f"  Duration: {leg.duration} minutes")
 ```
 
 ### Advanced Date Search with Validation
@@ -350,8 +344,8 @@ def validate_dates(from_date: str, to_date: str, min_stay: int, max_stay: int):
         raise ValueError("Minimum stay cannot be greater than maximum stay")
 
 
-from_date = "2024-06-01"
-to_date = "2024-06-30"
+from_date = "2026-06-01"
+to_date = "2026-06-30"
 min_stay = 2
 max_stay = 4
 

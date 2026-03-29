@@ -11,7 +11,6 @@ Fli is a Python library that provides programmatic access to Google Flights data
 - **Core utilities** (`fli/core/`) - Shared parsing and building utilities
 - **Search engine** (`fli/search/`) - Flight and date search implementations using Google Flights API
 - **Data models** (`fli/models/`) - Pydantic models for airports, airlines, and flight data structures
-- **FastAPI server** (`fli/server/`) - REST API endpoints for flight search functionality
 
 ## Development Commands
 

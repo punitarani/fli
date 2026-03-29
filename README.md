@@ -133,10 +133,10 @@ fli --help
 
 ```bash
 # Basic flight search
-fli flights JFK LHR 2025-10-25
+fli flights JFK LHR 2026-10-25
 
 # Advanced search with filters
-fli flights JFK LHR 2025-10-25 \
+fli flights JFK LHR 2026-10-25 \
     --time 6-20 \             # Departure time window (6 AM - 8 PM)
     --airlines BA KL \        # Airlines (British Airways, KLM)
     --class BUSINESS \        # Cabin class
@@ -149,7 +149,7 @@ fli flights JFK LHR 2025-10-25 \
 >
 > ```bash
 > # Return machine-readable flight results
-> fli flights JFK LHR 2025-10-25 --format json
+> fli flights JFK LHR 2026-10-25 --format json
 > ```
 
 ### Find Cheapest Dates
@@ -160,8 +160,8 @@ fli dates JFK LHR
 
 # Advanced search with date range
 fli dates JFK LHR \
-    --from 2025-01-01 \
-    --to 2025-02-01 \
+    --from 2026-01-01 \
+    --to 2026-02-01 \
     --monday --friday      # Only Mondays and Fridays
 ```
 
@@ -170,7 +170,7 @@ fli dates JFK LHR \
 >
 > ```bash
 > # Return machine-readable date search results
-> fli dates JFK LHR --from 2025-01-01 --to 2025-02-01 --format json
+> fli dates JFK LHR --from 2026-01-01 --to 2026-02-01 --format json
 > ```
 
 ### CLI Options
@@ -179,6 +179,7 @@ fli dates JFK LHR \
 
 | Option           | Description           | Example                |
 |------------------|-----------------------|------------------------|
+| `--return, -r`   | Return date           | `2026-10-30`           |
 | `--time, -t`     | Departure time window | `6-20`                 |
 | `--airlines, -a` | Airline IATA codes    | `BA KL`                |
 | `--class, -c`    | Cabin class           | `ECONOMY`, `BUSINESS`  |
@@ -188,14 +189,19 @@ fli dates JFK LHR \
 
 #### Dates Command (`fli dates`)
 
-| Option        | Description   | Example                |
-|---------------|---------------|------------------------|
-| `--from`      | Start date    | `2025-01-01`           |
-| `--to`        | End date      | `2025-02-01`           |
-| `--class, -c` | Cabin class   | `ECONOMY`, `BUSINESS`  |
-| `--stops, -s` | Maximum stops | `NON_STOP`, `ONE_STOP` |
-| `--[day]`     | Day filters   | `--monday`, `--friday` |
-| `--format`    | Output format | `text`, `json`         |
+| Option             | Description            | Example                |
+|--------------------|------------------------|------------------------|
+| `--from`           | Start date             | `2026-01-01`           |
+| `--to`             | End date               | `2026-02-01`           |
+| `--duration, -d`   | Trip duration in days  | `3`                    |
+| `--round, -R`      | Round-trip search      | (flag)                 |
+| `--airlines, -a`   | Airline IATA codes     | `BA KL`                |
+| `--class, -c`      | Cabin class            | `ECONOMY`, `BUSINESS`  |
+| `--stops, -s`      | Maximum stops          | `NON_STOP`, `ONE_STOP` |
+| `--time`           | Departure time window  | `6-20`                 |
+| `--sort`           | Sort by price          | (flag)                 |
+| `--[day]`          | Day filters            | `--monday`, `--friday` |
+| `--format`         | Output format          | `text`, `json`         |
 
 ## MCP Server Integration
 
