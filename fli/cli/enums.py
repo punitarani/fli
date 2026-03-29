@@ -11,3 +11,10 @@ class DayOfWeek(Enum):
     FRIDAY = "friday"
     SATURDAY = "saturday"
     SUNDAY = "sunday"
+
+
+class OutputFormat(str, Enum):
+    """Supported CLI output formats."""
+
+    TEXT = "text"
+    JSON = "json"

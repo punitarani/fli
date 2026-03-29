@@ -14,6 +14,8 @@ from fli.cli.utils import (
     filter_flights_by_time,
     parse_airlines,
     parse_stops,
+    serialize_date_result,
+    serialize_flight_result,
     validate_date,
     validate_time_range,
 )
@@ -259,3 +261,45 @@ def test_display_round_trip_price_asymmetric():
 
     assert "$400.00" in output
     assert "$750.00" not in output
+
+
+def test_serialize_flight_result_one_way():
+    """JSON flight serialization should use machine-readable nested fields."""
+    flight = _make_flight_result(price=159.0)
+
+    payload = serialize_flight_result(flight)
+
+    assert payload["price"] == 159.0
+    assert payload["currency"] == "USD"
+    assert payload["legs"][0]["departure_airport"]["code"] == "JFK"
+    assert payload["legs"][0]["airline"]["code"] == "DL"
+
+
+def test_serialize_flight_result_round_trip():
+    """Round-trip JSON serialization should expose outbound and return segments."""
+    outbound = _make_flight_result(price=317.0, flight_number="DL100")
+    return_flight = _make_flight_result(price=317.0, flight_number="DL200")
+
+    payload = serialize_flight_result((outbound, return_flight))
+
+    assert payload["price"] == 317.0
+    assert payload["currency"] == "USD"
+    assert payload["outbound"]["legs"][0]["flight_number"] == "DL100"
+    assert payload["return"]["legs"][0]["flight_number"] == "DL200"
+
+
+def test_serialize_date_result_round_trip():
+    """Date serialization should include the return date for round-trip searches."""
+    result = DatePrice(
+        date=(datetime(2026, 5, 1), datetime(2026, 5, 8)),
+        price=599.98,
+    )
+
+    payload = serialize_date_result(result, TripType.ROUND_TRIP)
+
+    assert payload == {
+        "departure_date": "2026-05-01",
+        "return_date": "2026-05-08",
+        "price": 599.98,
+        "currency": "USD",
+    }
