@@ -69,9 +69,9 @@ def dates(
         str,
         typer.Option("--from", help="Start date (YYYY-MM-DD)"),
     ] = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d"),
-    end_date: Annotated[
-        str, typer.Option("--to", help="End date (YYYY-MM-DD)")
-    ] = (datetime.now() + timedelta(days=60)).strftime("%Y-%m-%d"),
+    end_date: Annotated[str, typer.Option("--to", help="End date (YYYY-MM-DD)")] = (
+        datetime.now() + timedelta(days=60)
+    ).strftime("%Y-%m-%d"),
     trip_duration: Annotated[
         int,
         typer.Option(
