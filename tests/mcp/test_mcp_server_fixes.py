@@ -64,8 +64,8 @@ def _make_leg(airport_from="TLV", airport_to="ATH"):
     leg = MagicMock()
     leg.departure_airport = airport_from
     leg.arrival_airport = airport_to
-    leg.departure_time = None
-    leg.arrival_time = None
+    leg.departure_datetime = None
+    leg.arrival_datetime = None
     leg.duration = 145
     leg.airline = "Wizz Air"
     leg.flight_number = "W6100"

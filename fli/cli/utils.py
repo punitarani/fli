@@ -149,7 +149,7 @@ def display_flight_results(flights: list):
         table.add_column("Label", style="blue")
         table.add_column("Value", style="green")
 
-        # Google Flights returns the full round-trip price on each leg
+        # Google Flights returns the full round-trip price on the outbound leg
         total_price = flight_segments[0].price
         table.add_row("Total Price", f"${total_price:,.2f}")
 
