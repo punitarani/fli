@@ -1,274 +1,328 @@
 ---
 name: fli
 description: >
-  Guidance for working effectively in the Fli repository across the CLI, Python
-  library, and MCP server. Use when: editing the Fli codebase, debugging the
-  CLI or MCP server, choosing safe test commands, updating documentation, or
-  navigating the repository structure.
+  Guidance for installing and using Fli correctly as a CLI and MCP server.
+  Use when: setting up Fli with pipx, running `fli` flight searches, configuring
+  Claude Desktop with `fli-mcp`, using the HTTP MCP server, or troubleshooting
+  Fli command availability and common usage mistakes.
 license: MIT
 ---
 
-# Fli repository skill
+# Fli install and usage skill
 
-Use this skill when you are working inside the Fli repository.
+Use this skill when the goal is to install Fli and use its CLI or MCP server correctly.
 
-Fli is a Python project that provides direct access to Google Flights data through a reverse-engineered API. It has three primary user-facing surfaces:
+The primary path is:
+
+1. install with `pipx install flights`
+2. use `fli` for terminal searches
+3. use `fli-mcp` for Claude Desktop or other STDIO MCP clients
+4. use `fli-mcp-http` only when an HTTP MCP endpoint is specifically needed
+
+Do not default to cloning the repository or using a source checkout. Only mention cloning the repo when the user explicitly wants to contribute to Fli itself.
+
+## What Fli is
+
+Fli is a Python package for accessing Google Flights data through direct API interaction.
+
+It has three public surfaces:
 
 - CLI via `fli`
-- Python API via the `fli` package
+- Python library via the `fli` package
 - MCP server via `fli-mcp` and `fli-mcp-http`
 
-Prefer repository-specific guidance from this skill over generic Python guidance.
+For this skill, focus on the CLI and MCP server first.
 
-## Quick orientation
+## Core install rule
 
-- Package metadata lives in `pyproject.toml`.
-- Main app areas are `fli/cli/`, `fli/mcp/`, `fli/core/`, `fli/search/`, and `fli/models/`.
-- Tests mirror the source layout under `tests/`.
-- Docs exist in `README.md`, `docs/`, and the public Mintlify site at `https://www.mintlify.com/punitarani/fli/introduction`.
-- The Mintlify docs index is available at `https://punitarani-fli.mintlify.app/llms.txt`.
+If the user wants to use Fli as a tool, recommend `pipx install flights`.
 
-## What Fli does
+Why:
 
-Fli is not a scraper-driven browser automation project. It talks to Google Flights through direct API interaction and ships:
+- it is the documented recommended install path for CLI and MCP usage
+- it keeps the install isolated from other Python projects
+- it exposes `fli`, `fli-mcp`, and `fli-mcp-http` on the user's PATH
 
-- a Typer CLI for `flights` and `dates`
-- a FastMCP server with `search_flights` and `search_dates`
-- a Python API for programmatic searches
-- shared parsing and builder utilities
-- Pydantic models for airports, airlines, filters, and results
+Only fall back to `pip install flights` or `uvx` when:
 
-## When to use this skill
+- `pipx` is unavailable
+- the user wants library-only usage
+- the user explicitly prefers another Python package manager
 
-Use this skill when the task involves any of the following:
+## Standard installation flow
 
-- changing CLI behavior, arguments, help text, or output
-- changing MCP tools, prompts, resources, or configuration
-- changing search logic, result serialization, or model validation
-- updating tests or choosing which tests are safe to run
-- updating docs or examples for this repository
-- figuring out where a change belongs in the codebase
+### Preferred install
 
-## Source of truth
+```bash
+python3 -m pip install --user pipx
+python3 -m pipx ensurepath
+pipx install flights
+```
 
-When guidance differs, prefer sources in this order:
+If `pipx` is already installed, skip directly to:
 
-1. User instructions
-2. `AGENTS.md`
-3. `CLAUDE.md`
-4. Current source code
-5. `README.md`
-6. Mintlify docs
+```bash
+pipx install flights
+```
 
-Use the Mintlify docs for public usage examples and surface-area context. Use the repository source for implementation truth.
+### Verify installation
 
-## Repository map
+Run these checks after install:
 
-### `fli/cli/`
+```bash
+fli --help
+fli-mcp --help
+which fli-mcp
+```
 
-CLI entrypoints and commands.
+If the commands are not found after `pipx install flights`, have the user run:
 
-- `fli/cli/main.py` wires the Typer app
-- `fli/cli/commands/flights.py` handles point-in-time flight search
-- `fli/cli/commands/dates.py` handles cheapest-date search
+```bash
+python3 -m pipx ensurepath
+```
 
-If a user types `fli JFK LAX 2026-05-15`, the CLI treats that as a `flights` command automatically.
+Then restart the terminal session.
 
-### `fli/mcp/`
+## What the install provides
 
-MCP server behavior.
+After `pipx install flights`, these commands should be available:
 
-- `fli/mcp/server.py` defines the MCP server
-- tools: `search_flights`, `search_dates`
-- prompts: `search-direct-flight`, `find-budget-window`
-- resource: `resource://fli-mcp/configuration`
+- `fli` - main CLI for flight searches
+- `fli-mcp` - MCP server over STDIO
+- `fli-mcp-http` - MCP server over HTTP, defaulting to `http://127.0.0.1:8000/mcp/`
 
-### `fli/core/`
+Important naming detail:
 
-Shared parsing and filter-building utilities used by both the CLI and MCP layers.
+- the package to install is `flights`
+- the commands to run are `fli`, `fli-mcp`, and `fli-mcp-http`
 
-- `parsers.py` converts user-facing values into domain models
-- `builders.py` constructs search filters and segments
+Do not tell users to run `pipx install fli`.
 
-### `fli/search/`
+## CLI usage
 
-Core search behavior.
+### Basic flight search
 
-- `client.py` handles rate limiting, retries, and HTTP behavior
-- `flights.py` implements flight search
-- `dates.py` implements cheapest-date search
+Use:
 
-### `fli/models/`
+```bash
+fli flights JFK LAX 2025-10-25
+```
 
-Domain models and enums.
+### Cheapest-date search
 
-- airport and airline enums
-- filter models
-- result models
-- Google Flights-specific data structures
+Use:
 
-### `tests/`
+```bash
+fli dates JFK LAX --from 2025-01-01 --to 2025-01-31
+```
 
-Tests broadly mirror the package layout.
+### Common filters
 
-- `tests/cli/`
-- `tests/core/`
-- `tests/models/`
-- `tests/mcp/`
-- `tests/search/`
+Use filters like these when the user asks for them:
 
-## Safe development workflow
+```bash
+fli flights JFK LHR 2025-10-25 \
+  --time 6-20 \
+  --airlines BA KL \
+  --class BUSINESS \
+  --stops NON_STOP \
+  --sort DURATION
+```
 
-Prefer `uv` for Python environment management in this repository.
+Supported language to map correctly:
 
-### Install dependencies
-
-- `uv sync --all-extras`
-
-### Frequent quality commands
-
-- `make lint`
-- `make format`
-
-### Stable default test command
-
-Use this first in cloud or CI-like environments:
-
-- `uv run pytest -vv --ignore=tests/search/`
-
-Reason: `tests/search/` hits the live Google Flights API and is frequently rate-limited.
-
-## Test selection rules
-
-Do not reflexively run the full test suite.
-
-### Default behavior
-
-- normal `pytest` runs include most tests and skip fuzz tests unless special flags are used
-- fuzz tests require `--fuzz` or `--all`
-- MCP-only selection uses `--mcp`
-
-### Reliable tests
-
-Usually reliable:
-
-- CLI tests
-- core utility tests
-- model tests
-- most MCP tests
-
-### Flaky tests
-
-Use caution with:
-
-- `tests/search/` because it hits the live Google Flights API
-- MCP date-search paths that depend on live API results
-
-### Good testing pattern
-
-Match tests to the layer you changed:
-
-- CLI change -> run relevant CLI tests
-- parser/builder change -> run core and affected CLI or MCP tests
-- MCP change -> run MCP tests and any affected core tests
-- model change -> run model tests plus nearby consumers
-
-## Important pitfalls
-
-### Do not run the nonexistent app server target
-
-`make server` and `make server-dev` reference `fli.server.main:app`, but `fli/server/` does not exist in this repository state. Do not use those targets unless the repository adds that package later.
-
-### Respect live API constraints
-
-Search logic depends on Google Flights behavior. Failures can be caused by:
-
-- HTTP 429 rate limiting
-- empty live search results
-- transient upstream changes
-
-Do not treat those failures as immediate proof of a code regression without isolating the test path first.
-
-### MCP HTTP transport detail
-
-For MCP HTTP integrations, the endpoint expects the `Accept: application/json, text/event-stream` header.
-
-### Docs can lag source
-
-The Mintlify docs are helpful, but the code is authoritative when implementation details differ.
-
-## Public surfaces to keep aligned
-
-When changing behavior, consider whether you also need to update:
-
-- `README.md`
-- `docs/`
-- Mintlify-facing wording and examples
-- CLI help text
-- MCP parameter documentation
-- examples under `examples/`
-
-Keep terminology consistent:
-
-- airports and airlines use IATA codes
 - cabin classes: `ECONOMY`, `PREMIUM_ECONOMY`, `BUSINESS`, `FIRST`
 - stop filters: `ANY`, `NON_STOP`, `ONE_STOP`, `TWO_PLUS_STOPS`
+- sort options: `CHEAPEST`, `DURATION`, `DEPARTURE_TIME`, `ARRIVAL_TIME`
 
-## Common task routing
+### CLI shorthand
 
-### Add or change a CLI option
+Fli supports a convenience shorthand where a non-command invocation is treated as a flights search.
 
-Look in:
+Example:
 
-- `fli/cli/commands/`
-- `fli/core/parsers.py`
-- `fli/core/builders.py`
-- affected docs and examples
+```bash
+fli JFK LAX 2026-05-15
+```
 
-### Change MCP parameters or defaults
+This behaves like:
 
-Look in:
+```bash
+fli flights JFK LAX 2026-05-15
+```
 
-- `fli/mcp/server.py`
-- shared parsers and builders in `fli/core/`
-- docs for MCP setup and tools
+Use the explicit `flights` subcommand in examples unless the user asks for shortcuts.
 
-### Change search behavior
+## MCP usage
 
-Look in:
+### Default MCP mode
 
-- `fli/search/flights.py`
-- `fli/search/dates.py`
-- `fli/search/client.py`
-- filter or result models in `fli/models/`
+Use `fli-mcp` for Claude Desktop and other STDIO-based MCP clients.
 
-### Change model validation or serialization
+```bash
+fli-mcp
+```
 
-Look in:
+This is the default recommendation for local assistant integration.
 
-- `fli/models/`
-- MCP serialization paths in `fli/mcp/server.py`
-- CLI display code if output formatting is affected
+### HTTP MCP mode
 
-## Useful user-facing commands
+Use `fli-mcp-http` only when the user needs an HTTP endpoint.
 
-- `uv run fli flights JFK LAX 2026-05-15`
-- `uv run fli dates JFK LAX --from 2026-05-01 --to 2026-05-31`
-- `uv run fli-mcp`
-- `uv run fli-mcp-http`
+```bash
+fli-mcp-http
+```
 
-These are useful for understanding intended behavior, but prefer tests over ad hoc live API calls when a stable automated path exists.
+By default, it serves at:
 
-## Done criteria
+- `http://127.0.0.1:8000/mcp/`
 
-A repository change is usually not done until you have:
+For HTTP integrations, the client should send:
 
-- updated the implementation
-- run targeted checks appropriate to the changed layer
-- avoided flaky live API paths unless they are necessary
-- updated docs or examples when public behavior changed
-- kept CLI, MCP, and shared parsing logic consistent
+- `Accept: application/json, text/event-stream`
+
+## Claude Desktop setup
+
+When the user wants Claude Desktop integration, recommend this config first:
+
+```json
+{
+  "mcpServers": {
+    "fli": {
+      "command": "fli-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+Suggested config paths:
+
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\\Claude\\claude_desktop_config.json`
+- Linux: `~/.config/Claude/claude_desktop_config.json`
+
+After editing the config:
+
+1. fully quit Claude Desktop
+2. relaunch it
+3. start a new conversation
+4. ask for a flight search
+
+Good validation prompt:
+
+`Can you search for flights from JFK to LHR on 2026-03-15?`
+
+### Optional MCP environment variables
+
+If the user wants defaults, these environment variables are relevant:
+
+- `FLI_MCP_DEFAULT_PASSENGERS`
+- `FLI_MCP_DEFAULT_CURRENCY`
+- `FLI_MCP_DEFAULT_CABIN_CLASS`
+- `FLI_MCP_DEFAULT_SORT_BY`
+- `FLI_MCP_DEFAULT_DEPARTURE_WINDOW`
+- `FLI_MCP_MAX_RESULTS`
+
+Example:
+
+```json
+{
+  "mcpServers": {
+    "fli": {
+      "command": "fli-mcp",
+      "args": [],
+      "env": {
+        "FLI_MCP_DEFAULT_CURRENCY": "EUR",
+        "FLI_MCP_DEFAULT_CABIN_CLASS": "BUSINESS",
+        "FLI_MCP_MAX_RESULTS": "10"
+      }
+    }
+  }
+}
+```
+
+## How to guide users well
+
+### If the user asks to install Fli
+
+Give them the `pipx install flights` path first.
+
+### If the user asks how to use the command line tool
+
+Show `fli flights ...` and `fli dates ...` examples first.
+
+### If the user asks how to connect Claude or another assistant
+
+Show `fli-mcp` and the Claude Desktop config first.
+
+### If the user asks for a web endpoint
+
+Then show `fli-mcp-http` and mention the `/mcp/` path and `Accept` header.
+
+### If the user asks how to contribute or hack on the codebase
+
+That is outside the primary scope of this skill. Only then discuss cloning the repository and using development commands.
+
+## Common mistakes to prevent
+
+- telling users to clone the repository when they only want the tool
+- telling users to install `fli` instead of `flights`
+- focusing on the Python API when the user asked for CLI or MCP setup
+- giving HTTP MCP instructions when STDIO MCP is enough
+- forgetting to tell Claude Desktop users to fully restart the app
+- omitting the PATH fix when `pipx` installs successfully but commands are not found
+
+## Troubleshooting
+
+### `fli` or `fli-mcp` not found
+
+Try:
+
+```bash
+python3 -m pipx ensurepath
+```
+
+Then restart the terminal.
+
+### Python version problems
+
+Fli requires Python 3.10 or newer.
+
+Check with:
+
+```bash
+python3 --version
+```
+
+### Claude Desktop does not show the tools
+
+Check these in order:
+
+1. `fli-mcp --help` works in a terminal
+2. the Claude Desktop config file path is correct
+3. the JSON is valid
+4. Claude Desktop was fully quit and reopened
+
+### Rate limiting or temporary failures
+
+Fli includes automatic rate limiting and retries, but live Google Flights requests can still fail temporarily.
+
+If a query fails:
+
+- retry after a short delay
+- reduce repeated back-to-back searches
+- do not assume the CLI or MCP setup is broken just because one upstream request failed
+
+## Public docs
+
+Use these docs for product-facing guidance:
+
+- introduction: `https://www.mintlify.com/punitarani/fli/introduction`
+- docs index: `https://punitarani-fli.mintlify.app/llms.txt`
+
+Use product docs for examples and onboarding. Use the actual installed command names when writing instructions.
 
 ## Summary
 
-Treat Fli as a Python library with three connected surfaces: CLI, Python API, and MCP server. Use `uv`, prefer targeted tests, avoid the broken `make server` targets, and treat live Google Flights API tests as potentially flaky rather than as default validation paths.
+The default recommendation is `pipx install flights`. After that, use `fli` for terminal searches, `fli-mcp` for Claude Desktop and other STDIO MCP clients, and `fli-mcp-http` only when an HTTP MCP endpoint is specifically needed.
