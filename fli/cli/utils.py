@@ -1,5 +1,8 @@
 """CLI utility functions for display and validation."""
 
+import json
+from typing import Any
+
 import plotext as plt
 import typer
 from click import Context, Parameter
@@ -16,6 +19,8 @@ from fli.core.parsers import ParseError
 from fli.core.parsers import parse_airlines as core_parse_airlines
 from fli.core.parsers import parse_max_stops as core_parse_max_stops
 from fli.models import Airline, Airport, MaxStops, TripType
+
+DEFAULT_CURRENCY = "USD"
 
 
 def validate_date(ctx: Context, param: Parameter, value: str) -> str | None:
@@ -43,6 +48,36 @@ def validate_time_range(
         return start, end
     except ValueError as e:
         raise typer.BadParameter("Time range must be in format 'start-end' (e.g., 6-20)") from e
+
+
+def normalize_cli_date(value: str | None) -> str | None:
+    """Normalize a CLI date value or raise a parse error."""
+    if value is None:
+        return None
+
+    try:
+        return normalize_date(value)
+    except ValueError as e:
+        raise ParseError("Date must be in YYYY-MM-DD format") from e
+
+
+def normalize_cli_time_range(value: str | tuple[int, int] | None) -> tuple[int, int] | None:
+    """Normalize a CLI time range or raise a parse error."""
+    if value is None:
+        return None
+
+    if isinstance(value, tuple):
+        start, end = value
+    else:
+        try:
+            start, end = map(int, value.split("-"))
+        except ValueError as e:
+            raise ParseError("Time range must be in format 'start-end' (e.g., 6-20)") from e
+
+    if not (0 <= start <= 23 and 0 <= end <= 23):
+        raise ParseError("Time range must be in format 'start-end' (e.g., 6-20)")
+
+    return start, end
 
 
 def parse_airlines(airlines: list[str] | None) -> list[Airline] | None:
@@ -126,6 +161,118 @@ def format_duration(minutes: int) -> str:
     hours = minutes // 60
     mins = minutes % 60
     return f"{hours}h {mins}m"
+
+
+def serialize_airport(airport: Airport) -> dict[str, str]:
+    """Serialize an airport for machine-readable output."""
+    return {"code": airport.name, "name": airport.value}
+
+
+def serialize_airline(airline: Airline) -> dict[str, str]:
+    """Serialize an airline for machine-readable output."""
+    return {"code": airline.name, "name": airline.value}
+
+
+def serialize_flight_leg(leg: Any) -> dict[str, Any]:
+    """Serialize a flight leg using Google Flights-style field names."""
+    return {
+        "departure_airport": serialize_airport(leg.departure_airport),
+        "arrival_airport": serialize_airport(leg.arrival_airport),
+        "departure_time": leg.departure_datetime.isoformat(),
+        "arrival_time": leg.arrival_datetime.isoformat(),
+        "duration": leg.duration,
+        "airline": serialize_airline(leg.airline),
+        "flight_number": leg.flight_number,
+    }
+
+
+def _serialize_flight_segment_result(flight: Any, *, include_price: bool = False) -> dict[str, Any]:
+    """Serialize a one-direction flight result."""
+    payload = {
+        "duration": flight.duration,
+        "stops": flight.stops,
+        "legs": [serialize_flight_leg(leg) for leg in flight.legs],
+    }
+    if include_price:
+        payload["price"] = flight.price
+        payload["currency"] = DEFAULT_CURRENCY
+    return payload
+
+
+def serialize_flight_result(flight_data: Any) -> dict[str, Any]:
+    """Serialize a flight result or round-trip pair for JSON output."""
+    if isinstance(flight_data, tuple):
+        outbound, return_flight = flight_data
+        return {
+            "price": outbound.price,
+            "currency": DEFAULT_CURRENCY,
+            "duration": outbound.duration + return_flight.duration,
+            "stops": outbound.stops + return_flight.stops,
+            "outbound": _serialize_flight_segment_result(outbound),
+            "return": _serialize_flight_segment_result(return_flight),
+        }
+
+    return _serialize_flight_segment_result(flight_data, include_price=True)
+
+
+def serialize_date_result(date_result: Any, trip_type: TripType) -> dict[str, Any]:
+    """Serialize a date search result for JSON output."""
+    payload = {
+        "departure_date": date_result.date[0].date().isoformat(),
+        "return_date": None,
+        "price": date_result.price,
+        "currency": DEFAULT_CURRENCY,
+    }
+    if trip_type == TripType.ROUND_TRIP and len(date_result.date) > 1:
+        payload["return_date"] = date_result.date[1].date().isoformat()
+    return payload
+
+
+def build_json_success_response(
+    *,
+    search_type: str,
+    trip_type: TripType,
+    query: dict[str, Any],
+    results_key: str,
+    results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build a JSON success payload for CLI commands."""
+    return {
+        "success": True,
+        "data_source": "google_flights",
+        "search_type": search_type,
+        "trip_type": trip_type.name,
+        "query": query,
+        "count": len(results),
+        results_key: results,
+    }
+
+
+def build_json_error_response(
+    *,
+    search_type: str,
+    message: str,
+    error_type: str = "validation_error",
+    query: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a JSON error payload for CLI commands."""
+    payload = {
+        "success": False,
+        "data_source": "google_flights",
+        "search_type": search_type,
+        "error": {
+            "type": error_type,
+            "message": message,
+        },
+    }
+    if query is not None:
+        payload["query"] = query
+    return payload
+
+
+def emit_json(payload: dict[str, Any]) -> None:
+    """Emit a JSON payload to stdout."""
+    typer.echo(json.dumps(payload, indent=2))
 
 
 def display_flight_results(flights: list):

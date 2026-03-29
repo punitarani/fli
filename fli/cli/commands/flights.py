@@ -1,10 +1,19 @@
 """Flight search CLI command."""
 
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
-from fli.cli.utils import display_flight_results, validate_date, validate_time_range
+from fli.cli.enums import OutputFormat
+from fli.cli.utils import (
+    build_json_error_response,
+    build_json_success_response,
+    display_flight_results,
+    emit_json,
+    normalize_cli_date,
+    normalize_cli_time_range,
+    serialize_flight_result,
+)
 from fli.core import (
     build_flight_segments,
     parse_airlines,
@@ -26,14 +35,36 @@ def _search_flights_core(
     destination: str,
     departure_date: str,
     return_date: str | None = None,
-    departure_window: tuple[int, int] | None = None,
+    departure_window: str | tuple[int, int] | None = None,
     airlines: list[str] | None = None,
     cabin_class: str = "ECONOMY",
     max_stops: str = "ANY",
     sort_by: str = "CHEAPEST",
-):
+    output_format: OutputFormat = OutputFormat.TEXT,
+) -> None:
     """Core flight search functionality."""
+    query: dict[str, Any] = {
+        "origin": origin.upper(),
+        "destination": destination.upper(),
+        "departure_date": departure_date,
+        "return_date": return_date,
+        "departure_window": None,
+        "airlines": [airline.upper() for airline in airlines] if airlines else None,
+        "cabin_class": cabin_class.upper(),
+        "max_stops": max_stops.upper(),
+        "sort_by": sort_by.upper(),
+    }
+
     try:
+        departure_date = normalize_cli_date(departure_date)
+        return_date = normalize_cli_date(return_date)
+        departure_window = normalize_cli_time_range(departure_window)
+        query["departure_date"] = departure_date
+        query["return_date"] = return_date
+        query["departure_window"] = (
+            f"{departure_window[0]}-{departure_window[1]}" if departure_window else None
+        )
+
         # Parse parameters using shared utilities
         origin_airport = resolve_airport(origin)
         destination_airport = resolve_airport(destination)
@@ -77,16 +108,60 @@ def _search_flights_core(
         results = search_client.search(filters)
 
         if not results:
+            if output_format == OutputFormat.JSON:
+                emit_json(
+                    build_json_success_response(
+                        search_type="flights",
+                        trip_type=trip_type,
+                        query=query,
+                        results_key="flights",
+                        results=[],
+                    )
+                )
+                return
+
             typer.echo("No flights found.")
             raise typer.Exit(1)
 
-        # Display results
+        if output_format == OutputFormat.JSON:
+            emit_json(
+                build_json_success_response(
+                    search_type="flights",
+                    trip_type=trip_type,
+                    query=query,
+                    results_key="flights",
+                    results=[serialize_flight_result(result) for result in results],
+                )
+            )
+            return
+
         display_flight_results(results)
 
     except ParseError as e:
+        if output_format == OutputFormat.JSON:
+            emit_json(
+                build_json_error_response(
+                    search_type="flights",
+                    message=str(e),
+                    query=query,
+                )
+            )
+            raise typer.Exit(1) from e
+
         typer.echo(f"Error: {str(e)}")
         raise typer.Exit(1) from e
     except (AttributeError, ValueError) as e:
+        if output_format == OutputFormat.JSON:
+            emit_json(
+                build_json_error_response(
+                    search_type="flights",
+                    message=str(e),
+                    error_type="search_error",
+                    query=query,
+                )
+            )
+            raise typer.Exit(1) from e
+
         typer.echo(f"Error: {str(e)}")
         raise typer.Exit(1) from e
 
@@ -94,16 +169,13 @@ def _search_flights_core(
 def flights(
     origin: Annotated[str, typer.Argument(help="Departure airport IATA code (e.g., JFK)")],
     destination: Annotated[str, typer.Argument(help="Arrival airport IATA code (e.g., LHR)")],
-    departure_date: Annotated[
-        str, typer.Argument(help="Travel date (YYYY-MM-DD)", callback=validate_date)
-    ],
+    departure_date: Annotated[str, typer.Argument(help="Travel date (YYYY-MM-DD)")],
     return_date: Annotated[
         str | None,
         typer.Option(
             "--return",
             "-r",
             help="Return date (YYYY-MM-DD)",
-            callback=validate_date,
         ),
     ] = None,
     departure_window: Annotated[
@@ -112,7 +184,6 @@ def flights(
             "--time",
             "-t",
             help="Departure time window in 24h format (e.g., 6-20)",
-            callback=validate_time_range,
         ),
     ] = None,
     airlines: Annotated[
@@ -147,11 +218,20 @@ def flights(
             help="Sort results by (CHEAPEST, DURATION, DEPARTURE_TIME, ARRIVAL_TIME)",
         ),
     ] = "CHEAPEST",
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option(
+            "--format",
+            help="Output format: text or json",
+            case_sensitive=False,
+        ),
+    ] = OutputFormat.TEXT,
 ):
     """Search for flights on a specific date.
 
     Example:
         fli flights JFK LHR 2025-10-25 --time 6-20 --airlines BA KL --stops NON_STOP
+        fli flights JFK LHR 2025-10-25 --format json
 
     """
     _search_flights_core(
@@ -164,4 +244,5 @@ def flights(
         cabin_class=cabin_class,
         max_stops=max_stops,
         sort_by=sort_by,
+        output_format=output_format,
     )

@@ -48,6 +48,17 @@ fli flights JFK LHR 2025-06-01 \
 fli dates JFK LHR --from 2025-06-01 --to 2025-06-30
 ```
 
+!!! warning "Experimental"
+    `--format json` is experimental.
+    The JSON schema is intended for agents and tools such as `jq`, but it may evolve in future releases.
+
+5. Return machine-readable JSON:
+
+```bash
+fli flights JFK LHR 2025-06-01 --format json
+fli dates JFK LHR --from 2025-06-01 --to 2025-06-30 --format json
+```
+
 ### MCP Server (for AI Assistants)
 
 Run the MCP server for use with Claude Desktop or other MCP clients:
