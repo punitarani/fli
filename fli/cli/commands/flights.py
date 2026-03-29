@@ -40,6 +40,7 @@ def _search_flights_core(
     cabin_class: str = "ECONOMY",
     max_stops: str = "ANY",
     sort_by: str = "CHEAPEST",
+    exclude_basic_economy: bool = False,
     output_format: OutputFormat = OutputFormat.TEXT,
 ) -> None:
     """Core flight search functionality."""
@@ -101,6 +102,7 @@ def _search_flights_core(
             seat_type=seat_type,
             airlines=parsed_airlines,
             sort_by=sort,
+            exclude_basic_economy=exclude_basic_economy,
         )
 
         # Perform search
@@ -218,6 +220,14 @@ def flights(
             help="Sort results by (CHEAPEST, DURATION, DEPARTURE_TIME, ARRIVAL_TIME)",
         ),
     ] = "CHEAPEST",
+    exclude_basic_economy: Annotated[
+        bool,
+        typer.Option(
+            "--exclude-basic",
+            "-eb",
+            help="Exclude basic economy fares",
+        ),
+    ] = False,
     output_format: Annotated[
         OutputFormat,
         typer.Option(
@@ -232,6 +242,7 @@ def flights(
     Example:
         fli flights JFK LHR 2025-10-25 --time 6-20 --airlines BA KL --stops NON_STOP
         fli flights JFK LHR 2025-10-25 --format json
+        fli flights JFK LHR 2025-10-25 --exclude-basic
 
     """
     _search_flights_core(
@@ -244,5 +255,6 @@ def flights(
         cabin_class=cabin_class,
         max_stops=max_stops,
         sort_by=sort_by,
+        exclude_basic_economy=exclude_basic_economy,
         output_format=output_format,
     )
