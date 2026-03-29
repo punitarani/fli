@@ -1,9 +1,9 @@
 site_name: Fli Documentation
 site_url: https://punitarani.github.io/fli
-site_description: Documentation for the Fli library - A Python wrapper for Google Flights API
+site_description: Documentation for the Fli library - A Python library for direct Google Flights API access
 repo_url: https://github.com/punitarani/fli
 site_author: Punit Arani
-copyright: Copyright &copy; 2024 Punit Arani
+copyright: Copyright &copy; 2024-2026 Punit Arani
 
 theme:
   name: material

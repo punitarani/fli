@@ -92,8 +92,8 @@ Search for flights between two airports on a specific date.
         {
           "departure_airport": "JFK",
           "arrival_airport": "LHR",
-          "departure_time": "2025-03-15T18:00:00",
-          "arrival_time": "2025-03-16T06:30:00",
+          "departure_time": "2026-03-15T18:00:00",
+          "arrival_time": "2026-03-16T06:30:00",
           "duration": 450,
           "airline": "BA",
           "flight_number": "BA178"
@@ -134,13 +134,13 @@ Find the cheapest travel dates between two airports within a date range.
   "success": true,
   "dates": [
     {
-      "date": "2025-03-15",
+      "date": "2026-03-15",
       "price": 350.00,
       "currency": "USD",
       "return_date": null
     },
     {
-      "date": "2025-03-18",
+      "date": "2026-03-18",
       "price": 375.00,
       "currency": "USD",
       "return_date": null
@@ -148,7 +148,7 @@ Find the cheapest travel dates between two airports within a date range.
   ],
   "count": 30,
   "trip_type": "ONE_WAY",
-  "date_range": "2025-03-01 to 2025-03-31"
+  "date_range": "2026-03-01 to 2026-03-31"
 }
 ```
 

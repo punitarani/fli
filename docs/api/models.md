@@ -17,12 +17,12 @@ flight_segments = [
     FlightSegment(
         departure_airport=[[Airport.JFK, 0]],
         arrival_airport=[[Airport.LAX, 0]],
-        travel_date="2024-06-01",
+        travel_date="2026-06-01",
     ),
     FlightSegment(
         departure_airport=[[Airport.LAX, 0]],
         arrival_airport=[[Airport.JFK, 0]],
-        travel_date="2024-06-15",
+        travel_date="2026-06-15",
     )
 ]
 

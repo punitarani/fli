@@ -15,7 +15,7 @@ All standard commands are in the `Makefile` and `CLAUDE.md`. Key ones:
 - **Format**: `make format`
 - **Tests**: `make test` (standard), `make test-all` (including fuzz)
 - **CLI**: `uv run fli flights JFK LAX 2026-05-15`
-- **MCP HTTP server**: `uv run fli-mcp-http` (serves at `http://127.0.0.1:8000/mcp`)
+- **MCP HTTP server**: `uv run fli-mcp-http` (serves at `http://127.0.0.1:8000/mcp/`)
 
 ### Testing caveats
 
@@ -26,4 +26,4 @@ All standard commands are in the `Makefile` and `CLAUDE.md`. Key ones:
 ### MCP server notes
 
 - The MCP HTTP endpoint requires `Accept: application/json, text/event-stream` header.
-- The `fli/server/` module referenced in the Makefile (`make server`) does not exist yet; do not attempt to run it.
+- The `fli/server/` module has been removed from the codebase.
