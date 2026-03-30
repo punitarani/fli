@@ -63,7 +63,7 @@ The Cloudflare deployment exposes:
 * `ANY /mcp` - public streamable HTTP MCP endpoint
 
 The repo also includes `.github/workflows/ci-cd.yml`, which dry-runs the Cloudflare deploy on pull requests
-and deploys to Cloudflare automatically on pushes to `main`.
+and deploys to Cloudflare on GitHub release publish or manual workflow dispatch.
 
 See [docs/guides/cloudflare.md](docs/guides/cloudflare.md) for the full deployment guide and smoke-test flow.
 

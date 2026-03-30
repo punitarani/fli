@@ -77,7 +77,7 @@ The repo includes [`.github/workflows/ci-cd.yml`](../../.github/workflows/ci-cd.
 Behavior:
 
 * Pull requests to `main` run the reusable Python test workflow, validate the Worker types, and run a Cloudflare dry run
-* Pushes to `main` run the same checks, then deploy the Worker and container to Cloudflare
+* GitHub release publishes and manual workflow dispatches run the same checks, then deploy the Worker and container to Cloudflare
 
 Required GitHub secrets:
 
