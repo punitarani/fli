@@ -3,10 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev:vars": "./scripts/generate-dev-vars.sh",
     "check": "tsc --noEmit",
     "types": "wrangler types",
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "./scripts/cloudflare-deploy.sh",
+    "deploy:dry-run": "./scripts/cloudflare-deploy.sh --dry-run",
     "tail": "wrangler tail"
   },
   "dependencies": {

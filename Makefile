@@ -18,6 +18,10 @@ cloudflare-install:
 	npm install
 	npm run types
 
+# Generate local Wrangler env overrides from current shell vars
+cloudflare-dev-vars:
+	npm run dev:vars
+
 # Run the server
 server:
 	uv run uvicorn fli.server.main:app
@@ -31,6 +35,10 @@ mcp:
 # Run the Cloudflare MCP edge locally
 cloudflare-dev:
 	npm run dev
+
+# Validate the Cloudflare Worker packaging without deploying
+cloudflare-dry-run:
+	npm run deploy:dry-run -- --outdir dist-worker --upload-source-maps
 
 # Deploy the Cloudflare MCP edge and container
 cloudflare-deploy:
@@ -93,10 +101,12 @@ help:
 	@echo "  make install-dev - Install with dev dependencies"
 	@echo "  make install-all - Install all dependencies"
 	@echo "  make cloudflare-install - Install Cloudflare Worker dependencies"
+	@echo "  make cloudflare-dev-vars - Generate .dev.vars from current shell vars"
 	@echo "  make server      - Run the server"
 	@echo "  make server-dev  - Run the development server with reload"
 	@echo "  make mcp         - Run the MCP server"
 	@echo "  make cloudflare-dev - Run the Cloudflare Worker locally"
+	@echo "  make cloudflare-dry-run - Validate the Cloudflare deploy packaging locally"
 	@echo "  make cloudflare-deploy - Deploy the Cloudflare Worker and container"
 	@echo "  make cloudflare-tail - Tail Cloudflare Worker logs"
 	@echo "  make docs        - Build the docs"
@@ -112,4 +122,4 @@ help:
 	@echo "  make devcontainer - Build dev container image"
 	@echo "  make requirements - Generate the requirements.txt file"
 # Declare the targets as phony
-.PHONY: help install install-dev install-all cloudflare-install server server-dev mcp cloudflare-dev cloudflare-deploy cloudflare-tail docs format lint lint-fix test test-mcp test-fuzz test-all ci ci-docker devcontainer requirements
+.PHONY: help install install-dev install-all cloudflare-install cloudflare-dev-vars server server-dev mcp cloudflare-dev cloudflare-dry-run cloudflare-deploy cloudflare-tail docs format lint lint-fix test test-mcp test-fuzz test-all ci ci-docker devcontainer requirements

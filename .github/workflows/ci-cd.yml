@@ -1,0 +1,109 @@
+name: Cloudflare CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+env:
+  CI: "1"
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  cloudflare-validate:
+    name: Cloudflare Dry Run
+    runs-on: ubuntu-latest
+    needs: [test]
+    env:
+      FLI_MCP_DEFAULT_PASSENGERS: ${{ vars.FLI_MCP_DEFAULT_PASSENGERS }}
+      FLI_MCP_DEFAULT_CURRENCY: ${{ vars.FLI_MCP_DEFAULT_CURRENCY }}
+      FLI_MCP_DEFAULT_CABIN_CLASS: ${{ vars.FLI_MCP_DEFAULT_CABIN_CLASS }}
+      FLI_MCP_DEFAULT_SORT_BY: ${{ vars.FLI_MCP_DEFAULT_SORT_BY }}
+      FLI_MCP_DEFAULT_DEPARTURE_WINDOW: ${{ vars.FLI_MCP_DEFAULT_DEPARTURE_WINDOW }}
+      FLI_MCP_MAX_RESULTS: ${{ vars.FLI_MCP_MAX_RESULTS }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install Worker dependencies
+        run: npm ci
+
+      - name: Validate Worker env key list
+        run: |
+          PATTERN=$(grep -v '^#' scripts/worker-env-keys.txt | grep -v '^$' | tr '\n' '|' | sed 's/|$//')
+          if [ -z "$PATTERN" ]; then
+            echo "ERROR: scripts/worker-env-keys.txt produced an empty key pattern"
+            exit 1
+          fi
+          echo "Worker env key pattern: $PATTERN"
+
+      - name: Check generated Wrangler types
+        run: npm run types -- --check
+
+      - name: Worker dry run
+        run: |
+          rm -rf dist-worker
+          npm run deploy:dry-run -- --outdir dist-worker --upload-source-maps
+          test -f dist-worker/worker.js
+          test -f dist-worker/worker.js.map
+
+  deploy:
+    name: Deploy to Cloudflare
+    runs-on: ubuntu-latest
+    needs: [cloudflare-validate]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: cloudflare-workers
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      FLI_MCP_DEFAULT_PASSENGERS: ${{ vars.FLI_MCP_DEFAULT_PASSENGERS }}
+      FLI_MCP_DEFAULT_CURRENCY: ${{ vars.FLI_MCP_DEFAULT_CURRENCY }}
+      FLI_MCP_DEFAULT_CABIN_CLASS: ${{ vars.FLI_MCP_DEFAULT_CABIN_CLASS }}
+      FLI_MCP_DEFAULT_SORT_BY: ${{ vars.FLI_MCP_DEFAULT_SORT_BY }}
+      FLI_MCP_DEFAULT_DEPARTURE_WINDOW: ${{ vars.FLI_MCP_DEFAULT_DEPARTURE_WINDOW }}
+      FLI_MCP_MAX_RESULTS: ${{ vars.FLI_MCP_MAX_RESULTS }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install Worker dependencies
+        run: npm ci
+
+      - name: Prepare deployment metadata
+        id: metadata
+        run: |
+          COMMIT_SHORT="${GITHUB_SHA:0:7}"
+          DEPLOY_TAG="${GITHUB_REF_NAME}-${GITHUB_RUN_NUMBER}-${COMMIT_SHORT}"
+          {
+            echo "tag=${DEPLOY_TAG}"
+            echo "message=Deploy ${COMMIT_SHORT}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Deploy Worker and Container
+        run: |
+          npm run deploy -- \
+            --containers-rollout immediate \
+            --tag "${{ steps.metadata.outputs.tag }}" \
+            --message "${{ steps.metadata.outputs.message }}"
+
+      - name: Log deployment
+        run: |
+          echo "Deployed worker fli-mcp"
+          echo "Tag: ${{ steps.metadata.outputs.tag }}"

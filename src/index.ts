@@ -8,7 +8,6 @@ const MCP_ACCEPT_HEADER = "application/json, text/event-stream";
 const MCP_PATH = "/mcp";
 
 type WorkerEnv = Env & {
-  MCP_API_TOKEN?: string;
   FLI_MCP_DEFAULT_PASSENGERS?: string;
   FLI_MCP_DEFAULT_CURRENCY?: string;
   FLI_MCP_DEFAULT_CABIN_CLASS?: string;
@@ -48,8 +47,7 @@ const handler = {
           container_id: CONTAINER_ID,
           mcp_url: `${url.origin}${MCP_PATH}`,
           health_url: `${url.origin}/healthz`,
-          requires_bearer_auth: true,
-          configured: Boolean(env.MCP_API_TOKEN),
+          is_public: true,
         },
         200,
       );
@@ -65,10 +63,6 @@ const handler = {
     }
 
     if (url.pathname === MCP_PATH || url.pathname === `${MCP_PATH}/`) {
-      if (!isAuthorized(request, env)) {
-        return unauthorizedResponse(env);
-      }
-
       return proxyMcpRequest(request, env);
     }
 
@@ -126,65 +120,11 @@ function methodNotAllowed(allow: string[]): Response {
   );
 }
 
-function unauthorizedResponse(env: WorkerEnv): Response {
-  if (!env.MCP_API_TOKEN) {
-    return jsonResponse(
-      {
-        ok: false,
-        error: "MCP_API_TOKEN is not configured in Worker secrets.",
-      },
-      503,
-    );
-  }
-
-  return jsonResponse(
-    {
-      ok: false,
-      error: "Unauthorized",
-      message: "Provide Authorization: Bearer <MCP_API_TOKEN>.",
-    },
-    401,
-    { "www-authenticate": 'Bearer realm="fli-mcp"' },
-  );
-}
-
-function isAuthorized(request: Request, env: WorkerEnv): boolean {
-  if (!env.MCP_API_TOKEN) {
-    return false;
-  }
-
-  const authorization = request.headers.get("authorization");
-  if (!authorization?.startsWith("Bearer ")) {
-    return false;
-  }
-
-  const provided = authorization.slice("Bearer ".length).trim();
-  return timingSafeEqual(provided, env.MCP_API_TOKEN);
-}
-
-function timingSafeEqual(left: string, right: string): boolean {
-  const encoder = new TextEncoder();
-  const leftBytes = encoder.encode(left);
-  const rightBytes = encoder.encode(right);
-  const maxLength = Math.max(leftBytes.length, rightBytes.length);
-
-  let difference = leftBytes.length === rightBytes.length ? 0 : 1;
-
-  for (let index = 0; index < maxLength; index += 1) {
-    difference |= (leftBytes[index] ?? 0) ^ (rightBytes[index] ?? 0);
-  }
-
-  return difference === 0;
-}
-
 async function proxyMcpRequest(request: Request, env: WorkerEnv): Promise<Response> {
   const targetUrl = normalizeMcpUrl(request.url);
-  const headers = new Headers(request.headers);
-  headers.delete("authorization");
-
   const forwardedRequest = new Request(targetUrl, {
     method: request.method,
-    headers,
+    headers: request.headers,
     body: shouldForwardBody(request.method) ? request.body : undefined,
     redirect: "manual",
   });

@@ -43,9 +43,9 @@ Once running, the MCP endpoint is served at `/mcp/`, for example: `http://127.0.
 ## Deploying to Cloudflare
 
 This repository also includes a Cloudflare deployment target for the HTTP MCP server. It uses a Worker to
-authenticate and proxy requests to a single Cloudflare Container running `fli-mcp-http`.
+proxy requests to a single Cloudflare Container running `fli-mcp-http`.
 
-See the [Cloudflare deployment guide](cloudflare.md) for setup, secrets, deployment, and smoke tests.
+See the [Cloudflare deployment guide](cloudflare.md) for setup, CI/CD, deployment, and smoke tests.
 
 ## Claude Desktop Configuration
 

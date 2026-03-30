@@ -1,0 +1,14 @@
+## Cloudflare Worker/container environment variable keys.
+## Used by:
+## - scripts/generate-dev-vars.sh
+## - scripts/cloudflare-deploy.sh
+## - .github/workflows/ci-cd.yml
+##
+## Only include values that should be overrideable outside wrangler.jsonc defaults.
+
+FLI_MCP_DEFAULT_PASSENGERS
+FLI_MCP_DEFAULT_CURRENCY
+FLI_MCP_DEFAULT_CABIN_CLASS
+FLI_MCP_DEFAULT_SORT_BY
+FLI_MCP_DEFAULT_DEPARTURE_WINDOW
+FLI_MCP_MAX_RESULTS
