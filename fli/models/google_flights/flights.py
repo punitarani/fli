@@ -112,9 +112,10 @@ class FlightSearchFilters(BaseModel):
                 self.layover_restrictions.max_duration if self.layover_restrictions else None
             )
 
-            # Selected flight (to fetch return flights)
+            # Selected flight (to fetch return/next-leg flights)
             selected_flights = None
-            if self.trip_type == TripType.ROUND_TRIP and segment.selected_flight is not None:
+            is_multi_leg = self.trip_type in (TripType.ROUND_TRIP, TripType.MULTI_CITY)
+            if is_multi_leg and segment.selected_flight is not None:
                 selected_flights = [
                     [
                         serialize(leg.departure_airport.name),
