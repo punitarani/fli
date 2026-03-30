@@ -131,7 +131,7 @@ def build_multi_city_segments(
         FlightSegment(
             departure_airport=[[origin, 0]],
             arrival_airport=[[destination, 0]],
-            travel_date=date,
+            travel_date=normalize_date(date),
             time_restrictions=time_restrictions,
         )
         for origin, destination, date in legs
