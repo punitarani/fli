@@ -4,7 +4,12 @@ This module provides shared parsing and building utilities used by both
 the CLI and MCP interfaces.
 """
 
-from .builders import build_date_search_segments, build_flight_segments, build_time_restrictions
+from .builders import (
+    build_date_search_segments,
+    build_flight_segments,
+    build_multi_city_segments,
+    build_time_restrictions,
+)
 from .parsers import (
     parse_airlines,
     parse_cabin_class,
@@ -27,5 +32,6 @@ __all__ = [
     # Builders
     "build_date_search_segments",
     "build_flight_segments",
+    "build_multi_city_segments",
     "build_time_restrictions",
 ]
