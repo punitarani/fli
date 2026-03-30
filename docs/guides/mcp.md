@@ -40,6 +40,13 @@ run_http(host="0.0.0.0", port=8000)
 
 Once running, the MCP endpoint is served at `/mcp/`, for example: `http://127.0.0.1:8000/mcp/`.
 
+## Deploying to Cloudflare
+
+This repository also includes a Cloudflare deployment target for the HTTP MCP server. It uses a Worker to
+authenticate and proxy requests to a single Cloudflare Container running `fli-mcp-http`.
+
+See the [Cloudflare deployment guide](cloudflare.md) for setup, secrets, deployment, and smoke tests.
+
 ## Claude Desktop Configuration
 
 Add this configuration to your `claude_desktop_config.json`:

@@ -13,6 +13,11 @@ install-dev:
 install-all:
 	uv sync --extra dev
 
+# Install Cloudflare Worker dependencies
+cloudflare-install:
+	npm install
+	npm run types
+
 # Run the server
 server:
 	uv run uvicorn fli.server.main:app
@@ -22,6 +27,18 @@ server-dev:
 # Run the MCP server
 mcp:
 	uv run fli-mcp
+
+# Run the Cloudflare MCP edge locally
+cloudflare-dev:
+	npm run dev
+
+# Deploy the Cloudflare MCP edge and container
+cloudflare-deploy:
+	npm run deploy
+
+# Tail logs for the Cloudflare MCP edge
+cloudflare-tail:
+	npm run tail
 
 # Build the docs
 docs:
@@ -75,9 +92,13 @@ help:
 	@echo "  make install     - Install dependencies"
 	@echo "  make install-dev - Install with dev dependencies"
 	@echo "  make install-all - Install all dependencies"
+	@echo "  make cloudflare-install - Install Cloudflare Worker dependencies"
 	@echo "  make server      - Run the server"
 	@echo "  make server-dev  - Run the development server with reload"
 	@echo "  make mcp         - Run the MCP server"
+	@echo "  make cloudflare-dev - Run the Cloudflare Worker locally"
+	@echo "  make cloudflare-deploy - Deploy the Cloudflare Worker and container"
+	@echo "  make cloudflare-tail - Tail Cloudflare Worker logs"
 	@echo "  make docs        - Build the docs"
 	@echo "  make format      - Format code using ruff"
 	@echo "  make lint        - Lint code using ruff"
@@ -91,4 +112,4 @@ help:
 	@echo "  make devcontainer - Build dev container image"
 	@echo "  make requirements - Generate the requirements.txt file"
 # Declare the targets as phony
-.PHONY: help install install-dev install-all server server-dev mcp docs format lint lint-fix test test-mcp test-fuzz test-all ci ci-docker devcontainer requirements
+.PHONY: help install install-dev install-all cloudflare-install server server-dev mcp cloudflare-dev cloudflare-deploy cloudflare-tail docs format lint lint-fix test test-mcp test-fuzz test-all ci ci-docker devcontainer requirements

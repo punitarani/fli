@@ -102,6 +102,7 @@ nav:
     - Quick Start: guides/quickstart.md
     - Examples: examples/advanced.md
     - MCP Server: guides/mcp.md
+    - Cloudflare Deployment: guides/cloudflare.md
   - API Reference:
     - Models: api/models.md
     - Search: api/search.md 

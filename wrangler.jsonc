@@ -1,0 +1,40 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "fli-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-03-29",
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "vars": {
+    "FLI_MCP_DEFAULT_PASSENGERS": "1",
+    "FLI_MCP_DEFAULT_CURRENCY": "USD",
+    "FLI_MCP_DEFAULT_CABIN_CLASS": "ECONOMY",
+    "FLI_MCP_DEFAULT_SORT_BY": "CHEAPEST"
+  },
+  "containers": [
+    {
+      "class_name": "FliMcpContainer",
+      "image": "./Dockerfile",
+      "instance_type": "lite",
+      "max_instances": 1
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "FLI_MCP",
+        "class_name": "FliMcpContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "FliMcpContainer"
+      ]
+    }
+  ]
+}

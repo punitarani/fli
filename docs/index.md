@@ -19,6 +19,7 @@ flights and analyze pricing data.
 * Natural language flight search with Claude
 * Two powerful tools: `search_flights` and `search_dates`
 * Easy configuration with environment variables
+* Deployable to Cloudflare with a Worker + Container edge
 
 ### 🔍 Search Capabilities
 
@@ -60,6 +61,7 @@ fli-mcp-http
 ```
 
 See the [MCP Guide](guides/mcp.md) for Claude Desktop configuration.
+See the [Cloudflare Guide](guides/cloudflare.md) for remote HTTP deployment.
 
 ### Basic Usage
 

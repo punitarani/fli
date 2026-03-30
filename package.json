@@ -1,0 +1,19 @@
+{
+  "name": "fli-cloudflare",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "types": "wrangler types",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "^0.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "wrangler": "^4.78.0"
+  }
+}

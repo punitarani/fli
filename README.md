@@ -27,6 +27,43 @@ fli-mcp-http  # serves at http://127.0.0.1:8000/mcp/
 
 ![MCP Demo](https://github.com/punitarani/fli/blob/main/data/mcp-demo.gif)
 
+### Deploying MCP to Cloudflare
+
+The HTTP MCP server can be deployed to Cloudflare as a single [Cloudflare Container](https://developers.cloudflare.com/containers/)
+fronted by a small Worker that handles bearer auth, readiness checks, and request normalization.
+
+Prerequisites:
+
+* Workers Paid plan with Containers enabled
+* `npm`
+* Docker
+* `wrangler login`
+
+```bash
+# Install Worker dependencies and generate Worker types
+make cloudflare-install
+
+# For local wrangler dev, place the bearer token in .dev.vars
+printf 'MCP_API_TOKEN=replace-me\n' > .dev.vars
+
+# Provide the MCP bearer token used at the Worker edge
+npx wrangler secret put MCP_API_TOKEN
+
+# Run locally
+make cloudflare-dev
+
+# Deploy
+make cloudflare-deploy
+```
+
+The Cloudflare deployment exposes:
+
+* `GET /` - deployment metadata
+* `GET /healthz` - container/MCP readiness
+* `ANY /mcp` - authenticated streamable HTTP MCP endpoint
+
+See [docs/guides/cloudflare.md](docs/guides/cloudflare.md) for the full deployment guide and smoke-test flow.
+
 ### Connecting to Claude Desktop
 
 ```json
@@ -217,6 +254,19 @@ make mcp
 # Run the MCP server over HTTP (streamable)
 fli-mcp-http  # serves at http://127.0.0.1:8000/mcp/
 ```
+
+### Deploy to Cloudflare
+
+Use the included Worker + Container project to deploy the HTTP MCP endpoint to Cloudflare.
+
+```bash
+make cloudflare-install
+npx wrangler secret put MCP_API_TOKEN
+make cloudflare-deploy
+```
+
+The Worker protects `/mcp` with bearer auth and exposes `/healthz` for readiness. Local and production
+smoke-test steps are documented in [docs/guides/cloudflare.md](docs/guides/cloudflare.md).
 
 ### Claude Desktop Configuration
 
