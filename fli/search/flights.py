@@ -167,14 +167,15 @@ class SearchFlights:
         try:
             if len(fl) > 12 and isinstance(fl[12], list):
                 amenities = fl[12]
-                details["wifi"] = bool(amenities[1]) if len(amenities) > 1 and amenities[1] is not None else None
-                has_ac = len(amenities) > 11 and amenities[11] is not None and amenities[11] >= 3
-                has_usb = len(amenities) > 11 and amenities[11] is not None and amenities[11] >= 2
-                if has_ac or has_usb:
-                    details["power"] = True
-                has_seatback = len(amenities) > 9 and amenities[9] is not None and bool(amenities[9])
-                if has_seatback:
-                    details["in_seat_entertainment"] = True
+                details["wifi"] = (
+                    bool(amenities[1])
+                    if len(amenities) > 1 and amenities[1] is not None
+                    else None
+                )
+                if len(amenities) > 11 and amenities[11] is not None:
+                    details["power"] = amenities[11] >= 2
+                if len(amenities) > 9 and amenities[9] is not None:
+                    details["in_seat_entertainment"] = bool(amenities[9])
         except (IndexError, TypeError):
             pass
 

@@ -331,9 +331,12 @@ def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[s
                 *[_serialize_flight_leg(leg) for leg in return_flight.legs],
             ],
         }
-        emissions = _serialize_emissions(outbound.emissions)
-        if emissions:
-            result["emissions"] = emissions
+        outbound_emissions = _serialize_emissions(outbound.emissions)
+        if outbound_emissions:
+            result["outbound_emissions"] = outbound_emissions
+        return_emissions = _serialize_emissions(return_flight.emissions)
+        if return_emissions:
+            result["return_emissions"] = return_emissions
         return result
     else:
         result = {
