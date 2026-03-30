@@ -284,7 +284,7 @@ class DateSearchParams(BaseModel):
 
 def _serialize_flight_leg(leg: Any) -> dict[str, Any]:
     """Serialize a single flight leg to a dictionary."""
-    return {
+    result: dict[str, Any] = {
         "departure_airport": leg.departure_airport,
         "arrival_airport": leg.arrival_airport,
         "departure_time": leg.departure_datetime,
@@ -294,14 +294,40 @@ def _serialize_flight_leg(leg: Any) -> dict[str, Any]:
         "airline_code": getattr(leg.airline, "name", leg.airline).lstrip("_"),
         "flight_number": leg.flight_number,
     }
+    if leg.aircraft:
+        result["aircraft"] = leg.aircraft
+    if leg.legroom:
+        result["legroom"] = leg.legroom
+    if leg.codeshares:
+        result["codeshares"] = leg.codeshares
+    if leg.wifi is not None:
+        result["wifi"] = leg.wifi
+    if leg.power is not None:
+        result["power"] = leg.power
+    if leg.in_seat_entertainment is not None:
+        result["in_seat_entertainment"] = leg.in_seat_entertainment
+    return result
+
+
+def _serialize_emissions(emissions: Any) -> dict[str, Any] | None:
+    """Serialize emissions data to a dictionary."""
+    if emissions is None:
+        return None
+    result: dict[str, Any] = {}
+    if emissions.co2_grams is not None:
+        result["co2_grams"] = emissions.co2_grams
+    if emissions.typical_co2_grams is not None:
+        result["typical_co2_grams"] = emissions.typical_co2_grams
+    if emissions.diff_percent is not None:
+        result["diff_percent"] = emissions.diff_percent
+    return result or None
 
 
 def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[str, Any]:
     """Serialize a flight result (or round-trip pair) to a dictionary."""
     if is_round_trip and isinstance(flight, tuple):
         outbound, return_flight = flight
-        return {
-            # Google Flights returns the full round-trip price on the outbound leg
+        result: dict[str, Any] = {
             "price": outbound.price,
             "currency": CONFIG.default_currency,
             "legs": [
@@ -309,12 +335,23 @@ def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[s
                 *[_serialize_flight_leg(leg) for leg in return_flight.legs],
             ],
         }
+        outbound_emissions = _serialize_emissions(outbound.emissions)
+        if outbound_emissions:
+            result["outbound_emissions"] = outbound_emissions
+        return_emissions = _serialize_emissions(return_flight.emissions)
+        if return_emissions:
+            result["return_emissions"] = return_emissions
+        return result
     else:
-        return {
+        result = {
             "price": flight.price,
             "currency": CONFIG.default_currency,
             "legs": [_serialize_flight_leg(leg) for leg in flight.legs],
         }
+        emissions = _serialize_emissions(flight.emissions)
+        if emissions:
+            result["emissions"] = emissions
+        return result
 
 
 def _serialize_date_result(date_result: Any) -> dict[str, Any]:

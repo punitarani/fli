@@ -15,7 +15,7 @@ from fli.models import (
     FlightResult,
     FlightSearchFilters,
 )
-from fli.models.google_flights.base import TripType
+from fli.models.google_flights.base import Emissions, TripType
 from fli.search.client import get_client
 
 
@@ -131,11 +131,99 @@ class SearchFlights:
                     departure_datetime=SearchFlights._parse_datetime(fl[20], fl[8]),
                     arrival_datetime=SearchFlights._parse_datetime(fl[21], fl[10]),
                     duration=fl[11],
+                    **SearchFlights._parse_leg_details(fl),
                 )
                 for fl in data[0][2]
             ],
+            emissions=SearchFlights._parse_emissions(data),
         )
         return flight
+
+    @staticmethod
+    def _parse_leg_details(fl: list) -> dict:
+        """Extract aircraft, legroom, codeshares, and amenities from a raw leg.
+
+        Args:
+            fl: Raw leg data array from the API response
+
+        Returns:
+            Dict of optional fields for FlightLeg construction
+
+        """
+        details: dict = {}
+        try:
+            if len(fl) > 17 and isinstance(fl[17], str):
+                details["aircraft"] = fl[17]
+        except (IndexError, TypeError):
+            pass
+
+        try:
+            if len(fl) > 14 and isinstance(fl[14], str):
+                details["legroom"] = fl[14]
+        except (IndexError, TypeError):
+            pass
+
+        try:
+            if len(fl) > 15 and isinstance(fl[15], list):
+                details["codeshares"] = [
+                    {"airline": cs[0], "flight_number": cs[1]}
+                    for cs in fl[15]
+                    if isinstance(cs, list) and len(cs) >= 2
+                ]
+        except (IndexError, TypeError):
+            pass
+
+        try:
+            if len(fl) > 12 and isinstance(fl[12], list):
+                amenities = fl[12]
+                details["wifi"] = (
+                    bool(amenities[1])
+                    if len(amenities) > 1 and amenities[1] is not None
+                    else None
+                )
+                if len(amenities) > 11 and amenities[11] is not None:
+                    details["power"] = amenities[11] >= 2
+                if len(amenities) > 9 and amenities[9] is not None:
+                    details["in_seat_entertainment"] = bool(amenities[9])
+        except (IndexError, TypeError):
+            pass
+
+        return details
+
+    @staticmethod
+    def _parse_emissions(data: list) -> Emissions | None:
+        """Extract CO2 emissions data from the itinerary-level response.
+
+        The emissions block sits after the legs summary in the itinerary array
+        and contains CO2 grams, typical route average, and a percentage diff.
+
+        Args:
+            data: Raw itinerary data from the API response
+
+        Returns:
+            Emissions object if data is available, otherwise None
+
+        """
+        try:
+            info = data[0]
+            emissions_block = info[18] if len(info) > 18 else None
+            if not isinstance(emissions_block, list) or len(emissions_block) < 11:
+                return None
+
+            co2 = emissions_block[7] if isinstance(emissions_block[7], int) else None
+            typical = emissions_block[8] if isinstance(emissions_block[8], int) else None
+            diff_pct = emissions_block[3] if isinstance(emissions_block[3], int) else None
+
+            if co2 is None and typical is None:
+                return None
+
+            return Emissions(
+                co2_grams=co2,
+                typical_co2_grams=typical,
+                diff_percent=diff_pct,
+            )
+        except (IndexError, TypeError):
+            return None
 
     @staticmethod
     def _parse_price(data: list) -> float:
