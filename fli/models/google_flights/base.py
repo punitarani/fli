@@ -131,6 +131,20 @@ class FlightLeg(BaseModel):
     departure_datetime: datetime
     arrival_datetime: datetime
     duration: PositiveInt  # in minutes
+    aircraft: str | None = None
+    legroom: str | None = None
+    codeshares: list[dict[str, str]] | None = None
+    wifi: bool | None = None
+    power: bool | None = None
+    in_seat_entertainment: bool | None = None
+
+
+class Emissions(BaseModel):
+    """CO2 emissions data for a flight itinerary."""
+
+    co2_grams: int | None = None
+    typical_co2_grams: int | None = None
+    diff_percent: int | None = None
 
 
 class FlightResult(BaseModel):
@@ -140,6 +154,7 @@ class FlightResult(BaseModel):
     price: NonNegativeFloat  # in specified currency
     duration: PositiveInt  # total duration in minutes
     stops: NonNegativeInt
+    emissions: Emissions | None = None
 
 
 class FlightSegment(BaseModel):
