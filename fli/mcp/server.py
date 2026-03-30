@@ -288,7 +288,7 @@ def _serialize_flight_leg(leg: Any) -> dict[str, Any]:
         "arrival_time": leg.arrival_datetime,
         "duration": leg.duration,
         "airline": leg.airline,
-        "airline_code": leg.airline.name,
+        "airline_code": leg.airline.name.lstrip("_"),
         "flight_number": leg.flight_number,
     }
 
