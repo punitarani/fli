@@ -81,8 +81,11 @@ def parse_airlines(codes: list[str] | None) -> list[Airline] | None:
         code = code.strip().upper()
         if not code:
             continue
+        # Airline codes starting with a digit need an underscore prefix
+        # to match the Airline enum member names (e.g., "3F" -> "_3F")
+        enum_key = f"_{code}" if code[0].isdigit() else code
         try:
-            airline = getattr(Airline, code)
+            airline = getattr(Airline, enum_key)
             airlines.append(airline)
         except AttributeError as e:
             raise ParseError(f"Invalid airline code: '{code}'") from e
