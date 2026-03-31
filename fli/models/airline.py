@@ -944,7 +944,7 @@ class Airline(Enum):
     _3C = "Air Chathams"
     _3D = "Dokasch"
     _3E = "Multi Aero"
-    _3F = "Pacific Airways"
+    _3F = "FlyOne Armenia"
     _3G = "AsiaCargo Express"
     _3H = "Air Inuit"
     _3I = "Pison Airways Ltd"

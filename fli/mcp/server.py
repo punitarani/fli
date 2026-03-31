@@ -240,6 +240,9 @@ class FlightSearchParams(BaseModel):
         ge=1,
         description="Number of adult passengers",
     )
+    exclude_basic_economy: bool = Field(
+        False, description="Exclude basic economy fares from results"
+    )
 
 
 class DateSearchParams(BaseModel):
@@ -288,6 +291,7 @@ def _serialize_flight_leg(leg: Any) -> dict[str, Any]:
         "arrival_time": leg.arrival_datetime,
         "duration": leg.duration,
         "airline": leg.airline,
+        "airline_code": getattr(leg.airline, "name", leg.airline).lstrip("_"),
         "flight_number": leg.flight_number,
     }
 
@@ -361,6 +365,7 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
             seat_type=cabin_class,
             airlines=airlines,
             sort_by=sort_by,
+            exclude_basic_economy=params.exclude_basic_economy,
         )
 
         # Perform search
@@ -511,6 +516,10 @@ def search_flights(
         int | None,
         Field(description="Number of adult passengers", ge=1),
     ] = None,
+    exclude_basic_economy: Annotated[
+        bool,
+        Field(description="Exclude basic economy fares from results"),
+    ] = False,
 ) -> dict[str, Any]:
     """Search for flights between two airports on a specific date.
 
@@ -529,6 +538,7 @@ def search_flights(
         max_stops=max_stops,
         sort_by=sort_by,
         passengers=passengers or CONFIG.default_passengers,
+        exclude_basic_economy=exclude_basic_economy,
     )
     return _execute_flight_search(params)
 

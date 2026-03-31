@@ -37,6 +37,7 @@ class FlightSearchFilters(BaseModel):
     max_duration: PositiveInt | None = None
     layover_restrictions: LayoverRestrictions | None = None
     sort_by: SortBy = SortBy.NONE
+    exclude_basic_economy: bool = False
 
     def format(self) -> list:
         """Format filters into Google Flights API structure.
@@ -111,9 +112,10 @@ class FlightSearchFilters(BaseModel):
                 self.layover_restrictions.max_duration if self.layover_restrictions else None
             )
 
-            # Selected flight (to fetch return flights)
+            # Selected flight (to fetch return/next-leg flights)
             selected_flights = None
-            if self.trip_type == TripType.ROUND_TRIP and segment.selected_flight is not None:
+            is_multi_leg = self.trip_type in (TripType.ROUND_TRIP, TripType.MULTI_CITY)
+            if is_multi_leg and segment.selected_flight is not None:
                 selected_flights = [
                     [
                         serialize(leg.departure_airport.name),
@@ -172,11 +174,22 @@ class FlightSearchFilters(BaseModel):
                 None,  # placeholder
                 None,  # placeholder
                 1,  # placeholder (hardcoded to 1)
+                None,  # placeholder
+                None,  # placeholder
+                None,  # placeholder
+                None,  # placeholder
+                None,  # placeholder
+                None,  # placeholder
+                None,  # placeholder
+                None,  # placeholder
+                None,  # placeholder
+                None,  # placeholder
+                1 if self.exclude_basic_economy else 0,
             ],
             serialize(self.sort_by.value),
             0,  # constant
             0,  # constant
-            2,  # constant
+            1,  # constant
         ]
 
         return filters

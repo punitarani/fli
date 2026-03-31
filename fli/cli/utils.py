@@ -289,17 +289,20 @@ def display_flight_results(flights: list):
         return
 
     for i, flight_data in enumerate(flights, 1):
-        is_round_trip = isinstance(flight_data, tuple)
-        flight_segments = [flight_data] if not is_round_trip else [flight_data[0], flight_data[1]]
+        is_multi_leg = isinstance(flight_data, tuple)
+        flight_segments = list(flight_data) if is_multi_leg else [flight_data]
+        num_legs = len(flight_segments)
 
         # Create main flight info table
         table = Table(show_header=False, box=box.SIMPLE)
         table.add_column("Label", style="blue")
         table.add_column("Value", style="green")
 
-        # Google Flights returns the full round-trip price on the outbound leg
-        total_price = flight_segments[0].price
-        table.add_row("Total Price", format_price(total_price, flight_segments[0].currency))
+        # Google Flights returns the full trip price on the outbound leg for round-trips,
+        # and on the final leg for multi-city trips.
+        price_segment = flight_segments[-1] if num_legs > 2 else flight_segments[0]
+        total_price = price_segment.price
+        table.add_row("Total Price", format_price(total_price, price_segment.currency))
 
         total_duration = sum(flight.duration for flight in flight_segments)
         table.add_row("Total Duration", format_duration(total_duration))
@@ -309,7 +312,12 @@ def display_flight_results(flights: list):
         # Create segments tables for each direction
         all_segments = []
         for idx, flight in enumerate(flight_segments):
-            direction = "" if not is_round_trip else ("Outbound" if idx == 0 else "Return")
+            if num_legs == 1:
+                direction = ""
+            elif num_legs == 2:
+                direction = "Outbound" if idx == 0 else "Return"
+            else:
+                direction = f"Leg {idx + 1}"
             segments = Table(
                 title=(f"{direction} Flight Segments" if direction else "Flight Segments"),
                 box=box.ROUNDED,
@@ -333,7 +341,12 @@ def display_flight_results(flights: list):
             all_segments.extend([segments, Text("")])
 
         # Display in a panel
-        title = "Round-trip Flight" if is_round_trip else "One-way Flight"
+        if num_legs > 2:
+            title = "Multi-city Flight"
+        elif num_legs == 2:
+            title = "Round-trip Flight"
+        else:
+            title = "One-way Flight"
         console.print(
             Panel(
                 Group(

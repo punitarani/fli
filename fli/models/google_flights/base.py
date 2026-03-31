@@ -46,9 +46,7 @@ class TripType(Enum):
 
     ROUND_TRIP = 1
     ONE_WAY = 2
-
-    # Currently not supported - kept for reference
-    _MULTI_CITY = 3  # Unsupported
+    MULTI_CITY = 3
 
 
 class MaxStops(Enum):

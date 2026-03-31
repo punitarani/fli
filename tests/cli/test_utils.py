@@ -109,6 +109,12 @@ def test_parse_airlines_none():
     assert result is None
 
 
+def test_parse_airlines_numeric_prefix():
+    """Test that airline codes starting with a digit are resolved correctly."""
+    result = parse_airlines(["3F"])
+    assert result == [Airline._3F]
+
+
 def test_parse_airlines_invalid():
     """Test parsing airlines with invalid code."""
     with pytest.raises(BadParameter):
