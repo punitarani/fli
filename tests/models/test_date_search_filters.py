@@ -175,7 +175,7 @@ TEST_CASES = [
         "name": "Test 3: Flight Search Data",
         "search": DateSearchFilters(
             passenger_info=PassengerInfo(
-                adults=2,
+                adults=3,
                 children=3,
                 infants_in_seat=0,
                 infants_on_lap=1,
@@ -215,7 +215,7 @@ TEST_CASES = [
                 None,
                 [],
                 1,
-                [2, 3, 1, 0],
+                [3, 3, 1, 0],
                 [None, 900],
                 None,
                 None,

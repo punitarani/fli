@@ -80,7 +80,12 @@ def main():
     # Create filters with complex requirements
     filters = FlightSearchFilters(
         trip_type=TripType.ROUND_TRIP,
-        passenger_info=PassengerInfo(adults=2, children=1, infants_on_lap=1),
+        passenger_info=PassengerInfo(
+            adults=2,
+            children=1,
+            infants_in_seat=1,
+            infants_on_lap=1,
+        ),
         flight_segments=[outbound, return_flight],
         stops=MaxStops.ONE_STOP_OR_FEWER,
         seat_type=SeatType.BUSINESS,

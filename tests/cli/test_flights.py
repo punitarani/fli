@@ -94,6 +94,33 @@ def test_flights_with_stops(runner, mock_search_flights, mock_console):
     mock_search_flights.search.assert_called_once()
 
 
+def test_flights_with_family_passenger_counts(runner, mock_search_flights, mock_console):
+    """Test flights search passes family passenger counts into filters."""
+    result = runner.invoke(
+        app,
+        [
+            "flights",
+            "JFK",
+            "LAX",
+            datetime.now().strftime("%Y-%m-%d"),
+            "--children",
+            "2",
+            "--infants-in-seat",
+            "1",
+            "--infants-on-lap",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    mock_search_flights.search.assert_called_once()
+    args, _ = mock_search_flights.search.call_args
+    assert args[0].passenger_info.adults == 1
+    assert args[0].passenger_info.children == 2
+    assert args[0].passenger_info.infants_in_seat == 1
+    assert args[0].passenger_info.infants_on_lap == 1
+
+
 def test_flights_invalid_airport(runner, mock_search_flights, mock_console):
     """Test flights search with invalid airport code."""
     result = runner.invoke(

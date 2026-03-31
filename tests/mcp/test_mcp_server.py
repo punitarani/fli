@@ -1,6 +1,7 @@
 """Test MCP server functionality."""
 
 from datetime import datetime, timedelta
+from unittest.mock import MagicMock
 
 from fli.mcp.server import (
     DateSearchParams,
@@ -211,6 +212,53 @@ class TestMCPServer:
         assert "airline" in result["error"].lower()
         assert result["flights"] == []
 
+    def test_search_flights_passes_family_passenger_counts(self, monkeypatch):
+        """Test flight search tool passes family passenger counts into filters."""
+        mock_client = MagicMock()
+        mock_client.search.return_value = []
+        monkeypatch.setattr("fli.mcp.server.SearchFlights", lambda: mock_client)
+
+        result = search_flights(
+            origin="JFK",
+            destination="LHR",
+            departure_date=get_future_date(30),
+            passengers=2,
+            children=1,
+            infants_in_seat=1,
+            infants_on_lap=1,
+        )
+
+        assert result["success"] is True
+        args, _ = mock_client.search.call_args
+        assert args[0].passenger_info.adults == 2
+        assert args[0].passenger_info.children == 1
+        assert args[0].passenger_info.infants_in_seat == 1
+        assert args[0].passenger_info.infants_on_lap == 1
+
+    def test_search_dates_passes_family_passenger_counts(self, monkeypatch):
+        """Test date search tool passes family passenger counts into filters."""
+        mock_client = MagicMock()
+        mock_client.search.return_value = []
+        monkeypatch.setattr("fli.mcp.server.SearchDates", lambda: mock_client)
+
+        result = search_dates(
+            origin="JFK",
+            destination="LHR",
+            start_date=get_future_date(30),
+            end_date=get_future_date(60),
+            passengers=2,
+            children=1,
+            infants_in_seat=1,
+            infants_on_lap=1,
+        )
+
+        assert result["success"] is True
+        args, _ = mock_client.search.call_args
+        assert args[0].passenger_info.adults == 2
+        assert args[0].passenger_info.children == 1
+        assert args[0].passenger_info.infants_in_seat == 1
+        assert args[0].passenger_info.infants_on_lap == 1
+
     def test_flight_search_params_validation(self):
         """Test FlightSearchParams validation."""
         future_date = get_future_date(30)
@@ -221,6 +269,9 @@ class TestMCPServer:
         assert params.cabin_class == "ECONOMY"  # default
         assert params.max_stops == "ANY"  # default
         assert params.sort_by == "CHEAPEST"  # default
+        assert params.children == 0
+        assert params.infants_in_seat == 0
+        assert params.infants_on_lap == 0
 
     def test_date_search_params_validation(self):
         """Test DateSearchParams validation."""
@@ -241,3 +292,6 @@ class TestMCPServer:
         assert params.cabin_class == "ECONOMY"  # default
         assert params.max_stops == "ANY"  # default
         assert params.sort_by_price is False  # default
+        assert params.children == 0
+        assert params.infants_in_seat == 0
+        assert params.infants_on_lap == 0

@@ -211,7 +211,7 @@ from fli.models import PassengerInfo
 PassengerInfo(adults=1)
 
 # Family with children
-PassengerInfo(adults=2, children=2, infants_on_lap=1)
+PassengerInfo(adults=2, children=2, infants_in_seat=1, infants_on_lap=1)
 ```
 
 ## Support

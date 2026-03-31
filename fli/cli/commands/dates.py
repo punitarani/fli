@@ -80,6 +80,27 @@ def dates(
             help="Trip duration in days",
         ),
     ] = 3,
+    children: Annotated[
+        int,
+        typer.Option(
+            "--children",
+            help="Number of children",
+        ),
+    ] = 0,
+    infants_in_seat: Annotated[
+        int,
+        typer.Option(
+            "--infants-in-seat",
+            help="Number of infants in seat",
+        ),
+    ] = 0,
+    infants_on_lap: Annotated[
+        int,
+        typer.Option(
+            "--infants-on-lap",
+            help="Number of infants on lap",
+        ),
+    ] = 0,
     airlines: Annotated[
         list[str] | None,
         typer.Option(
@@ -226,6 +247,9 @@ def dates(
             "end_date": end_date,
             "trip_duration": trip_duration,
             "is_round_trip": is_round_trip,
+            "children": children,
+            "infants_in_seat": infants_in_seat,
+            "infants_on_lap": infants_on_lap,
             "cabin_class": seat_type.name,
             "max_stops": stops.name,
             "departure_window": (
@@ -260,7 +284,12 @@ def dates(
         # Create search filters
         filters = DateSearchFilters(
             trip_type=trip_type,
-            passenger_info=PassengerInfo(adults=1),
+            passenger_info=PassengerInfo(
+                adults=1,
+                children=children,
+                infants_in_seat=infants_in_seat,
+                infants_on_lap=infants_on_lap,
+            ),
             flight_segments=segments,
             stops=stops,
             seat_type=seat_type,
@@ -320,6 +349,9 @@ def dates(
                         "end_date": end_date,
                         "trip_duration": trip_duration,
                         "is_round_trip": is_round_trip,
+                        "children": children,
+                        "infants_in_seat": infants_in_seat,
+                        "infants_on_lap": infants_on_lap,
                         "cabin_class": cabin_class,
                         "max_stops": max_stops,
                         "departure_window": (

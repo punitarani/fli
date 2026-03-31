@@ -65,6 +65,9 @@ The MCP server provides two main tools:
 | `airlines`         | list   | Filter by airline codes (e.g., ['BA', 'AA'])        |
 | `sort_by`          | string | CHEAPEST, DURATION, DEPARTURE_TIME, or ARRIVAL_TIME |
 | `passengers`       | int    | Number of adult passengers                          |
+| `children`         | int    | Number of child passengers                          |
+| `infants_in_seat`  | int    | Number of infants traveling in their own seat       |
+| `infants_on_lap`   | int    | Number of lap infants                               |
 
 #### `search_dates` Parameters
 
@@ -82,6 +85,9 @@ The MCP server provides two main tools:
 | `airlines`         | list   | Filter by airline codes (e.g., ['BA', 'AA']) |
 | `sort_by_price`    | bool   | Sort results by price (lowest first)         |
 | `passengers`       | int    | Number of adult passengers                   |
+| `children`         | int    | Number of child passengers                   |
+| `infants_in_seat`  | int    | Number of infants traveling in their own seat |
+| `infants_on_lap`   | int    | Number of lap infants                        |
 
 ## Quick Start
 
@@ -185,6 +191,9 @@ fli dates JFK LHR \
 | `--class, -c`    | Cabin class           | `ECONOMY`, `BUSINESS`  |
 | `--stops, -s`    | Maximum stops         | `NON_STOP`, `ONE_STOP` |
 | `--sort, -o`     | Sort results by       | `CHEAPEST`, `DURATION` |
+| `--children`     | Number of children    | `2`                    |
+| `--infants-in-seat` | Number of infants in seat | `1`             |
+| `--infants-on-lap` | Number of infants on lap | `1`               |
 | `--format`       | Output format         | `text`, `json`         |
 
 #### Dates Command (`fli dates`)
@@ -200,6 +209,9 @@ fli dates JFK LHR \
 | `--stops, -s`      | Maximum stops          | `NON_STOP`, `ONE_STOP` |
 | `--time`           | Departure time window  | `6-20`                 |
 | `--sort`           | Sort by price          | (flag)                 |
+| `--children`       | Number of children     | `2`                    |
+| `--infants-in-seat` | Number of infants in seat | `1`                |
+| `--infants-on-lap` | Number of infants on lap | `1`                  |
 | `--[day]`          | Day filters            | `--monday`, `--friday` |
 | `--format`         | Output format          | `text`, `json`         |
 
