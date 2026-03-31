@@ -63,7 +63,7 @@ class FlightSearchConfig(BaseSettings):
         "USD",
         min_length=3,
         max_length=3,
-        description="Three-letter currency code returned with search results.",
+        description="Fallback currency code when Google does not expose one in results.",
     )
     default_cabin_class: str = Field(
         "ECONOMY",
@@ -313,7 +313,7 @@ def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[s
         return {
             # Google Flights returns the full round-trip price on the outbound leg
             "price": outbound.price,
-            "currency": CONFIG.default_currency,
+            "currency": outbound.currency or CONFIG.default_currency,
             "legs": [
                 *[_serialize_flight_leg(leg) for leg in outbound.legs],
                 *[_serialize_flight_leg(leg) for leg in return_flight.legs],
@@ -322,7 +322,7 @@ def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[s
     else:
         return {
             "price": flight.price,
-            "currency": CONFIG.default_currency,
+            "currency": flight.currency or CONFIG.default_currency,
             "legs": [_serialize_flight_leg(leg) for leg in flight.legs],
         }
 
@@ -332,7 +332,7 @@ def _serialize_date_result(date_result: Any) -> dict[str, Any]:
     return {
         "date": date_result.date,
         "price": date_result.price,
-        "currency": CONFIG.default_currency,
+        "currency": date_result.currency or CONFIG.default_currency,
         "return_date": getattr(date_result, "return_date", None),
     }
 
@@ -796,7 +796,7 @@ def configuration_resource() -> str:
             "prefix": "FLI_MCP_",
             "variables": {
                 "FLI_MCP_DEFAULT_PASSENGERS": "Adjust the default passenger count.",
-                "FLI_MCP_DEFAULT_CURRENCY": "Override the currency code returned with results.",
+                "FLI_MCP_DEFAULT_CURRENCY": "Override the fallback currency code for results.",
                 "FLI_MCP_DEFAULT_CABIN_CLASS": "Set a default cabin class.",
                 "FLI_MCP_DEFAULT_SORT_BY": "Set the default result sorting strategy.",
                 "FLI_MCP_DEFAULT_DEPARTURE_WINDOW": "Provide a default departure window (HH-HH).",
