@@ -226,7 +226,7 @@ class FlightSearchFilters(BaseModel):
                 1 if self.exclude_basic_economy else 0,
             ],
             serialize(self.sort_by.value),  # outer[2] sort mode
-            1 if self.show_all_results else 0,  # outer[3] 0=~30, 1=all. equivalent to clicking "Show more flights"
+            1 if self.show_all_results else 0,  # outer[3] 0=~30, 1=all results
             0,  # outer[4] seemingly no effect
             1,  # outer[5] seemingly no effect
         ]
