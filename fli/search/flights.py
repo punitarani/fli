@@ -153,7 +153,20 @@ class SearchFlights:
     @staticmethod
     def _parse_price_info(data: list) -> tuple[float, str | None]:
         """Extract the numeric price and returned currency from raw flight data."""
-        return SearchFlights._parse_price(data), SearchFlights._parse_currency(data)
+        price_block = SearchFlights._get_price_block(data)
+        price = 0.0
+        currency = None
+        try:
+            if price_block and price_block[0]:
+                price = float(price_block[0][-1])
+        except (IndexError, TypeError):
+            pass
+        try:
+            if price_block and len(price_block) > 1:
+                currency = extract_currency_from_price_token(price_block[1])
+        except (IndexError, TypeError):
+            pass
+        return price, currency
 
     @staticmethod
     def _parse_currency(data: list) -> str | None:

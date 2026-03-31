@@ -81,7 +81,7 @@ def _extract_currency_from_message(data: bytes) -> str | None:
                     return currency_bytes.decode("utf-8").upper()
 
                 nested_offset = _skip_field(nested_message, nested_offset, nested_wire_type)
-            return None
+            continue
 
         offset = _skip_field(data, offset, wire_type)
 
