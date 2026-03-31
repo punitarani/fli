@@ -14,6 +14,8 @@ from pydantic import (
 from fli.models.airline import Airline
 from fli.models.airport import Airport
 from fli.models.google_flights.base import (
+    BagsFilter,
+    EmissionsFilter,
     FlightSegment,
     LayoverRestrictions,
     MaxStops,
@@ -42,6 +44,8 @@ class DateSearchFilters(BaseModel):
     airlines: list[Airline] | None = None
     max_duration: PositiveInt | None = None
     layover_restrictions: LayoverRestrictions | None = None
+    emissions: EmissionsFilter = EmissionsFilter.ALL
+    bags: BagsFilter | None = None
     from_date: str
     to_date: str
     duration: PositiveInt | None = None
@@ -204,22 +208,27 @@ class DateSearchFilters(BaseModel):
                 self.layover_restrictions.max_duration if self.layover_restrictions else None
             )
 
+            # Emissions filter
+            emissions_filter = (
+                [self.emissions.value] if self.emissions != EmissionsFilter.ALL else None
+            )
+
             segment_formatted = [
                 segment_filters[0],  # departure airport
                 segment_filters[1],  # arrival airport
                 time_filters,  # time restrictions
                 serialize(self.stops.value),  # stops
                 airlines_filters,  # airlines
-                None,  # placeholder
+                None,  # unknown: accepts [] but 400s on scalars; no observable effect
                 segment.travel_date,  # travel date
                 [self.max_duration] if self.max_duration else None,  # max duration
-                None,  # placeholder
+                None,  # selected flight (unused in date search)
                 layover_airports,  # layover airports
-                None,  # placeholder
-                None,  # placeholder
+                None,  # unknown: accepts [] but 400s on scalars; no observable effect
+                None,  # seemingly no effect: accepts any value without changing results
                 layover_duration,  # layover duration
-                None,  # emissions
-                3,  # constant value
+                emissions_filter,  # emissions filter: [1]=less emissions, None=all
+                3,  # seemingly no effect: accepts any value without changing results
             ]
             formatted_segments.append(segment_formatted)
 
@@ -229,15 +238,19 @@ class DateSearchFilters(BaseModel):
         else:
             duration_filters = ()
 
+        # Bags filter
+        bags_filter = [self.bags.checked_bags, int(self.bags.carry_on)] if self.bags else None
+
         # Create the main filters structure
+        # See FlightSearchFilters.format() for full index map of filters[1].
         filters = [
-            None,  # placeholder
+            None,  # placeholder (flights uses []; dates uses None)
             [
-                None,  # placeholder
-                None,  # placeholder
+                None,  # [0] seemingly no effect
+                None,  # [1] seemingly no effect (not currency)
                 serialize(self.trip_type.value),
-                None,  # placeholder
-                [],  # empty array
+                None,  # [3] seemingly no effect
+                [],  # [4] seemingly no effect
                 serialize(self.seat_type.value),
                 [
                     self.passenger_info.adults,
@@ -246,16 +259,16 @@ class DateSearchFilters(BaseModel):
                     self.passenger_info.infants_in_seat,
                 ],
                 [None, self.price_limit.max_price] if self.price_limit else None,
-                None,  # placeholder
-                None,  # placeholder
-                None,  # placeholder
-                None,  # placeholder
-                None,  # placeholder
+                None,  # [8] seemingly no effect
+                None,  # [9] seemingly no effect
+                bags_filter,  # [10] bags filter [checked_bags, carry_on]
+                None,  # [11] seemingly no effect
+                None,  # [12] seemingly no effect
                 formatted_segments,
-                None,  # placeholder
-                None,  # placeholder
-                None,  # placeholder
-                1,  # placeholder (hardcoded to 1)
+                None,  # [14] seemingly no effect
+                None,  # [15] seemingly no effect
+                None,  # [16] seemingly no effect
+                1,  # [17] seemingly no effect (historically 1, but value doesn't seem to matter)
             ],
             [
                 serialize(self.from_date),

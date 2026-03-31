@@ -1108,3 +1108,8 @@ class Airline(Enum):
     _9W = "Jet Airways"
     _9X = "Southern Airways Express"
     _9Y = "National Airways"
+
+    # Airline alliances (used as filter values in Google Flights)
+    ONEWORLD = "Oneworld"
+    SKYTEAM = "SkyTeam"
+    STAR_ALLIANCE = "Star Alliance"

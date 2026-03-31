@@ -33,12 +33,14 @@ from fli.core import (
     build_time_restrictions,
     parse_airlines,
     parse_cabin_class,
+    parse_emissions,
     parse_max_stops,
     parse_sort_by,
     resolve_airport,
 )
 from fli.core.parsers import ParseError
 from fli.models import (
+    BagsFilter,
     DateSearchFilters,
     FlightSearchFilters,
     PassengerInfo,
@@ -243,6 +245,14 @@ class FlightSearchParams(BaseModel):
     exclude_basic_economy: bool = Field(
         False, description="Exclude basic economy fares from results"
     )
+    emissions: str = Field("ALL", description="Filter by emissions level: ALL or LESS")
+    checked_bags: int = Field(
+        0, ge=0, le=2, description="Number of checked bags to include in price (0, 1, or 2)"
+    )
+    carry_on: bool = Field(False, description="Include carry-on bag fee in displayed price")
+    show_all_results: bool = Field(
+        True, description="Return all available results instead of curated ~30"
+    )
 
 
 class DateSearchParams(BaseModel):
@@ -356,6 +366,12 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
             time_restrictions=time_restrictions,
         )
 
+        # Parse new filters
+        emissions_filter = parse_emissions(params.emissions)
+        bags_filter = None
+        if params.checked_bags > 0 or params.carry_on:
+            bags_filter = BagsFilter(checked_bags=params.checked_bags, carry_on=params.carry_on)
+
         # Create search filters
         filters = FlightSearchFilters(
             trip_type=trip_type,
@@ -366,6 +382,9 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
             airlines=airlines,
             sort_by=sort_by,
             exclude_basic_economy=params.exclude_basic_economy,
+            emissions=emissions_filter,
+            bags=bags_filter,
+            show_all_results=params.show_all_results,
         )
 
         # Perform search
@@ -510,7 +529,10 @@ def search_flights(
     ] = "ANY",
     sort_by: Annotated[
         str,
-        Field(description="Sort by: CHEAPEST, DURATION, DEPARTURE_TIME, ARRIVAL_TIME"),
+        Field(
+            description="Sort by: TOP_FLIGHTS, BEST, CHEAPEST,"
+            " DEPARTURE_TIME, ARRIVAL_TIME, DURATION, EMISSIONS"
+        ),
     ] = CONFIG.default_sort_by,
     passengers: Annotated[
         int | None,
@@ -520,6 +542,22 @@ def search_flights(
         bool,
         Field(description="Exclude basic economy fares from results"),
     ] = False,
+    emissions: Annotated[
+        str,
+        Field(description="Filter by emissions level: ALL or LESS"),
+    ] = "ALL",
+    checked_bags: Annotated[
+        int,
+        Field(description="Number of checked bags to include in price (0, 1, or 2)", ge=0, le=2),
+    ] = 0,
+    carry_on: Annotated[
+        bool,
+        Field(description="Include carry-on bag fee in displayed price"),
+    ] = False,
+    show_all_results: Annotated[
+        bool,
+        Field(description="Return all available results instead of curated ~30"),
+    ] = True,
 ) -> dict[str, Any]:
     """Search for flights between two airports on a specific date.
 
@@ -539,6 +577,10 @@ def search_flights(
         sort_by=sort_by,
         passengers=passengers or CONFIG.default_passengers,
         exclude_basic_economy=exclude_basic_economy,
+        emissions=emissions,
+        checked_bags=checked_bags,
+        carry_on=carry_on,
+        show_all_results=show_all_results,
     )
     return _execute_flight_search(params)
 
