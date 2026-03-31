@@ -13,12 +13,6 @@ install-dev:
 install-all:
 	uv sync --extra dev
 
-# Run the server
-server:
-	uv run uvicorn fli.server.main:app
-server-dev:
-	uv run uvicorn fli.server.main:app --reload
-
 # Run the MCP server
 mcp:
 	uv run fli-mcp
@@ -75,8 +69,6 @@ help:
 	@echo "  make install     - Install dependencies"
 	@echo "  make install-dev - Install with dev dependencies"
 	@echo "  make install-all - Install all dependencies"
-	@echo "  make server      - Run the server"
-	@echo "  make server-dev  - Run the development server with reload"
 	@echo "  make mcp         - Run the MCP server"
 	@echo "  make docs        - Build the docs"
 	@echo "  make format      - Format code using ruff"
@@ -91,4 +83,4 @@ help:
 	@echo "  make devcontainer - Build dev container image"
 	@echo "  make requirements - Generate the requirements.txt file"
 # Declare the targets as phony
-.PHONY: help install install-dev install-all server server-dev mcp docs format lint lint-fix test test-mcp test-fuzz test-all ci ci-docker devcontainer requirements
+.PHONY: help install install-dev install-all mcp docs format lint lint-fix test test-mcp test-fuzz test-all ci ci-docker devcontainer requirements

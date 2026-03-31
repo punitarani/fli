@@ -41,7 +41,7 @@ filters = FlightSearchFilters(
         FlightSegment(
             departure_airport=[[Airport.JFK, 0]],
             arrival_airport=[[Airport.LAX, 0]],
-            travel_date="2024-06-01",
+            travel_date="2026-06-01",
         )
     ],
     seat_type=SeatType.ECONOMY
@@ -65,11 +65,11 @@ filters = DateSearchFilters(
         FlightSegment(
             departure_airport=[[Airport.JFK, 0]],
             arrival_airport=[[Airport.LAX, 0]],
-            travel_date="2024-06-01",
+            travel_date="2026-06-01",
         )
     ],
-    from_date="2024-06-01",
-    to_date="2024-06-30"
+    from_date="2026-06-01",
+    to_date="2026-06-30"
 )
 
 # Search dates

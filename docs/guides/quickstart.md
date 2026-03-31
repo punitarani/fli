@@ -23,19 +23,19 @@ pipx install flights
 1. Search for one-way flights:
 
 ```bash
-fli flights JFK LHR 2025-06-01
+fli flights JFK LHR 2026-06-01
 ```
 
 2. Search for round trip flights:
 
 ```bash
-fli flights JFK LHR 2025-06-01 --return 2025-06-15
+fli flights JFK LHR 2026-06-01 --return 2026-06-15
 ```
 
 3. Search with filters:
 
 ```bash
-fli flights JFK LHR 2025-06-01 \
+fli flights JFK LHR 2026-06-01 \
     --time 6-20 \             # Departure window (6 AM - 8 PM)
     --airlines BA KL \        # Airlines (British Airways, KLM)
     --class BUSINESS \        # Cabin class
@@ -45,7 +45,18 @@ fli flights JFK LHR 2025-06-01 \
 4. Find cheapest dates:
 
 ```bash
-fli dates JFK LHR --from 2025-06-01 --to 2025-06-30
+fli dates JFK LHR --from 2026-06-01 --to 2026-06-30
+```
+
+!!! warning "Experimental"
+    `--format json` is experimental.
+    The JSON schema is intended for agents and tools such as `jq`, but it may evolve in future releases.
+
+5. Return machine-readable JSON:
+
+```bash
+fli flights JFK LHR 2026-06-01 --format json
+fli dates JFK LHR --from 2026-06-01 --to 2026-06-30 --format json
 ```
 
 ### MCP Server (for AI Assistants)
@@ -78,7 +89,7 @@ flight_segments = [
     FlightSegment(
         departure_airport=[[Airport.JFK, 0]],
         arrival_airport=[[Airport.LAX, 0]],
-        travel_date="2025-06-01"
+        travel_date="2026-06-01"
     )
 ]
 
@@ -116,12 +127,12 @@ flight_segments = [
     FlightSegment(
         departure_airport=[[Airport.JFK, 0]],
         arrival_airport=[[Airport.LAX, 0]],
-        travel_date="2025-06-01"
+        travel_date="2026-06-01"
     ),
     FlightSegment(
         departure_airport=[[Airport.LAX, 0]],
         arrival_airport=[[Airport.JFK, 0]],
-        travel_date="2025-06-15"
+        travel_date="2026-06-15"
     )
 ]
 
@@ -164,11 +175,11 @@ filters = DateSearchFilters(
         FlightSegment(
             departure_airport=[[Airport.JFK, 0]],
             arrival_airport=[[Airport.LAX, 0]],
-            travel_date="2025-06-01",
+            travel_date="2026-06-01",
         )
     ],
-    from_date="2025-06-01",
-    to_date="2025-06-30"
+    from_date="2026-06-01",
+    to_date="2026-06-30"
 )
 
 # Search dates
@@ -201,7 +212,13 @@ python examples/basic_one_way_search.py
 * `round_trip_search.py` - Round-trip flight search example
 * `date_range_search.py` - Date range search example
 * `complex_flight_search.py` - Advanced filtering example
+* `time_restrictions_search.py` - Time-constrained search example
+* `date_search_with_preferences.py` - Weekend and day filtering example
+* `complex_round_trip_validation.py` - Complex round-trip with validation
+* `advanced_date_search_validation.py` - Advanced date search with validation
+* `price_tracking.py` - Price monitoring over time
 * `error_handling_with_retries.py` - Robust error handling example
+* `result_processing.py` - Data analysis with pandas
 
 > 💡 **Tip**: Examples include automatic dependency checking and will guide you through installation if dependencies are missing.
 

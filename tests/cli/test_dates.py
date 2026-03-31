@@ -1,5 +1,6 @@
 """Tests for the dates CLI command."""
 
+import json
 from datetime import datetime, timedelta
 
 import pytest
@@ -217,3 +218,63 @@ def test_dates_round_trip_with_duration(runner, mock_search_dates, mock_console)
     args, _ = mock_search_dates.search.call_args
     assert args[0].trip_type == TripType.ROUND_TRIP
     assert args[0].duration == 14
+
+
+def test_dates_json_output(runner, mock_search_dates, mock_console):
+    """Test dates search JSON output."""
+    departure_date = datetime.now() + timedelta(days=1)
+    return_date = departure_date + timedelta(days=7)
+    mock_search_dates.search.return_value = [
+        DatePrice(
+            date=(departure_date, return_date),
+            price=599.98,
+        )
+    ]
+
+    result = runner.invoke(
+        app,
+        ["dates", "JFK", "LAX", "--round", "--format", "json"],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["success"] is True
+    assert payload["search_type"] == "dates"
+    assert payload["trip_type"] == "ROUND_TRIP"
+    assert payload["count"] == 1
+    assert payload["query"]["is_round_trip"] is True
+    assert payload["dates"][0]["departure_date"] == departure_date.date().isoformat()
+    assert payload["dates"][0]["return_date"] == return_date.date().isoformat()
+    assert payload["dates"][0]["price"] == 599.98
+    assert payload["dates"][0]["currency"] == "USD"
+
+
+def test_dates_json_invalid_date(runner, mock_search_dates, mock_console):
+    """Test dates JSON output for invalid date input."""
+    result = runner.invoke(
+        app,
+        ["dates", "JFK", "LAX", "--from", "2024-13-45", "--format", "json"],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert payload["search_type"] == "dates"
+    assert payload["error"]["type"] == "validation_error"
+    assert payload["error"]["message"] == "Date must be in YYYY-MM-DD format"
+
+
+def test_dates_json_empty_results(runner, mock_search_dates, mock_console):
+    """Test dates JSON output when no results are found."""
+    mock_search_dates.search.return_value = []
+
+    result = runner.invoke(
+        app,
+        ["dates", "JFK", "LAX", "--format", "json"],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["success"] is True
+    assert payload["count"] == 0
+    assert payload["dates"] == []
