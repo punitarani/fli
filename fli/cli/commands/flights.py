@@ -274,6 +274,8 @@ def flights(
             "--bags",
             "-b",
             help="Number of checked bags to include in price (0, 1, or 2)",
+            min=0,
+            max=2,
         ),
     ] = 0,
     carry_on: Annotated[

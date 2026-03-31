@@ -55,6 +55,7 @@ def basic_search_params():
         stops=MaxStops.NON_STOP,
         seat_type=SeatType.ECONOMY,
         sort_by=SortBy.CHEAPEST,
+        show_all_results=False,
     )
 
 
@@ -80,6 +81,7 @@ def complex_search_params():
         stops=MaxStops.ONE_STOP_OR_FEWER,
         seat_type=SeatType.FIRST,
         sort_by=SortBy.TOP_FLIGHTS,
+        show_all_results=False,
     )
 
 
@@ -113,6 +115,7 @@ def round_trip_search_params():
         seat_type=SeatType.ECONOMY,
         sort_by=SortBy.CHEAPEST,
         trip_type=TripType.ROUND_TRIP,
+        show_all_results=False,
     )
 
 
@@ -146,6 +149,7 @@ def complex_round_trip_params():
         seat_type=SeatType.BUSINESS,
         sort_by=SortBy.TOP_FLIGHTS,
         trip_type=TripType.ROUND_TRIP,
+        show_all_results=False,
     )
 
 

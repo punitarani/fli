@@ -203,14 +203,7 @@ def parse_emissions(emissions: str) -> EmissionsFilter:
         ParseError: If the value is not valid
 
     """
-    emissions_map = {
-        "ALL": EmissionsFilter.ALL,
-        "LESS": EmissionsFilter.LESS,
-    }
-    upper = emissions.upper()
-    if upper in emissions_map:
-        return emissions_map[upper]
-    raise ParseError(f"Invalid emissions value: '{emissions}'. Valid values: ALL, LESS")
+    return resolve_enum(EmissionsFilter, emissions)
 
 
 def parse_time_range(time_range: str) -> tuple[int, int]:

@@ -20,11 +20,11 @@ class TestParseEmissions:
         assert parse_emissions("Less") == EmissionsFilter.LESS
 
     def test_invalid(self):
-        with pytest.raises(ParseError, match="Invalid emissions value"):
+        with pytest.raises(ParseError, match="Invalid EmissionsFilter"):
             parse_emissions("NONE")
 
     def test_invalid_random(self):
-        with pytest.raises(ParseError, match="Invalid emissions value"):
+        with pytest.raises(ParseError, match="Invalid EmissionsFilter"):
             parse_emissions("HIGH")
 
 
