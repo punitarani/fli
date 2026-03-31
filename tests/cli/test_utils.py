@@ -348,6 +348,16 @@ def test_serialize_flight_result_uses_returned_currency():
     assert payload["currency"] == "SEK"
 
 
+def test_serialize_flight_result_round_trip_uses_returned_currency():
+    """Round-trip JSON serialization should preserve the parsed result currency."""
+    outbound = _make_flight_result(price=2534.0, currency="SEK", flight_number="SK101")
+    return_flight = _make_flight_result(price=2534.0, currency="SEK", flight_number="SK202")
+
+    payload = serialize_flight_result((outbound, return_flight))
+
+    assert payload["currency"] == "SEK"
+
+
 def test_serialize_date_result_uses_returned_currency():
     """JSON date serialization should preserve the parsed result currency."""
     result = DatePrice(
