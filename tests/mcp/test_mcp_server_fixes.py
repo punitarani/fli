@@ -75,6 +75,7 @@ def _make_leg(airport_from="TLV", airport_to="ATH"):
 def _make_flight(price, legs=None):
     flight = MagicMock()
     flight.price = price
+    flight.currency = "USD"
     flight.legs = legs or [_make_leg()]
     return flight
 
@@ -87,6 +88,7 @@ class TestSerializeFlightResult:
         flight = _make_flight(price=250.0)
         result = _serialize_flight_result(flight, is_round_trip=False)
         assert result["price"] == 250.0
+        assert result["currency"] == "USD"
 
     def test_round_trip_uses_outbound_price_only(self):
         """Round-trip price must equal outbound.price (Google already includes full RT price)."""
@@ -127,3 +129,12 @@ class TestSerializeFlightResult:
         flight = _make_flight(price=500.0)
         result = _serialize_flight_result(flight, is_round_trip=True)
         assert result["price"] == 500.0
+
+    def test_uses_flight_currency_when_available(self):
+        """Serialization should emit the per-result returned currency."""
+        flight = _make_flight(price=275.0)
+        flight.currency = "EUR"
+
+        result = _serialize_flight_result(flight, is_round_trip=False)
+
+        assert result["currency"] == "EUR"
