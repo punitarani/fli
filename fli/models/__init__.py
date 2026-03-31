@@ -2,6 +2,7 @@ from .airline import Airline
 from .airport import Airport
 from .google_flights import (
     BagsFilter,
+    BookingOffer,
     DateSearchFilters,
     EmissionsFilter,
     FlightLeg,
@@ -22,6 +23,7 @@ __all__ = [
     "Airline",
     "Airport",
     "BagsFilter",
+    "BookingOffer",
     "DateSearchFilters",
     "EmissionsFilter",
     "FlightLeg",
