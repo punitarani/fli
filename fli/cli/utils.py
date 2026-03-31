@@ -171,7 +171,7 @@ def serialize_airport(airport: Airport) -> dict[str, str]:
 
 def serialize_airline(airline: Airline) -> dict[str, str]:
     """Serialize an airline for machine-readable output."""
-    return {"code": airline.name, "name": airline.value}
+    return {"code": airline.name.removeprefix("_"), "name": airline.value}
 
 
 def serialize_flight_leg(leg: Any) -> dict[str, Any]:

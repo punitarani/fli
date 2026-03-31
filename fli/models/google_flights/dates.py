@@ -147,7 +147,7 @@ class DateSearchFilters(BaseModel):
 
         def serialize(obj):
             if isinstance(obj, Airport) or isinstance(obj, Airline):
-                return obj.name
+                return obj.name.removeprefix("_")
             if isinstance(obj, Enum):
                 return obj.value
             if isinstance(obj, list):
