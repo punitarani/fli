@@ -55,7 +55,7 @@ class FlightSearchFilters(BaseModel):
 
         def serialize(obj):
             if isinstance(obj, Airport) or isinstance(obj, Airline):
-                return obj.name
+                return obj.name.removeprefix("_")
             if isinstance(obj, Enum):
                 return obj.value
             if isinstance(obj, list):
@@ -118,11 +118,11 @@ class FlightSearchFilters(BaseModel):
             if is_multi_leg and segment.selected_flight is not None:
                 selected_flights = [
                     [
-                        serialize(leg.departure_airport.name),
+                        serialize(leg.departure_airport),
                         serialize(leg.departure_datetime.strftime("%Y-%m-%d")),
-                        serialize(leg.arrival_airport.name),
+                        serialize(leg.arrival_airport),
                         None,
-                        serialize(leg.airline.name),
+                        serialize(leg.airline),
                         serialize(leg.flight_number),
                     ]
                     for leg in segment.selected_flight.legs
