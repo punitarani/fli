@@ -8,6 +8,7 @@ from typer import BadParameter
 
 from fli.cli.enums import DayOfWeek
 from fli.cli.utils import (
+    display_date_results,
     display_flight_results,
     filter_dates_by_days,
     filter_flights_by_airlines,
@@ -211,11 +212,14 @@ def test_filter_dates_by_days():
 # ---------------------------------------------------------------------------
 
 
-def _make_flight_result(price: float, airline=Airline.DL, flight_number="DL123") -> FlightResult:
+def _make_flight_result(
+    price: float, airline=Airline.DL, flight_number="DL123", currency: str | None = "USD"
+) -> FlightResult:
     """Create a FlightResult for testing display."""
     now = datetime.now()
     return FlightResult(
         price=price,
+        currency=currency,
         duration=300,
         stops=0,
         legs=[
@@ -238,6 +242,15 @@ def _capture_display(flights: list) -> str:
     test_console = Console(file=buf, width=120, force_terminal=True)
     with patch("fli.cli.utils.console", test_console):
         display_flight_results(flights)
+    return buf.getvalue()
+
+
+def _capture_date_display(dates: list, trip_type: TripType) -> str:
+    """Run display_date_results and capture the rendered text."""
+    buf = StringIO()
+    test_console = Console(file=buf, width=120, force_terminal=True)
+    with patch("fli.cli.utils.console", test_console):
+        display_date_results(dates, trip_type)
     return buf.getvalue()
 
 
@@ -267,6 +280,21 @@ def test_display_round_trip_price_asymmetric():
 
     assert "$400.00" in output
     assert "$750.00" not in output
+
+
+def test_display_one_way_price_uses_returned_currency():
+    """One-way flight should use the returned currency code for formatting."""
+    output = _capture_display([_make_flight_result(price=159.0, currency="HKD")])
+    assert "HK$159.00" in output
+
+
+def test_display_date_results_uses_returned_currency():
+    """Date results should render prices using the returned currency."""
+    output = _capture_date_display(
+        [DatePrice(date=(datetime(2026, 5, 1),), price=118.0, currency="EUR")],
+        TripType.ONE_WAY,
+    )
+    assert "€118.00" in output
 
 
 def test_serialize_flight_result_one_way():

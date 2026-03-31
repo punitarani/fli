@@ -136,6 +136,7 @@ class FlightResult(BaseModel):
 
     legs: list[FlightLeg]
     price: NonNegativeFloat  # in specified currency
+    currency: str | None = None
     duration: PositiveInt  # total duration in minutes
     stops: NonNegativeInt
 

@@ -8,6 +8,7 @@ import json
 from copy import deepcopy
 from datetime import datetime
 
+from fli.core import extract_currency_from_price_token
 from fli.models import (
     Airline,
     Airport,
@@ -118,8 +119,10 @@ class SearchFlights:
             Structured FlightResult object with all flight details
 
         """
+        price, currency = SearchFlights._parse_price_info(data)
         flight = FlightResult(
-            price=SearchFlights._parse_price(data),
+            price=price,
+            currency=currency,
             duration=data[0][9],
             stops=len(data[0][2]) - 1,
             legs=[
@@ -139,7 +142,7 @@ class SearchFlights:
 
     @staticmethod
     def _parse_price(data: list) -> float:
-        """Extract price from raw flight data.
+        """Extract the numeric price from raw flight data.
 
         Args:
             data: Raw flight data from the API response
@@ -149,11 +152,51 @@ class SearchFlights:
 
         """
         try:
-            if data[1] and data[1][0]:
-                return data[1][0][-1]
+            price_block = SearchFlights._get_price_block(data)
+            if price_block and price_block[0]:
+                return float(price_block[0][-1])
         except (IndexError, TypeError):
             pass
         return 0.0
+
+    @staticmethod
+    def _parse_price_info(data: list) -> tuple[float, str | None]:
+        """Extract the numeric price and returned currency from raw flight data."""
+        price_block = SearchFlights._get_price_block(data)
+        price = 0.0
+        currency = None
+        try:
+            if price_block and price_block[0]:
+                price = float(price_block[0][-1])
+        except (IndexError, TypeError):
+            pass
+        try:
+            if price_block and len(price_block) > 1:
+                currency = extract_currency_from_price_token(price_block[1])
+        except (IndexError, TypeError):
+            pass
+        return price, currency
+
+    @staticmethod
+    def _parse_currency(data: list) -> str | None:
+        """Extract the returned currency code from raw flight data."""
+        try:
+            price_block = SearchFlights._get_price_block(data)
+            if price_block and len(price_block) > 1:
+                return extract_currency_from_price_token(price_block[1])
+        except (IndexError, TypeError):
+            pass
+        return None
+
+    @staticmethod
+    def _get_price_block(data: list) -> list | None:
+        """Return the raw price block attached to a flight row."""
+        try:
+            if len(data) > 1 and isinstance(data[1], list):
+                return data[1]
+        except TypeError:
+            pass
+        return None
 
     @staticmethod
     def _parse_datetime(date_arr: list[int], time_arr: list[int]) -> datetime:

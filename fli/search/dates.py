@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 
 from pydantic import BaseModel
 
+from fli.core import extract_currency_from_price_token
 from fli.models import DateSearchFilters
 from fli.models.google_flights.base import TripType
 from fli.search.client import get_client
@@ -20,6 +21,7 @@ class DatePrice(BaseModel):
 
     date: tuple[datetime] | tuple[datetime, datetime]
     price: float
+    currency: str | None = None
 
 
 class SearchDates:
@@ -130,6 +132,7 @@ class SearchDates:
                 DatePrice(
                     date=self.__parse_date(item, filters.trip_type),
                     price=self.__parse_price(item),
+                    currency=self.__parse_currency(item),
                 )
                 for item in data[-1]
                 if self.__parse_price(item)
@@ -177,6 +180,18 @@ class SearchDates:
                 if isinstance(item[2], list) and len(item[2]) > 0:
                     if isinstance(item[2][0], list) and len(item[2][0]) > 1:
                         return float(item[2][0][1])
+        except (IndexError, TypeError, ValueError):
+            pass
+
+        return None
+
+    @staticmethod
+    def __parse_currency(item: list[list] | list | None) -> str | None:
+        """Parse the returned currency code from the API response."""
+        try:
+            if item and isinstance(item, list) and len(item) > 2:
+                if isinstance(item[2], list) and len(item[2]) > 1:
+                    return extract_currency_from_price_token(item[2][1])
         except (IndexError, TypeError, ValueError):
             pass
 

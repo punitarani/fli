@@ -186,6 +186,24 @@ def test_date_price_sorting(search, basic_search_params):
     assert dates == sorted(dates)
 
 
+SHOPPING_TOKEN = (
+    "CjRIQktCNmV1UjNqNjhBR043X0FCRy0tLS0tLS0tLS12dGpkN0FBQUFBR25JcWZNS2pGTTBBEgZV"
+    "QTIyMDkaCgjcWxACGgNVU0Q4HHDcWw=="
+)
+
+CALENDAR_ITEM = ["2026-04-28", None, [[None, 118], SHOPPING_TOKEN], 1]
+
+
+def test_parse_currency_from_calendar_item():
+    """Calendar rows should expose the returned currency code."""
+    assert SearchDates._SearchDates__parse_currency(CALENDAR_ITEM) == "USD"
+
+
+def test_parse_price_from_calendar_item():
+    """Calendar rows should keep using the numeric display price."""
+    assert SearchDates._SearchDates__parse_price(CALENDAR_ITEM) == 118.0
+
+
 def test_basic_round_trip_search(search, round_trip_search_params):
     """Test basic round trip date search functionality."""
     results = search.search(round_trip_search_params)
