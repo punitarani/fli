@@ -335,11 +335,7 @@ def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[s
     return {
         "price": price_segment.price,
         "currency": price_segment.currency or CONFIG.default_currency,
-        "legs": [
-            _serialize_flight_leg(leg)
-            for segment in segments
-            for leg in segment.legs
-        ],
+        "legs": [_serialize_flight_leg(leg) for segment in segments for leg in segment.legs],
     }
 
 
