@@ -863,7 +863,7 @@ class Airline(Enum):
     ZD = "Ewa Air"
     ZE = "Eastar Jet"
     ZF = "Azur Air"
-    ZG = "ZIPAIR"
+    ZG = "Zipair"
     ZH = "Shenzhen Airlines"
     ZI = "Aigle Azur"
     ZJ = "Zambezi Airlines"
