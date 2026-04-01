@@ -31,14 +31,18 @@ class SeatType(Enum):
 
 
 class SortBy(Enum):
-    """Available sorting options for flight results."""
+    """Available sorting options for flight results.
 
-    NONE = 0
-    TOP_FLIGHTS = 1
+    Maps to the top-level sort_mode value in the Google Flights API payload.
+    """
+
+    TOP_FLIGHTS = 0
+    BEST = 1
     CHEAPEST = 2
     DEPARTURE_TIME = 3
     ARRIVAL_TIME = 4
     DURATION = 5
+    EMISSIONS = 6
 
 
 class TripType(Enum):
@@ -58,11 +62,33 @@ class MaxStops(Enum):
     TWO_OR_FEWER_STOPS = 3
 
 
+class EmissionsFilter(Enum):
+    """Filter flights by carbon emissions level.
+
+    Corresponds to the "Less emissions" toggle on Google Flights.
+    When enabled, only flights with lower-than-average CO2 emissions are shown.
+    """
+
+    ALL = 0
+    LESS = 1
+
+
 class Currency(Enum):
     """Supported currencies for pricing. Currently only USD."""
 
     USD = "USD"
     # Placeholder for other currencies
+
+
+class BagsFilter(BaseModel):
+    """Include checked/carry-on bag fees in displayed prices.
+
+    When set, Google Flights adjusts the displayed price to include baggage costs,
+    making comparisons between budget and full-service carriers fairer.
+    """
+
+    checked_bags: NonNegativeInt = 0
+    carry_on: bool = False
 
 
 class TimeRestrictions(BaseModel):

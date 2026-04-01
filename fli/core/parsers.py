@@ -7,7 +7,7 @@ to convert user input into domain model objects.
 from enum import Enum
 from typing import TypeVar
 
-from fli.models import Airline, Airport, MaxStops, SeatType, SortBy
+from fli.models import Airline, Airport, EmissionsFilter, MaxStops, SeatType, SortBy
 
 T = TypeVar("T", bound=Enum)
 
@@ -171,7 +171,8 @@ def parse_sort_by(sort_by: str) -> SortBy:
     """Parse a sort_by string into a SortBy enum.
 
     Args:
-        sort_by: Sort option (CHEAPEST, DURATION, DEPARTURE_TIME, ARRIVAL_TIME)
+        sort_by: Sort option (TOP_FLIGHTS, BEST, CHEAPEST,
+            DEPARTURE_TIME, ARRIVAL_TIME, DURATION, EMISSIONS)
 
     Returns:
         The corresponding SortBy enum member
@@ -187,6 +188,22 @@ def parse_sort_by(sort_by: str) -> SortBy:
         raise ParseError(
             f"Invalid sort_by value: '{sort_by}'. Valid values: {', '.join(valid_values)}"
         ) from e
+
+
+def parse_emissions(emissions: str) -> EmissionsFilter:
+    """Parse an emissions filter string into an EmissionsFilter enum.
+
+    Args:
+        emissions: Emissions filter (ALL, LESS)
+
+    Returns:
+        The corresponding EmissionsFilter enum member
+
+    Raises:
+        ParseError: If the value is not valid
+
+    """
+    return resolve_enum(EmissionsFilter, emissions)
 
 
 def parse_time_range(time_range: str) -> tuple[int, int]:
