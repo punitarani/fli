@@ -196,7 +196,7 @@ def _serialize_flight_segment_result(flight: Any, *, include_price: bool = False
     }
     if include_price:
         payload["price"] = flight.price
-        payload["currency"] = DEFAULT_CURRENCY
+        payload["currency"] = flight.currency or DEFAULT_CURRENCY
     return payload
 
 
@@ -206,7 +206,7 @@ def serialize_flight_result(flight_data: Any) -> dict[str, Any]:
         outbound, return_flight = flight_data
         return {
             "price": outbound.price,
-            "currency": DEFAULT_CURRENCY,
+            "currency": outbound.currency or DEFAULT_CURRENCY,
             "duration": outbound.duration + return_flight.duration,
             "stops": outbound.stops + return_flight.stops,
             "outbound": _serialize_flight_segment_result(outbound),
@@ -222,7 +222,7 @@ def serialize_date_result(date_result: Any, trip_type: TripType) -> dict[str, An
         "departure_date": date_result.date[0].date().isoformat(),
         "return_date": None,
         "price": date_result.price,
-        "currency": DEFAULT_CURRENCY,
+        "currency": date_result.currency or DEFAULT_CURRENCY,
     }
     if trip_type == TripType.ROUND_TRIP and len(date_result.date) > 1:
         payload["return_date"] = date_result.date[1].date().isoformat()
