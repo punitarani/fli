@@ -322,17 +322,16 @@ def display_flight_results(flights: list):
                 title=(f"{direction} Flight Segments" if direction else "Flight Segments"),
                 box=box.ROUNDED,
             )
-            segments.add_column("Airline", style="cyan")
-            segments.add_column("Flight", style="magenta")
-            segments.add_column("From", style="yellow", width=30)
-            segments.add_column("Departure", style="green")
-            segments.add_column("To", style="yellow", width=30)
-            segments.add_column("Arrival", style="green")
+            segments.add_column("Flight", style="cyan", no_wrap=True)
+            segments.add_column("From", style="yellow")
+            segments.add_column("Depart", style="green", no_wrap=True)
+            segments.add_column("To", style="yellow")
+            segments.add_column("Arrive", style="green", no_wrap=True)
 
             for leg in flight.legs:
+                airline_flight = f"{leg.airline.name} {leg.flight_number}"
                 segments.add_row(
-                    leg.airline.value,
-                    leg.flight_number,
+                    airline_flight,
                     format_airport(leg.departure_airport),
                     leg.departure_datetime.strftime("%H:%M %d-%b"),
                     format_airport(leg.arrival_airport),
