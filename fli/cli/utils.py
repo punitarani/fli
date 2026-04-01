@@ -171,7 +171,7 @@ def serialize_airport(airport: Airport) -> dict[str, str]:
 
 def serialize_airline(airline: Airline) -> dict[str, str]:
     """Serialize an airline for machine-readable output."""
-    return {"code": airline.name, "name": airline.value}
+    return {"code": airline.name.lstrip("_"), "name": airline.value}
 
 
 def serialize_flight_leg(leg: Any) -> dict[str, Any]:
@@ -329,7 +329,7 @@ def display_flight_results(flights: list):
             segments.add_column("Arrive", style="green", no_wrap=True)
 
             for leg in flight.legs:
-                airline_flight = f"{leg.airline.name} {leg.flight_number}"
+                airline_flight = f"{leg.airline.name.lstrip('_')} {leg.flight_number}"
                 segments.add_row(
                     airline_flight,
                     format_airport(leg.departure_airport),

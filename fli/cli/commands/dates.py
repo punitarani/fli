@@ -231,7 +231,11 @@ def dates(
             "departure_window": (
                 f"{departure_window[0]}-{departure_window[1]}" if departure_window else None
             ),
-            "airlines": [airline.name for airline in parsed_airlines] if parsed_airlines else None,
+            "airlines": (
+                [airline.name.lstrip("_") for airline in parsed_airlines]
+                if parsed_airlines
+                else None
+            ),
             "sort_by_price": sort_by_price,
             "days": [day.value for day in selected_days],
         }

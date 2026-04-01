@@ -297,6 +297,22 @@ def test_display_date_results_uses_returned_currency():
     assert "€118.00" in output
 
 
+def test_serialize_airline_strips_numeric_prefix():
+    """Numeric-prefix airline codes should not include the underscore in output."""
+    from fli.cli.utils import serialize_airline
+
+    result = serialize_airline(Airline._3F)
+    assert result == {"code": "3F", "name": "FlyOne Armenia"}
+
+
+def test_serialize_airline_normal_code():
+    """Normal airline codes should serialize unchanged."""
+    from fli.cli.utils import serialize_airline
+
+    result = serialize_airline(Airline.BA)
+    assert result == {"code": "BA", "name": "British Airways"}
+
+
 def test_serialize_flight_result_one_way():
     """JSON flight serialization should use machine-readable nested fields."""
     flight = _make_flight_result(price=159.0)
@@ -307,6 +323,16 @@ def test_serialize_flight_result_one_way():
     assert payload["currency"] == "USD"
     assert payload["legs"][0]["departure_airport"]["code"] == "JFK"
     assert payload["legs"][0]["airline"]["code"] == "DL"
+
+
+def test_serialize_flight_result_numeric_prefix_airline():
+    """Numeric-prefix airline codes in flight legs should not have underscore."""
+    flight = _make_flight_result(price=200.0, airline=Airline._3F, flight_number="3F101")
+
+    payload = serialize_flight_result(flight)
+
+    assert payload["legs"][0]["airline"]["code"] == "3F"
+    assert payload["legs"][0]["airline"]["name"] == "FlyOne Armenia"
 
 
 def test_serialize_flight_result_round_trip():
