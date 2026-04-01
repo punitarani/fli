@@ -103,6 +103,8 @@ def test_flights_with_family_passenger_counts(runner, mock_search_flights, mock_
             "JFK",
             "LAX",
             datetime.now().strftime("%Y-%m-%d"),
+            "--passengers",
+            "2",
             "--children",
             "2",
             "--infants-in-seat",
@@ -115,7 +117,7 @@ def test_flights_with_family_passenger_counts(runner, mock_search_flights, mock_
     assert result.exit_code == 0
     mock_search_flights.search.assert_called_once()
     args, _ = mock_search_flights.search.call_args
-    assert args[0].passenger_info.adults == 1
+    assert args[0].passenger_info.adults == 2
     assert args[0].passenger_info.children == 2
     assert args[0].passenger_info.infants_in_seat == 1
     assert args[0].passenger_info.infants_on_lap == 1

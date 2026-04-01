@@ -150,6 +150,8 @@ def test_dates_with_family_passenger_counts(runner, mock_search_dates, mock_cons
             "dates",
             "JFK",
             "LAX",
+            "--passengers",
+            "2",
             "--children",
             "2",
             "--infants-in-seat",
@@ -162,7 +164,7 @@ def test_dates_with_family_passenger_counts(runner, mock_search_dates, mock_cons
     assert result.exit_code == 0
     mock_search_dates.search.assert_called_once()
     args, _ = mock_search_dates.search.call_args
-    assert args[0].passenger_info.adults == 1
+    assert args[0].passenger_info.adults == 2
     assert args[0].passenger_info.children == 2
     assert args[0].passenger_info.infants_in_seat == 1
     assert args[0].passenger_info.infants_on_lap == 1

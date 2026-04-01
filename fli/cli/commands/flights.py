@@ -36,6 +36,7 @@ def _search_flights_core(
     departure_date: str,
     return_date: str | None = None,
     departure_window: str | tuple[int, int] | None = None,
+    passengers: int = 1,
     children: int = 0,
     infants_in_seat: int = 0,
     infants_on_lap: int = 0,
@@ -53,6 +54,7 @@ def _search_flights_core(
         "departure_date": departure_date,
         "return_date": return_date,
         "departure_window": None,
+        "passengers": passengers,
         "children": children,
         "infants_in_seat": infants_in_seat,
         "infants_on_lap": infants_on_lap,
@@ -103,7 +105,7 @@ def _search_flights_core(
         filters = FlightSearchFilters(
             trip_type=trip_type,
             passenger_info=PassengerInfo(
-                adults=1,
+                adults=passengers,
                 children=children,
                 infants_in_seat=infants_in_seat,
                 infants_on_lap=infants_on_lap,
@@ -199,11 +201,20 @@ def flights(
             help="Departure time window in 24h format (e.g., 6-20)",
         ),
     ] = None,
+    passengers: Annotated[
+        int,
+        typer.Option(
+            "--passengers",
+            help="Number of adult passengers",
+            min=1,
+        ),
+    ] = 1,
     children: Annotated[
         int,
         typer.Option(
             "--children",
             help="Number of children",
+            min=0,
         ),
     ] = 0,
     infants_in_seat: Annotated[
@@ -211,6 +222,7 @@ def flights(
         typer.Option(
             "--infants-in-seat",
             help="Number of infants in seat",
+            min=0,
         ),
     ] = 0,
     infants_on_lap: Annotated[
@@ -218,6 +230,7 @@ def flights(
         typer.Option(
             "--infants-on-lap",
             help="Number of infants on lap",
+            min=0,
         ),
     ] = 0,
     airlines: Annotated[
@@ -283,6 +296,7 @@ def flights(
         departure_date=departure_date,
         return_date=return_date,
         departure_window=departure_window,
+        passengers=passengers,
         children=children,
         infants_in_seat=infants_in_seat,
         infants_on_lap=infants_on_lap,

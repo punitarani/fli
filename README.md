@@ -191,6 +191,7 @@ fli dates JFK LHR \
 | `--class, -c`    | Cabin class           | `ECONOMY`, `BUSINESS`  |
 | `--stops, -s`    | Maximum stops         | `NON_STOP`, `ONE_STOP` |
 | `--sort, -o`     | Sort results by       | `CHEAPEST`, `DURATION` |
+| `--passengers`   | Number of adult passengers | `2`               |
 | `--children`     | Number of children    | `2`                    |
 | `--infants-in-seat` | Number of infants in seat | `1`             |
 | `--infants-on-lap` | Number of infants on lap | `1`               |
@@ -209,6 +210,7 @@ fli dates JFK LHR \
 | `--stops, -s`      | Maximum stops          | `NON_STOP`, `ONE_STOP` |
 | `--time`           | Departure time window  | `6-20`                 |
 | `--sort`           | Sort by price          | (flag)                 |
+| `--passengers`     | Number of adult passengers | `2`                |
 | `--children`       | Number of children     | `2`                    |
 | `--infants-in-seat` | Number of infants in seat | `1`                |
 | `--infants-on-lap` | Number of infants on lap | `1`                  |
