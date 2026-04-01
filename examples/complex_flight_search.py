@@ -25,7 +25,12 @@ def main():
     # Create detailed filters
     filters = FlightSearchFilters(
         trip_type=TripType.ONE_WAY,
-        passenger_info=PassengerInfo(adults=2, children=1, infants_on_lap=1),
+        passenger_info=PassengerInfo(
+            adults=2,
+            children=1,
+            infants_in_seat=1,
+            infants_on_lap=1,
+        ),
         flight_segments=[
             FlightSegment(
                 departure_airport=[[Airport.JFK, 0]],
