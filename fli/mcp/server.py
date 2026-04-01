@@ -329,15 +329,16 @@ def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[s
             ],
         }
 
-    # Multi-city (3+ legs): combined price is on the final leg.
-    price_segment = segments[-1]
+    # Multi-city (3+ legs) or 2-leg non-round-trip: combined price on the
+    # final leg (matches Google Flights pricing and the CLI display logic).
+    price_segment = segments[-1] if len(segments) > 2 else segments[0]
     return {
         "price": price_segment.price,
         "currency": price_segment.currency or CONFIG.default_currency,
         "legs": [
-            serialized_leg
+            _serialize_flight_leg(leg)
             for segment in segments
-            for serialized_leg in [_serialize_flight_leg(leg) for leg in segment.legs]
+            for leg in segment.legs
         ],
     }
 

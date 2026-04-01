@@ -152,6 +152,16 @@ class TestSerializeFlightResult:
         assert result["price"] == 900.0
         assert len(result["legs"]) == 3
 
+    def test_two_tuple_without_round_trip_uses_outbound_price(self):
+        """A 2-element tuple with is_round_trip=False should use outbound price."""
+        outbound = _make_flight(price=350.0, legs=[_make_leg("JFK", "LAX")])
+        return_flight = _make_flight(price=350.0, legs=[_make_leg("LAX", "JFK")])
+
+        result = _serialize_flight_result((outbound, return_flight), is_round_trip=False)
+
+        assert result["price"] == 350.0
+        assert len(result["legs"]) == 2
+
     def test_uses_flight_currency_when_available(self):
         """Serialization should emit the per-result returned currency."""
         flight = _make_flight(price=275.0)

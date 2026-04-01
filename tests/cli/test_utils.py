@@ -271,6 +271,21 @@ def test_display_round_trip_price_not_doubled():
     assert "$634.00" not in output
 
 
+def test_display_multi_city_three_legs():
+    """Multi-city (3+ legs) should render without errors, showing final-leg price."""
+    leg1 = _make_flight_result(price=0.0, flight_number="AA100")
+    leg2 = _make_flight_result(price=0.0, flight_number="DL200")
+    leg3 = _make_flight_result(price=800.0, flight_number="UA300")
+
+    output = _capture_display([(leg1, leg2, leg3)])
+
+    assert "$800.00" in output
+    assert "Multi-city Flight" in output
+    assert "Leg 1" in output
+    assert "Leg 2" in output
+    assert "Leg 3" in output
+
+
 def test_display_round_trip_price_asymmetric():
     """When leg prices differ, total should be the outbound price, not the sum."""
     outbound = _make_flight_result(price=400.0)
