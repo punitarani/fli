@@ -201,9 +201,15 @@ def _serialize_flight_segment_result(flight: Any, *, include_price: bool = False
 
 
 def serialize_flight_result(flight_data: Any) -> dict[str, Any]:
-    """Serialize a flight result or round-trip pair for JSON output."""
-    if isinstance(flight_data, tuple):
-        outbound, return_flight = flight_data
+    """Serialize a flight result or round-trip/multi-city tuple for JSON output."""
+    if not isinstance(flight_data, tuple):
+        return _serialize_flight_segment_result(flight_data, include_price=True)
+
+    segments = list(flight_data)
+
+    if len(segments) == 2:
+        # Round-trip: Google Flights returns the full RT price on the outbound leg.
+        outbound, return_flight = segments
         return {
             "price": outbound.price,
             "currency": outbound.currency or DEFAULT_CURRENCY,
@@ -213,7 +219,15 @@ def serialize_flight_result(flight_data: Any) -> dict[str, Any]:
             "return": _serialize_flight_segment_result(return_flight),
         }
 
-    return _serialize_flight_segment_result(flight_data, include_price=True)
+    # Multi-city (3+ legs): combined price is on the final leg.
+    price_segment = segments[-1]
+    return {
+        "price": price_segment.price,
+        "currency": price_segment.currency or DEFAULT_CURRENCY,
+        "duration": sum(s.duration for s in segments),
+        "stops": sum(s.stops for s in segments),
+        "segments": [_serialize_flight_segment_result(s) for s in segments],
+    }
 
 
 def serialize_date_result(date_result: Any, trip_type: TripType) -> dict[str, Any]:

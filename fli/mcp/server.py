@@ -307,11 +307,20 @@ def _serialize_flight_leg(leg: Any) -> dict[str, Any]:
 
 
 def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[str, Any]:
-    """Serialize a flight result (or round-trip pair) to a dictionary."""
-    if is_round_trip and isinstance(flight, tuple):
-        outbound, return_flight = flight
+    """Serialize a flight result (or round-trip/multi-city tuple) to a dictionary."""
+    if not isinstance(flight, tuple):
         return {
-            # Google Flights returns the full round-trip price on the outbound leg
+            "price": flight.price,
+            "currency": flight.currency or CONFIG.default_currency,
+            "legs": [_serialize_flight_leg(leg) for leg in flight.legs],
+        }
+
+    segments = list(flight)
+
+    if len(segments) == 2 and is_round_trip:
+        # Google Flights returns the full round-trip price on the outbound leg
+        outbound, return_flight = segments
+        return {
             "price": outbound.price,
             "currency": outbound.currency or CONFIG.default_currency,
             "legs": [
@@ -319,12 +328,18 @@ def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[s
                 *[_serialize_flight_leg(leg) for leg in return_flight.legs],
             ],
         }
-    else:
-        return {
-            "price": flight.price,
-            "currency": flight.currency or CONFIG.default_currency,
-            "legs": [_serialize_flight_leg(leg) for leg in flight.legs],
-        }
+
+    # Multi-city (3+ legs): combined price is on the final leg.
+    price_segment = segments[-1]
+    return {
+        "price": price_segment.price,
+        "currency": price_segment.currency or CONFIG.default_currency,
+        "legs": [
+            serialized_leg
+            for segment in segments
+            for serialized_leg in [_serialize_flight_leg(leg) for leg in segment.legs]
+        ],
+    }
 
 
 def _serialize_date_result(date_result: Any) -> dict[str, Any]:

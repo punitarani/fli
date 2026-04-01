@@ -130,6 +130,28 @@ class TestSerializeFlightResult:
         result = _serialize_flight_result(flight, is_round_trip=True)
         assert result["price"] == 500.0
 
+    def test_multi_city_three_legs(self):
+        """Multi-city (3-leg) tuple should serialize without crashing."""
+        leg1 = _make_flight(price=0.0, legs=[_make_leg("JFK", "LAX")])
+        leg2 = _make_flight(price=0.0, legs=[_make_leg("LAX", "ORD")])
+        leg3 = _make_flight(price=750.0, legs=[_make_leg("ORD", "JFK")])
+
+        result = _serialize_flight_result((leg1, leg2, leg3), is_round_trip=False)
+
+        assert result["price"] == 750.0
+        assert len(result["legs"]) == 3
+
+    def test_multi_city_not_treated_as_round_trip(self):
+        """A 3-leg tuple must not be treated as round-trip even if flag is True."""
+        leg1 = _make_flight(price=0.0, legs=[_make_leg("JFK", "LAX")])
+        leg2 = _make_flight(price=0.0, legs=[_make_leg("LAX", "ORD")])
+        leg3 = _make_flight(price=900.0, legs=[_make_leg("ORD", "JFK")])
+
+        result = _serialize_flight_result((leg1, leg2, leg3), is_round_trip=True)
+
+        assert result["price"] == 900.0
+        assert len(result["legs"]) == 3
+
     def test_uses_flight_currency_when_available(self):
         """Serialization should emit the per-result returned currency."""
         flight = _make_flight(price=275.0)

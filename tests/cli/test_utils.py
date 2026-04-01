@@ -348,6 +348,25 @@ def test_serialize_flight_result_round_trip():
     assert payload["return"]["legs"][0]["flight_number"] == "DL200"
 
 
+def test_serialize_flight_result_multi_city():
+    """Multi-city (3+ legs) JSON serialization should not crash."""
+    leg1 = _make_flight_result(price=0.0, flight_number="AA100")
+    leg2 = _make_flight_result(price=0.0, flight_number="DL200")
+    leg3 = _make_flight_result(price=800.0, flight_number="UA300")
+
+    payload = serialize_flight_result((leg1, leg2, leg3))
+
+    # Price comes from the final leg for multi-city
+    assert payload["price"] == 800.0
+    assert payload["currency"] == "USD"
+    assert payload["duration"] == 900  # 300 * 3
+    assert payload["stops"] == 0
+    assert len(payload["segments"]) == 3
+    assert payload["segments"][0]["legs"][0]["flight_number"] == "AA100"
+    assert payload["segments"][1]["legs"][0]["flight_number"] == "DL200"
+    assert payload["segments"][2]["legs"][0]["flight_number"] == "UA300"
+
+
 def test_serialize_date_result_round_trip():
     """Date serialization should include the return date for round-trip searches."""
     result = DatePrice(
