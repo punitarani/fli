@@ -38,7 +38,7 @@ class SearchFlights:
 
     def search(
         self, filters: FlightSearchFilters, top_n: int = 5
-    ) -> list[FlightResult | tuple[FlightResult, FlightResult]] | None:
+    ) -> list[FlightResult | tuple[FlightResult, ...]] | None:
         """Search for flights using the given FlightSearchFilters.
 
         Args:
@@ -46,10 +46,16 @@ class SearchFlights:
             top_n: Number of flights to limit the return flight search to
 
         Returns:
-            List of FlightResult objects containing flight details, or None if no results
+            List of FlightResult objects (one-way), tuples of FlightResult (round-trip
+            or multi-city), or None if no results
 
         Raises:
             Exception: If the search fails or returns invalid data
+
+        Note:
+            Multi-city searches (TripType.MULTI_CITY) with distinct city pairs may
+            time out due to limitations of the Google Flights API endpoint.  The
+            endpoint reliably supports one-way and round-trip searches.
 
         """
         encoded_filters = filters.encode()

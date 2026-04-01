@@ -126,6 +126,11 @@ def build_multi_city_segments(
     Returns:
         Tuple of (list of FlightSegment objects, TripType.MULTI_CITY)
 
+    Note:
+        Multi-city searches with distinct city pairs may time out due to
+        limitations of the Google Flights API endpoint.  Round-trip-style
+        multi-city (same origin and final destination) works reliably.
+
     """
     segments = [
         FlightSegment(
