@@ -17,6 +17,18 @@ from fli.models import (
 from fli.models.google_flights.base import TripType
 from fli.search import SearchFlights
 
+TRANSIENT_LIVE_SEARCH_ERRORS = (
+    "Operation timed out",
+    "429",
+    "Empty results, retrying...",
+)
+
+
+def _is_transient_live_search_error(exc: Exception) -> bool:
+    """Return True for expected Google Flights live API instability."""
+    message = str(exc)
+    return any(token in message for token in TRANSIENT_LIVE_SEARCH_ERRORS)
+
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), reraise=True)
 def search_with_retry(search: SearchFlights, search_params):
@@ -25,6 +37,16 @@ def search_with_retry(search: SearchFlights, search_params):
     if not results:
         raise ValueError("Empty results, retrying...")
     return results
+
+
+def search_or_skip(search: SearchFlights, search_params):
+    """Skip the test if the live Google Flights API is temporarily unstable."""
+    try:
+        return search_with_retry(search, search_params)
+    except Exception as exc:
+        if _is_transient_live_search_error(exc):
+            pytest.skip(f"live Google Flights API unstable: {exc}")
+        raise
 
 
 @pytest.fixture
@@ -163,22 +185,22 @@ def complex_round_trip_params():
 def test_search_functionality(search, search_params_fixture, request):
     """Test flight search functionality with different data sets."""
     search_params = request.getfixturevalue(search_params_fixture)
-    results = search.search(search_params)
+    results = search_or_skip(search, search_params)
     assert isinstance(results, list)
 
 
 def test_multiple_searches(search, basic_search_params, complex_search_params):
     """Test performing multiple searches with the same Search instance."""
     # First search
-    results1 = search.search(basic_search_params)
+    results1 = search_or_skip(search, basic_search_params)
     assert isinstance(results1, list)
 
     # Second search with different data
-    results2 = search.search(complex_search_params)
+    results2 = search_or_skip(search, complex_search_params)
     assert isinstance(results2, list)
 
     # Third search reusing first search data
-    results3 = search.search(basic_search_params)
+    results3 = search_or_skip(search, basic_search_params)
     assert isinstance(results3, list)
 
 
