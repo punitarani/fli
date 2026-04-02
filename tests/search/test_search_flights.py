@@ -331,6 +331,7 @@ def test_basic_round_trip_search(mock_get_client, round_trip_search_params):
     return_response = _make_api_response(*_make_return_flights())
     # First call returns outbound flights, subsequent calls return return flights
     mock_client.post.side_effect = [outbound_response, return_response, return_response]
+    # Expect 3 calls: 1 outbound + 1 return per selected outbound (top_n=2)
 
     search = SearchFlights()
     results = search.search(round_trip_search_params, top_n=2)
