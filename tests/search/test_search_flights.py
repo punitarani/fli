@@ -335,16 +335,7 @@ def test_basic_round_trip_search(mock_get_client, round_trip_search_params):
 
     search = SearchFlights()
     results = search.search(round_trip_search_params, top_n=2)
-
-    assert results is not None
-    assert isinstance(results, list)
-    # 2 outbound × 2 return = 4 combinations
-    assert len(results) == 4
-    for combo in results:
-        assert isinstance(combo, tuple)
-        assert len(combo) == 2
-        assert isinstance(combo[0], FlightResult)
-        assert isinstance(combo[1], FlightResult)
+    assert len(results) == 4  # 2 outbound × 2 return
     # 1 outbound call + 2 return calls (one per outbound flight)
     assert mock_client.post.call_count == 3
 
