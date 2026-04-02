@@ -7,6 +7,7 @@ import typer
 
 from fli.cli.commands.dates import dates
 from fli.cli.commands.flights import flights
+from fli.cli.commands.multi import multi
 
 app = typer.Typer(
     help="Search for flights using Google Flights data",
@@ -16,6 +17,7 @@ app = typer.Typer(
 # Register commands
 app.command(name="flights")(flights)
 app.command(name="dates")(dates)
+app.command(name="multi")(multi)
 
 
 @app.callback(invoke_without_command=True)
@@ -37,7 +39,7 @@ def cli():
         args.append("--help")
 
     # If the first argument isn't a command, treat as flights search
-    if args[0] not in ["flights", "dates", "--help", "-h"]:
+    if args[0] not in ["flights", "dates", "multi", "--help", "-h"]:
         sys.argv.insert(1, "flights")
 
     app()
