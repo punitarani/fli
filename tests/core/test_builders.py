@@ -8,16 +8,16 @@ class TestNormalizeDate:
     """Tests for normalize_date."""
 
     def test_already_padded(self):
-        assert normalize_date("2026-04-02") == "2026-04-02"
+        assert normalize_date("2027-01-15") == "2027-01-15"
 
     def test_single_digit_month_and_day(self):
-        assert normalize_date("2026-4-2") == "2026-04-02"
+        assert normalize_date("2027-1-15") == "2027-01-15"
 
     def test_single_digit_day(self):
-        assert normalize_date("2026-12-5") == "2026-12-05"
+        assert normalize_date("2027-12-5") == "2027-12-05"
 
     def test_single_digit_month(self):
-        assert normalize_date("2026-1-15") == "2026-01-15"
+        assert normalize_date("2027-1-15") == "2027-01-15"
 
     def test_invalid_date_raises(self):
         with pytest.raises(ValueError):
@@ -25,7 +25,7 @@ class TestNormalizeDate:
 
     def test_invalid_month_raises(self):
         with pytest.raises(ValueError):
-            normalize_date("2026-13-01")
+            normalize_date("2027-13-01")
 
 
 class TestBuildFlightSegments:
@@ -35,20 +35,20 @@ class TestBuildFlightSegments:
         segments, _ = build_flight_segments(
             origin=Airport.JFK,
             destination=Airport.LAX,
-            departure_date="2026-4-2",
+            departure_date="2027-1-15",
         )
-        assert segments[0].travel_date == "2026-04-02"
+        assert segments[0].travel_date == "2027-01-15"
 
     def test_normalizes_return_date(self):
         segments, trip_type = build_flight_segments(
             origin=Airport.JFK,
             destination=Airport.LAX,
-            departure_date="2026-4-2",
-            return_date="2026-4-9",
+            departure_date="2027-1-15",
+            return_date="2027-1-22",
         )
         assert trip_type == TripType.ROUND_TRIP
-        assert segments[0].travel_date == "2026-04-02"
-        assert segments[1].travel_date == "2026-04-09"
+        assert segments[0].travel_date == "2027-01-15"
+        assert segments[1].travel_date == "2027-01-22"
 
 
 class TestBuildDateSearchSegments:
@@ -58,18 +58,18 @@ class TestBuildDateSearchSegments:
         segments, _ = build_date_search_segments(
             origin=Airport.JFK,
             destination=Airport.LAX,
-            start_date="2026-4-2",
+            start_date="2027-1-15",
         )
-        assert segments[0].travel_date == "2026-04-02"
+        assert segments[0].travel_date == "2027-01-15"
 
     def test_normalizes_start_date_round_trip(self):
         segments, trip_type = build_date_search_segments(
             origin=Airport.JFK,
             destination=Airport.LAX,
-            start_date="2026-4-2",
+            start_date="2027-1-15",
             is_round_trip=True,
             trip_duration=7,
         )
         assert trip_type == TripType.ROUND_TRIP
-        assert segments[0].travel_date == "2026-04-02"
-        assert segments[1].travel_date == "2026-04-09"
+        assert segments[0].travel_date == "2027-01-15"
+        assert segments[1].travel_date == "2027-01-22"
