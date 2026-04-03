@@ -46,7 +46,7 @@ def test_validate_date_valid(mock_context, mock_param):
 
 def test_validate_date_single_digit(mock_context, mock_param):
     """Test date validation normalizes single-digit month and day."""
-    assert validate_date(mock_context, mock_param, "2027-1-15") == "2027-01-15"
+    assert validate_date(mock_context, mock_param, "2027-4-2") == "2027-04-02"
     assert validate_date(mock_context, mock_param, "2027-12-5") == "2027-12-05"
     assert validate_date(mock_context, mock_param, "2027-1-15") == "2027-01-15"
 

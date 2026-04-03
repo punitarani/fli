@@ -8,10 +8,10 @@ class TestNormalizeDate:
     """Tests for normalize_date."""
 
     def test_already_padded(self):
-        assert normalize_date("2027-01-15") == "2027-01-15"
+        assert normalize_date("2027-04-02") == "2027-04-02"
 
     def test_single_digit_month_and_day(self):
-        assert normalize_date("2027-1-15") == "2027-01-15"
+        assert normalize_date("2027-4-2") == "2027-04-02"
 
     def test_single_digit_day(self):
         assert normalize_date("2027-12-5") == "2027-12-05"
