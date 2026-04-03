@@ -1,7 +1,5 @@
 """Tests for Search class."""
 
-from datetime import datetime, timedelta
-
 import pytest
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -16,6 +14,13 @@ from fli.models import (
 )
 from fli.models.google_flights.base import TripType
 from fli.search import SearchFlights
+from tests.live_api_dates import (
+    LONG_RETURN_OFFSET_DAYS,
+    PRIMARY_TRAVEL_OFFSET_DAYS,
+    SECONDARY_TRAVEL_OFFSET_DAYS,
+    SHORT_RETURN_OFFSET_DAYS,
+    live_api_date,
+)
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), reraise=True)
@@ -36,8 +41,6 @@ def search():
 @pytest.fixture
 def basic_search_params():
     """Create basic search params for testing."""
-    today = datetime.now()
-    future_date = today + timedelta(days=30)
     return FlightSearchFilters(
         passenger_info=PassengerInfo(
             adults=1,
@@ -49,7 +52,7 @@ def basic_search_params():
             FlightSegment(
                 departure_airport=[[Airport.PHX, 0]],
                 arrival_airport=[[Airport.SFO, 0]],
-                travel_date=future_date.strftime("%Y-%m-%d"),
+                travel_date=live_api_date(PRIMARY_TRAVEL_OFFSET_DAYS),
             )
         ],
         stops=MaxStops.NON_STOP,
@@ -62,8 +65,6 @@ def basic_search_params():
 @pytest.fixture
 def complex_search_params():
     """Create more complex search params for testing."""
-    today = datetime.now()
-    future_date = today + timedelta(days=60)
     return FlightSearchFilters(
         passenger_info=PassengerInfo(
             adults=2,
@@ -75,7 +76,7 @@ def complex_search_params():
             FlightSegment(
                 departure_airport=[[Airport.JFK, 0]],
                 arrival_airport=[[Airport.LAX, 0]],
-                travel_date=future_date.strftime("%Y-%m-%d"),
+                travel_date=live_api_date(SECONDARY_TRAVEL_OFFSET_DAYS),
             )
         ],
         stops=MaxStops.ONE_STOP_OR_FEWER,
@@ -88,10 +89,6 @@ def complex_search_params():
 @pytest.fixture
 def round_trip_search_params():
     """Create basic round trip search params for testing."""
-    today = datetime.now()
-    outbound_date = today + timedelta(days=30)
-    return_date = outbound_date + timedelta(days=7)
-
     return FlightSearchFilters(
         passenger_info=PassengerInfo(
             adults=1,
@@ -103,12 +100,12 @@ def round_trip_search_params():
             FlightSegment(
                 departure_airport=[[Airport.SFO, 0]],
                 arrival_airport=[[Airport.JFK, 0]],
-                travel_date=outbound_date.strftime("%Y-%m-%d"),
+                travel_date=live_api_date(PRIMARY_TRAVEL_OFFSET_DAYS),
             ),
             FlightSegment(
                 departure_airport=[[Airport.JFK, 0]],
                 arrival_airport=[[Airport.SFO, 0]],
-                travel_date=return_date.strftime("%Y-%m-%d"),
+                travel_date=live_api_date(PRIMARY_TRAVEL_OFFSET_DAYS + SHORT_RETURN_OFFSET_DAYS),
             ),
         ],
         stops=MaxStops.NON_STOP,
@@ -122,10 +119,6 @@ def round_trip_search_params():
 @pytest.fixture
 def complex_round_trip_params():
     """Create more complex round trip search params for testing."""
-    today = datetime.now()
-    outbound_date = today + timedelta(days=60)
-    return_date = outbound_date + timedelta(days=14)
-
     return FlightSearchFilters(
         passenger_info=PassengerInfo(
             adults=2,
@@ -137,12 +130,12 @@ def complex_round_trip_params():
             FlightSegment(
                 departure_airport=[[Airport.LAX, 0]],
                 arrival_airport=[[Airport.ORD, 0]],
-                travel_date=outbound_date.strftime("%Y-%m-%d"),
+                travel_date=live_api_date(SECONDARY_TRAVEL_OFFSET_DAYS),
             ),
             FlightSegment(
                 departure_airport=[[Airport.ORD, 0]],
                 arrival_airport=[[Airport.LAX, 0]],
-                travel_date=return_date.strftime("%Y-%m-%d"),
+                travel_date=live_api_date(SECONDARY_TRAVEL_OFFSET_DAYS + LONG_RETURN_OFFSET_DAYS),
             ),
         ],
         stops=MaxStops.ONE_STOP_OR_FEWER,

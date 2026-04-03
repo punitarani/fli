@@ -1,18 +1,21 @@
 """Test MCP server functionality."""
 
-from datetime import datetime, timedelta
-
 from fli.mcp.server import (
     DateSearchParams,
     FlightSearchParams,
     search_dates,
     search_flights,
 )
+from tests.live_api_dates import (
+    PRIMARY_TRAVEL_OFFSET_DAYS,
+    SECONDARY_TRAVEL_OFFSET_DAYS,
+    SHORT_RETURN_OFFSET_DAYS,
+    live_api_date,
+    live_api_window,
+)
 
-
-def get_future_date(days: int = 30) -> str:
-    """Generate a future date string in YYYY-MM-DD format."""
-    return (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+PRIMARY_START_DATE, PRIMARY_END_DATE = live_api_window(PRIMARY_TRAVEL_OFFSET_DAYS)
+SECONDARY_START_DATE, SECONDARY_END_DATE = live_api_window(SECONDARY_TRAVEL_OFFSET_DAYS)
 
 
 class TestMCPServer:
@@ -23,7 +26,7 @@ class TestMCPServer:
         params = FlightSearchParams(
             origin="JFK",
             destination="LHR",
-            departure_date=get_future_date(30),
+            departure_date=live_api_date(PRIMARY_TRAVEL_OFFSET_DAYS),
             cabin_class="ECONOMY",
             max_stops="ANY",
             sort_by="CHEAPEST",
@@ -46,8 +49,8 @@ class TestMCPServer:
         params = FlightSearchParams(
             origin="LAX",
             destination="JFK",
-            departure_date=get_future_date(30),
-            return_date=get_future_date(37),
+            departure_date=live_api_date(PRIMARY_TRAVEL_OFFSET_DAYS),
+            return_date=live_api_date(PRIMARY_TRAVEL_OFFSET_DAYS + SHORT_RETURN_OFFSET_DAYS),
             departure_window="8-20",
             airlines=["AA", "DL"],
             cabin_class="BUSINESS",
@@ -69,14 +72,11 @@ class TestMCPServer:
 
     def test_search_dates_one_way(self):
         """Test one-way date search."""
-        start_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
-        end_date = (datetime.now() + timedelta(days=60)).strftime("%Y-%m-%d")
-
         params = DateSearchParams(
             origin="JFK",
             destination="LHR",
-            start_date=start_date,
-            end_date=end_date,
+            start_date=PRIMARY_START_DATE,
+            end_date=PRIMARY_END_DATE,
             is_round_trip=False,
             cabin_class="ECONOMY",
             max_stops="ANY",
@@ -98,14 +98,11 @@ class TestMCPServer:
 
     def test_search_dates_round_trip(self):
         """Test round-trip date search."""
-        start_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
-        end_date = (datetime.now() + timedelta(days=60)).strftime("%Y-%m-%d")
-
         params = DateSearchParams(
             origin="LAX",
             destination="MIA",
-            start_date=start_date,
-            end_date=end_date,
+            start_date=SECONDARY_START_DATE,
+            end_date=SECONDARY_END_DATE,
             trip_duration=7,
             is_round_trip=True,
             airlines=["AA", "B6"],
@@ -132,7 +129,9 @@ class TestMCPServer:
     def test_invalid_airport_code(self):
         """Test error handling for invalid airport code."""
         params = FlightSearchParams(
-            origin="INVALID", destination="LHR", departure_date=get_future_date(30)
+            origin="INVALID",
+            destination="LHR",
+            departure_date=live_api_date(PRIMARY_TRAVEL_OFFSET_DAYS),
         )
 
         result = search_flights.fn(params)
@@ -148,7 +147,7 @@ class TestMCPServer:
         params = FlightSearchParams(
             origin="JFK",
             destination="LHR",
-            departure_date=get_future_date(30),
+            departure_date=live_api_date(PRIMARY_TRAVEL_OFFSET_DAYS),
             departure_window="invalid-time",
         )
 
@@ -165,7 +164,7 @@ class TestMCPServer:
         params = FlightSearchParams(
             origin="JFK",
             destination="LHR",
-            departure_date=get_future_date(30),
+            departure_date=live_api_date(PRIMARY_TRAVEL_OFFSET_DAYS),
             cabin_class="INVALID_CLASS",
         )
 
@@ -182,7 +181,7 @@ class TestMCPServer:
         params = FlightSearchParams(
             origin="JFK",
             destination="LHR",
-            departure_date=get_future_date(30),
+            departure_date=live_api_date(PRIMARY_TRAVEL_OFFSET_DAYS),
             max_stops="INVALID_STOPS",
         )
 
@@ -199,7 +198,7 @@ class TestMCPServer:
         params = FlightSearchParams(
             origin="JFK",
             destination="LHR",
-            departure_date=get_future_date(30),
+            departure_date=live_api_date(PRIMARY_TRAVEL_OFFSET_DAYS),
             airlines=["INVALID_AIRLINE"],
         )
 
@@ -213,7 +212,7 @@ class TestMCPServer:
 
     def test_flight_search_params_validation(self):
         """Test FlightSearchParams validation."""
-        future_date = get_future_date(30)
+        future_date = live_api_date(PRIMARY_TRAVEL_OFFSET_DAYS)
         params = FlightSearchParams(origin="JFK", destination="LHR", departure_date=future_date)
         assert params.origin == "JFK"
         assert params.destination == "LHR"
@@ -224,8 +223,8 @@ class TestMCPServer:
 
     def test_date_search_params_validation(self):
         """Test DateSearchParams validation."""
-        start_date = get_future_date(30)
-        end_date = get_future_date(60)
+        start_date = PRIMARY_START_DATE
+        end_date = PRIMARY_END_DATE
         params = DateSearchParams(
             origin="JFK",
             destination="LHR",

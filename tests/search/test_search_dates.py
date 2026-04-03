@@ -1,6 +1,6 @@
 """Tests for SearchDates class."""
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import pytest
 
@@ -15,6 +15,14 @@ from fli.models import (
 )
 from fli.models.google_flights.base import TripType
 from fli.search import SearchDates
+from tests.live_api_dates import (
+    LONG_RETURN_OFFSET_DAYS,
+    PRIMARY_TRAVEL_OFFSET_DAYS,
+    SECONDARY_TRAVEL_OFFSET_DAYS,
+    SHORT_RETURN_OFFSET_DAYS,
+    live_api_date,
+    live_api_window,
+)
 
 
 @pytest.fixture
@@ -26,8 +34,7 @@ def search():
 @pytest.fixture
 def basic_search_params():
     """Create basic date search params for testing."""
-    today = datetime.now()
-    future_date = today + timedelta(days=30)
+    from_date, to_date = live_api_window(PRIMARY_TRAVEL_OFFSET_DAYS)
     return DateSearchFilters(
         passenger_info=PassengerInfo(
             adults=1,
@@ -39,22 +46,21 @@ def basic_search_params():
             FlightSegment(
                 departure_airport=[[Airport.PHX, 0]],
                 arrival_airport=[[Airport.SFO, 0]],
-                travel_date=future_date.strftime("%Y-%m-%d"),
+                travel_date=live_api_date(PRIMARY_TRAVEL_OFFSET_DAYS),
             )
         ],
         stops=MaxStops.NON_STOP,
         seat_type=SeatType.ECONOMY,
         sort_by=SortBy.CHEAPEST,
-        from_date=(future_date - timedelta(days=30)).strftime("%Y-%m-%d"),
-        to_date=(future_date + timedelta(days=30)).strftime("%Y-%m-%d"),
+        from_date=from_date,
+        to_date=to_date,
     )
 
 
 @pytest.fixture
 def complex_search_params():
     """Create more complex date search params for testing."""
-    today = datetime.now()
-    future_date = today + timedelta(days=60)
+    from_date, to_date = live_api_window(SECONDARY_TRAVEL_OFFSET_DAYS)
     return DateSearchFilters(
         passenger_info=PassengerInfo(
             adults=2,
@@ -66,23 +72,21 @@ def complex_search_params():
             FlightSegment(
                 departure_airport=[[Airport.JFK, 0]],
                 arrival_airport=[[Airport.LAX, 0]],
-                travel_date=future_date.strftime("%Y-%m-%d"),
+                travel_date=live_api_date(SECONDARY_TRAVEL_OFFSET_DAYS),
             )
         ],
         stops=MaxStops.ONE_STOP_OR_FEWER,
         seat_type=SeatType.FIRST,
         sort_by=SortBy.TOP_FLIGHTS,
-        from_date=(future_date - timedelta(days=30)).strftime("%Y-%m-%d"),
-        to_date=(future_date + timedelta(days=30)).strftime("%Y-%m-%d"),
+        from_date=from_date,
+        to_date=to_date,
     )
 
 
 @pytest.fixture
 def round_trip_search_params():
     """Create basic round trip search params for testing."""
-    today = datetime.now()
-    outbound_date = today + timedelta(days=30)
-    return_date = outbound_date + timedelta(days=7)
+    from_date, to_date = live_api_window(PRIMARY_TRAVEL_OFFSET_DAYS)
 
     return DateSearchFilters(
         passenger_info=PassengerInfo(
@@ -95,29 +99,27 @@ def round_trip_search_params():
             FlightSegment(
                 departure_airport=[[Airport.SFO, 0]],
                 arrival_airport=[[Airport.JFK, 0]],
-                travel_date=outbound_date.strftime("%Y-%m-%d"),
+                travel_date=live_api_date(PRIMARY_TRAVEL_OFFSET_DAYS),
             ),
             FlightSegment(
                 departure_airport=[[Airport.JFK, 0]],
                 arrival_airport=[[Airport.SFO, 0]],
-                travel_date=return_date.strftime("%Y-%m-%d"),
+                travel_date=live_api_date(PRIMARY_TRAVEL_OFFSET_DAYS + SHORT_RETURN_OFFSET_DAYS),
             ),
         ],
         stops=MaxStops.NON_STOP,
         seat_type=SeatType.ECONOMY,
         sort_by=SortBy.CHEAPEST,
         trip_type=TripType.ROUND_TRIP,
-        from_date=(outbound_date - timedelta(days=30)).strftime("%Y-%m-%d"),
-        to_date=(outbound_date + timedelta(days=30)).strftime("%Y-%m-%d"),
+        from_date=from_date,
+        to_date=to_date,
     )
 
 
 @pytest.fixture
 def complex_round_trip_params():
     """Create more complex round trip search params for testing."""
-    today = datetime.now()
-    outbound_date = today + timedelta(days=60)
-    return_date = outbound_date + timedelta(days=14)
+    from_date, to_date = live_api_window(SECONDARY_TRAVEL_OFFSET_DAYS)
 
     return DateSearchFilters(
         passenger_info=PassengerInfo(
@@ -130,20 +132,20 @@ def complex_round_trip_params():
             FlightSegment(
                 departure_airport=[[Airport.LAX, 0]],
                 arrival_airport=[[Airport.ORD, 0]],
-                travel_date=outbound_date.strftime("%Y-%m-%d"),
+                travel_date=live_api_date(SECONDARY_TRAVEL_OFFSET_DAYS),
             ),
             FlightSegment(
                 departure_airport=[[Airport.ORD, 0]],
                 arrival_airport=[[Airport.LAX, 0]],
-                travel_date=return_date.strftime("%Y-%m-%d"),
+                travel_date=live_api_date(SECONDARY_TRAVEL_OFFSET_DAYS + LONG_RETURN_OFFSET_DAYS),
             ),
         ],
         stops=MaxStops.ONE_STOP_OR_FEWER,
         seat_type=SeatType.BUSINESS,
         sort_by=SortBy.TOP_FLIGHTS,
         trip_type=TripType.ROUND_TRIP,
-        from_date=(outbound_date - timedelta(days=30)).strftime("%Y-%m-%d"),
-        to_date=(outbound_date + timedelta(days=30)).strftime("%Y-%m-%d"),
+        from_date=from_date,
+        to_date=to_date,
     )
 
 
