@@ -161,7 +161,7 @@ def _search_flights_core(
             )
             return
 
-        display_flight_results(results)
+        display_flight_results(results, trip_type=trip_type)
 
     except ParseError as e:
         if output_format == OutputFormat.JSON:

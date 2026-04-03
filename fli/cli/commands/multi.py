@@ -5,9 +5,10 @@ from typing import Annotated
 
 import typer
 
-from fli.cli.utils import display_flight_results, validate_date, validate_time_range
+from fli.cli.utils import display_flight_results, validate_time_range
 from fli.core import (
     build_multi_city_segments,
+    normalize_date,
     parse_airlines,
     parse_cabin_class,
     parse_max_stops,
@@ -112,7 +113,7 @@ def multi(
         parsed_legs = []
         for leg_str in legs:
             origin, destination, date = _parse_leg(leg_str)
-            date = validate_date(None, None, date)
+            date = normalize_date(date)
             origin_airport = resolve_airport(origin)
             destination_airport = resolve_airport(destination)
             parsed_legs.append((origin_airport, destination_airport, date))
@@ -156,7 +157,7 @@ def multi(
             typer.echo("No flights found.")
             raise typer.Exit(1)
 
-        display_flight_results(results)
+        display_flight_results(results, trip_type=trip_type)
 
     except ParseError as e:
         typer.echo(f"Error: {str(e)}")
