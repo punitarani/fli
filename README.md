@@ -1,7 +1,7 @@
-# 🛫 Fli - Flight Search MCP Server and Library
+# 🛫 Fli - Flight & Hotel Search MCP Server and Library
 
-A powerful Python library that provides programmatic access to Google Flights data with an elegant CLI interface. Search
-flights, find the best deals, and filter results with ease.
+A powerful Python library that provides programmatic access to Google Flights and Google Travel data with an elegant CLI
+interface. Search flights, find the best deals, compare hotels, and filter results with ease.
 
 > 🚀 **What makes `fli` special?**
 > Unlike other flight search libraries that rely on web scraping, Fli directly interacts with Google Flights' API
@@ -101,13 +101,21 @@ fli --help
 
 ## Features
 
-* 🔍 **Powerful Search**
+* 🔍 **Powerful Flight Search**
     * One-way flight searches
     * Flexible departure times
     * Multi-airline support
     * Cabin class selection
     * Stop preferences
     * Custom result sorting
+
+* 🏨 **Hotel Search**
+    * Search hotels by city or location
+    * Check-in / check-out date selection
+    * Guest count (adults and children)
+    * Sort by price, rating, or best value
+    * Multi-currency support
+    * Amenity details and ratings
 
 * 💺 **Cabin Classes**
     * Economy
@@ -152,6 +160,30 @@ fli flights JFK LHR 2026-10-25 \
 > fli flights JFK LHR 2026-10-25 --format json
 > ```
 
+### Search for Hotels
+
+```bash
+# Basic hotel search
+fli hotels Lima 2026-06-10 2026-06-18
+
+# Search with guest and sorting options
+fli hotels "Buenos Aires" 2026-06-25 2026-07-10 \
+    --adults 4 \            # Number of adult guests
+    --sort price            # Sort by price
+
+# Limit results and get JSON output
+fli hotels Santiago 2026-06-18 2026-06-25 --format json --limit 10
+
+# Specify currency and children
+fli hotels Tokyo 2026-08-01 2026-08-07 \
+    --adults 2 \
+    --children 1 \
+    --currency EUR
+```
+
+> ⚠️ **Experimental**
+> `--format json` is experimental. The JSON schema may change while the machine-readable CLI contract settles.
+
 ### Find Cheapest Dates
 
 ```bash
@@ -186,6 +218,17 @@ fli dates JFK LHR \
 | `--stops, -s`    | Maximum stops         | `NON_STOP`, `ONE_STOP` |
 | `--sort, -o`     | Sort results by       | `CHEAPEST`, `DURATION` |
 | `--format`       | Output format         | `text`, `json`         |
+
+#### Hotels Command (`fli hotels`)
+
+| Option             | Description             | Example                  |
+|--------------------|-------------------------|--------------------------|
+| `--adults, -a`     | Number of adult guests  | `2`                      |
+| `--children, -k`   | Number of child guests  | `1`                      |
+| `--currency, -c`   | Currency code           | `USD`, `EUR`, `GBP`     |
+| `--sort, -s`       | Sort results by         | `price`, `rating`, `best`|
+| `--limit, -n`      | Max results to show     | `10`                     |
+| `--format`         | Output format           | `text`, `json`           |
 
 #### Dates Command (`fli dates`)
 
