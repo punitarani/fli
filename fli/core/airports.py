@@ -81,14 +81,14 @@ def search_airports(query: str, limit: int = 10) -> list[AirportMatch]:
 
     Args:
         query: Search string (e.g., "new york", "san fran", "JFK", "heathrow")
-        limit: Maximum results to return.
+        limit: Maximum results to return (must be >= 1).
 
     Returns:
         List of matching airports sorted by relevance (best match first).
 
     """
     query_lower = query.strip().lower()
-    if not query_lower:
+    if not query_lower or limit < 1:
         return []
 
     results: list[AirportMatch] = []
@@ -115,16 +115,17 @@ def search_airports(query: str, limit: int = 10) -> list[AirportMatch]:
                     pass
 
     # Priority 3: Partial city name match (handles "new yo" matching "new york")
-    for city, codes in CITY_AIRPORTS.items():
-        if city.startswith(query_lower) and query_lower not in CITY_AIRPORTS:
-            for code in codes:
-                if code not in seen_codes:
-                    try:
-                        airport = Airport[code]
-                        results.append(AirportMatch(code, airport.value, "city", 80.0))
-                        seen_codes.add(code)
-                    except KeyError:
-                        pass
+    if query_lower not in CITY_AIRPORTS:
+        for city, codes in CITY_AIRPORTS.items():
+            if city.startswith(query_lower):
+                for code in codes:
+                    if code not in seen_codes:
+                        try:
+                            airport = Airport[code]
+                            results.append(AirportMatch(code, airport.value, "city", 80.0))
+                            seen_codes.add(code)
+                        except KeyError:
+                            pass
 
     # Priority 4: Airport name substring match
     for airport in Airport:

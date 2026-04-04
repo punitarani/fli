@@ -24,8 +24,8 @@ from fli.core import (
     parse_max_stops,
     parse_sort_by,
     resolve_airport,
+    search_airports,
 )
-from fli.core.airports import search_airports
 from fli.core.parsers import ParseError
 from fli.models import (
     BagsFilter,
@@ -565,7 +565,7 @@ def find_airports(
         ),
     ],
     limit: Annotated[int, Field(description="Maximum results to return", ge=1, le=50)] = 10,
-) -> str:
+) -> dict[str, Any]:
     """Search for airports by city name, airport name, or IATA code.
 
     Use this tool to find airport IATA codes before searching for flights.
@@ -574,13 +574,11 @@ def find_airports(
     """
     results = search_airports(query, limit=limit)
 
-    if not results:
-        return f"No airports found matching '{query}'."
-
-    lines = [f"Airports matching '{query}':\n"]
-    for r in results:
-        lines.append(f"  {r.code} - {r.name}")
-    return "\n".join(lines)
+    return {
+        "query": query,
+        "count": len(results),
+        "airports": [{"code": r.code, "name": r.name, "match_type": r.match_type} for r in results],
+    }
 
 
 
