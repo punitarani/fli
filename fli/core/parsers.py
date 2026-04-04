@@ -4,18 +4,35 @@ This module provides parsing functions used by both the CLI and MCP interfaces
 to convert user input into domain model objects.
 """
 
+import csv
+import importlib.resources
 from enum import Enum
 from typing import TypeVar
 
 from fli.models import Airline, Airport, EmissionsFilter, MaxStops, SeatType, SortBy
 
 T = TypeVar("T", bound=Enum)
+_icao_to_iata: dict[str, str] | None = None
 
 
 class ParseError(ValueError):
     """Error raised when parsing fails."""
 
     pass
+
+
+def _load_icao_mapping() -> dict[str, str]:
+    """Load ICAO-to-IATA airport mappings lazily."""
+    global _icao_to_iata
+
+    if _icao_to_iata is None:
+        ref = importlib.resources.files("fli") / "data" / "icao_to_iata.csv"
+        with importlib.resources.as_file(ref) as p:
+            with open(p, newline="") as f:
+                reader = csv.reader(f)
+                _icao_to_iata = {icao.upper(): iata.upper() for icao, iata in reader}
+
+    return _icao_to_iata
 
 
 def resolve_enum(enum_cls: type[T], name: str) -> T:
@@ -45,7 +62,7 @@ def resolve_airport(code: str) -> Airport:
     """Resolve an airport code to an Airport enum.
 
     Args:
-        code: IATA airport code (e.g., 'JFK', 'LHR')
+        code: IATA or ICAO airport code (e.g., 'JFK', 'LHR', 'KJFK', 'EGLL')
 
     Returns:
         The corresponding Airport enum member
@@ -54,8 +71,18 @@ def resolve_airport(code: str) -> Airport:
         ParseError: If the code is not a valid airport
 
     """
+    airport_code = code.upper()
+
+    if len(airport_code) == 4 and airport_code.isalpha():
+        mapped = _load_icao_mapping().get(airport_code)
+        if mapped is None:
+            raise ParseError(
+                f"Unknown ICAO code: '{code}'. Not found in the ICAO-to-IATA mapping table."
+            )
+        airport_code = mapped
+
     try:
-        return getattr(Airport, code.upper())
+        return getattr(Airport, airport_code)
     except AttributeError as e:
         raise ParseError(f"Invalid airport code: '{code}'") from e
 
