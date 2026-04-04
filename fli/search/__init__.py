@@ -1,6 +1,6 @@
 from .dates import DatePrice, SearchDates
 from .flights import SearchFlights
-from .hotels import HotelResult, SearchHotels
+from .hotels import HotelResult, HotelSearchError, SearchHotels
 
 __all__ = [
     "SearchFlights",
@@ -8,4 +8,5 @@ __all__ = [
     "SearchHotels",
     "DatePrice",
     "HotelResult",
+    "HotelSearchError",
 ]

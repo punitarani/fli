@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from fast_hotels import get_hotels
-from fast_hotels.hotels_impl import Guests as FastHotelGuests
-from fast_hotels.hotels_impl import HotelData as FastHotelData
+
+class HotelSearchError(Exception):
+    """Raised when a hotel search fails."""
 
 
 @dataclass
@@ -58,9 +58,20 @@ class SearchHotels:
             List of HotelResult objects, or None if no results found
 
         Raises:
-            Exception: If the search fails
+            HotelSearchError: If the search fails
+            ImportError: If fast-hotels is not installed
 
         """
+        try:
+            from fast_hotels import get_hotels
+            from fast_hotels.hotels_impl import Guests as FastHotelGuests
+            from fast_hotels.hotels_impl import HotelData as FastHotelData
+        except ImportError as e:
+            raise ImportError(
+                "Hotel search requires the 'hotels' extra. "
+                "Install with: pip install flights[hotels]"
+            ) from e
+
         try:
             hotel_data = [
                 FastHotelData(
@@ -75,6 +86,7 @@ class SearchHotels:
             result = get_hotels(
                 hotel_data=hotel_data,
                 guests=guests,
+                currency=currency,
                 sort_by=sort_by,
                 limit=limit,
             )
@@ -94,4 +106,4 @@ class SearchHotels:
             ]
 
         except Exception as e:
-            raise Exception(f"Hotel search failed: {str(e)}") from e
+            raise HotelSearchError(f"Hotel search failed: {str(e)}") from e

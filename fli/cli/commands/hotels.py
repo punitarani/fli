@@ -1,14 +1,11 @@
 """Hotel search CLI command."""
 
-import json
 from typing import Annotated, Any
 
 import typer
 from rich import box
-from rich.console import Group
 from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 
 from fli.cli.console import console
 from fli.cli.enums import OutputFormat
@@ -19,7 +16,7 @@ from fli.cli.utils import (
 )
 from fli.core import format_price
 from fli.core.parsers import ParseError
-from fli.search.hotels import HotelResult, SearchHotels
+from fli.search.hotels import HotelResult, HotelSearchError, SearchHotels
 
 
 def serialize_hotel_result(hotel: HotelResult) -> dict[str, Any]:
@@ -33,7 +30,9 @@ def serialize_hotel_result(hotel: HotelResult) -> dict[str, Any]:
     }
 
 
-def display_hotel_results(hotels: list[HotelResult], location: str, dates: str, currency: str = "USD"):
+def display_hotel_results(
+    hotels: list[HotelResult], location: str, dates: str, currency: str = "USD"
+):
     """Display hotel results in a formatted table."""
     if not hotels:
         console.print(Panel("No hotels found matching your criteria", style="red"))
@@ -147,13 +146,14 @@ def _search_hotels_core(
                     search_type="hotels",
                     message=str(e),
                     query=query,
+                    data_source="google_travel",
                 )
             )
             raise typer.Exit(1) from e
 
         typer.echo(f"Error: {str(e)}")
         raise typer.Exit(1) from e
-    except (AttributeError, ValueError) as e:
+    except (AttributeError, ValueError, HotelSearchError) as e:
         if output_format == OutputFormat.JSON:
             emit_json(
                 build_json_error_response(
@@ -161,6 +161,7 @@ def _search_hotels_core(
                     message=str(e),
                     error_type="search_error",
                     query=query,
+                    data_source="google_travel",
                 )
             )
             raise typer.Exit(1) from e
@@ -170,7 +171,9 @@ def _search_hotels_core(
 
 
 def hotels(
-    location: Annotated[str, typer.Argument(help="City name or location (e.g., Lima, Tokyo, 'New York')")],
+    location: Annotated[
+        str, typer.Argument(help="City name or location (e.g., Lima, Tokyo, 'New York')")
+    ],
     check_in_date: Annotated[str, typer.Argument(help="Check-in date (YYYY-MM-DD)")],
     check_out_date: Annotated[str, typer.Argument(help="Check-out date (YYYY-MM-DD)")],
     adults: Annotated[
