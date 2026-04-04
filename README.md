@@ -340,6 +340,35 @@ for flight in flights:
         print(f"📍 To: {leg.arrival_airport.value} at {leg.arrival_datetime}")
 ```
 
+### Hotel Search Example
+
+```python
+from fli.search.hotels import SearchHotels
+
+# Search for hotels
+search = SearchHotels()
+hotels = search.search(
+    location="Lima",
+    check_in_date="2026-06-10",
+    check_out_date="2026-06-18",
+    adults=2,
+    children=0,
+    currency="USD",
+    sort_by="price",
+    limit=5,
+)
+
+# Process results
+if hotels:
+    for hotel in hotels:
+        print(f"🏨 {hotel.name}")
+        print(f"💰 ${hotel.price}/night")
+        print(f"⭐ Rating: {hotel.rating}/5" if hotel.rating else "⭐ Rating: N/A")
+        if hotel.amenities:
+            print(f"🛎️ Amenities: {', '.join(hotel.amenities[:5])}")
+        print()
+```
+
 ### Running Examples
 
 We provide 11 comprehensive examples in the `examples/` directory that demonstrate various use cases:
