@@ -829,7 +829,7 @@ def run():
     mcp.run(transport="stdio")
 
 
-def run_http(host: str = "127.0.0.1", port: int = 8000) -> None:
+def run_http(host: str = "0.0.0.0", port: int = 8000) -> None:
     """Run the MCP server over HTTP (streamable)."""
     env_host = os.getenv("HOST")
     env_port = os.getenv("PORT")
