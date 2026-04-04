@@ -112,6 +112,39 @@ def mock_search_dates(monkeypatch):
 
 
 @pytest.fixture
+def mock_search_hotels(monkeypatch):
+    """Mock SearchHotels class."""
+    from fli.search.hotels import HotelResult
+
+    mock = MagicMock()
+    mock.search.return_value = [
+        HotelResult(
+            name="Hotel Lima Central",
+            price=89.99,
+            rating=4.2,
+            url="https://example.com/hotel-lima-central",
+            amenities=["Free WiFi", "Pool", "Breakfast", "Gym", "Spa"],
+        ),
+        HotelResult(
+            name="Gran Hotel Bolivar",
+            price=125.50,
+            rating=4.5,
+            url="https://example.com/gran-hotel-bolivar",
+            amenities=["Free WiFi", "Restaurant", "Bar", "Room Service"],
+        ),
+        HotelResult(
+            name="Budget Inn Lima",
+            price=45.00,
+            rating=3.8,
+            url="https://example.com/budget-inn-lima",
+            amenities=["Free WiFi"],
+        ),
+    ]
+    monkeypatch.setattr("fli.search.hotels.SearchHotels.__new__", lambda cls: mock)
+    return mock
+
+
+@pytest.fixture
 def mock_console(monkeypatch):
     """Mock the rich console to prevent output during tests."""
     mock = MagicMock()

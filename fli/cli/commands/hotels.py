@@ -33,7 +33,7 @@ def serialize_hotel_result(hotel: HotelResult) -> dict[str, Any]:
     }
 
 
-def display_hotel_results(hotels: list[HotelResult], location: str, dates: str):
+def display_hotel_results(hotels: list[HotelResult], location: str, dates: str, currency: str = "USD"):
     """Display hotel results in a formatted table."""
     if not hotels:
         console.print(Panel("No hotels found matching your criteria", style="red"))
@@ -58,7 +58,7 @@ def display_hotel_results(hotels: list[HotelResult], location: str, dates: str):
         table.add_row(
             str(i),
             hotel.name,
-            format_price(hotel.price),
+            format_price(hotel.price, currency),
             rating_str,
             amenities_str,
         )
@@ -138,7 +138,7 @@ def _search_hotels_core(
             return
 
         dates_str = f"{check_in_date} to {check_out_date}"
-        display_hotel_results(results, location, dates_str)
+        display_hotel_results(results, location, dates_str, currency=currency.upper())
 
     except ParseError as e:
         if output_format == OutputFormat.JSON:
