@@ -2,8 +2,14 @@
 
 import pytest
 
-from fli.core.parsers import ParseError, parse_airlines, parse_emissions, parse_sort_by
-from fli.models import Airline, EmissionsFilter, SortBy
+from fli.core.parsers import (
+    ParseError,
+    parse_airlines,
+    parse_emissions,
+    parse_sort_by,
+    resolve_airport,
+)
+from fli.models import Airline, Airport, EmissionsFilter, SortBy
 
 
 class TestParseEmissions:
@@ -71,3 +77,29 @@ class TestParseSortBy:
     def test_invalid(self):
         with pytest.raises(ParseError, match="Invalid sort_by value"):
             parse_sort_by("NONE")
+
+
+class TestResolveAirportICAO:
+    """Tests for ICAO airport resolution."""
+
+    def test_icao_kjfk(self):
+        assert resolve_airport("KJFK") == Airport.JFK
+
+    def test_icao_vtbs(self):
+        assert resolve_airport("VTBS") == Airport.BKK
+
+    def test_icao_egll(self):
+        assert resolve_airport("EGLL") == Airport.LHR
+
+    def test_icao_case_insensitive(self):
+        assert resolve_airport("kjfk") == Airport.JFK
+
+    def test_iata_still_works(self):
+        assert resolve_airport("JFK") == Airport.JFK
+
+    def test_unknown_icao_raises(self):
+        with pytest.raises(ParseError, match="Invalid airport code"):
+            resolve_airport("ZZZZ")
+
+    def test_three_letter_not_icao(self):
+        assert resolve_airport("AAA") == Airport.AAA
