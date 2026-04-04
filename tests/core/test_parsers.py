@@ -98,7 +98,7 @@ class TestResolveAirportICAO:
         assert resolve_airport("JFK") == Airport.JFK
 
     def test_unknown_icao_raises(self):
-        with pytest.raises(ParseError, match="Invalid airport code"):
+        with pytest.raises(ParseError, match="Unknown ICAO code"):
             resolve_airport("ZZZZ")
 
     def test_three_letter_not_icao(self):

@@ -5,8 +5,8 @@ to convert user input into domain model objects.
 """
 
 import csv
+import importlib.resources
 from enum import Enum
-from pathlib import Path
 from typing import TypeVar
 
 from fli.models import Airline, Airport, EmissionsFilter, MaxStops, SeatType, SortBy
@@ -26,10 +26,11 @@ def _load_icao_mapping() -> dict[str, str]:
     global _icao_to_iata
 
     if _icao_to_iata is None:
-        mapping_path = Path(__file__).resolve().parent.parent.parent / "data" / "icao_to_iata.csv"
-        with mapping_path.open(newline="") as f:
-            reader = csv.reader(f)
-            _icao_to_iata = {icao.upper(): iata.upper() for icao, iata in reader}
+        ref = importlib.resources.files("fli") / "data" / "icao_to_iata.csv"
+        with importlib.resources.as_file(ref) as p:
+            with open(p, newline="") as f:
+                reader = csv.reader(f)
+                _icao_to_iata = {icao.upper(): iata.upper() for icao, iata in reader}
 
     return _icao_to_iata
 
@@ -73,7 +74,12 @@ def resolve_airport(code: str) -> Airport:
     airport_code = code.upper()
 
     if len(airport_code) == 4 and airport_code.isalpha():
-        airport_code = _load_icao_mapping().get(airport_code, airport_code)
+        mapped = _load_icao_mapping().get(airport_code)
+        if mapped is None:
+            raise ParseError(
+                f"Unknown ICAO code: '{code}'. Not found in the ICAO-to-IATA mapping table."
+            )
+        airport_code = mapped
 
     try:
         return getattr(Airport, airport_code)
