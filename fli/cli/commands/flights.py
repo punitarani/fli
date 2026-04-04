@@ -1,5 +1,6 @@
 """Flight search CLI command."""
 
+import re
 from typing import Annotated, Any
 
 import typer
@@ -52,6 +53,14 @@ def _search_flights_core(
     output_format: OutputFormat = OutputFormat.TEXT,
 ) -> None:
     """Core flight search functionality."""
+    # Normalize airlines: split each element on commas/spaces to support "BA,KL" in a single flag
+    if airlines:
+        airlines = [
+            code.strip().upper()
+            for item in airlines
+            for code in re.split(r"[,\s]+", item)
+            if code.strip()
+        ]
     query: dict[str, Any] = {
         "origin": origin.upper(),
         "destination": destination.upper(),
@@ -217,7 +226,7 @@ def flights(
         typer.Option(
             "--airlines",
             "-a",
-            help="List of airline IATA codes (e.g., BA KL)",
+            help="Airline IATA codes (e.g., BA,KL or repeated --airlines BA --airlines KL)",
         ),
     ] = None,
     cabin_class: Annotated[
