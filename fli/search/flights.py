@@ -8,15 +8,25 @@ import json
 from copy import deepcopy
 from datetime import datetime
 
-from fli.core import extract_currency_from_price_token
+from fli.core import (
+    extract_currency_from_price_token,
+)
 from fli.models import (
     Airline,
     Airport,
+    BookingOffer,
     FlightLeg,
     FlightResult,
     FlightSearchFilters,
+    PassengerInfo,
+    SeatType,
 )
 from fli.models.google_flights.base import TripType
+from fli.search.booking_offers import (
+    build_booking_f_req,
+    build_booking_filter_block,
+    parse_booking_results,
+)
 from fli.search.client import get_client
 
 
@@ -28,6 +38,7 @@ class SearchFlights:
     """
 
     BASE_URL = "https://www.google.com/_/FlightsFrontendUi/data/travel.frontend.flights.FlightsFrontendService/GetShoppingResults"
+    BOOKING_URL = "https://www.google.com/_/FlightsFrontendUi/data/travel.frontend.flights.FlightsFrontendService/GetBookingResults"
     DEFAULT_HEADERS = {
         "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
     }
@@ -114,6 +125,61 @@ class SearchFlights:
         except Exception as e:
             raise Exception(f"Search failed: {str(e)}") from e
 
+    def get_booking_offers(
+        self,
+        itinerary: FlightResult | tuple[FlightResult, ...],
+        *,
+        passenger_info: PassengerInfo | None = None,
+        cabin_class: SeatType = SeatType.ECONOMY,
+    ) -> list[BookingOffer]:
+        """Fetch booking offers for an exact found itinerary.
+
+        Args:
+            itinerary: A one-way `FlightResult` or the tuple returned for a
+                round-trip or multi-city itinerary.
+                For multi-leg itineraries, the booking token from the last
+                flight is used for the booking lookup.
+            passenger_info: Passenger configuration for the booking lookup.
+                Defaults to `PassengerInfo(adults=1)` when omitted.
+            cabin_class: Cabin class to include in the booking lookup request.
+
+        Returns:
+            A list of `BookingOffer` objects. Returns an empty list when the
+            itinerary does not include a booking token.
+
+        Raises:
+            Exception: If the booking-offer lookup fails at any stage.
+
+        """
+        flights = list(itinerary) if isinstance(itinerary, tuple) else [itinerary]
+        booking_token = next(
+            (flight.booking_token for flight in reversed(flights) if flight.booking_token),
+            None,
+        )
+        if not booking_token:
+            return []
+
+        try:
+            filter_block = build_booking_filter_block(
+                flights=flights,
+                passenger_info=passenger_info or PassengerInfo(adults=1),
+                cabin_class=cabin_class,
+            )
+            encoded_body = build_booking_f_req(
+                booking_token=booking_token,
+                filter_block=filter_block,
+            )
+            response = self.client.post(
+                url=self.BOOKING_URL,
+                data=f"f.req={encoded_body}",
+                impersonate="chrome",
+                allow_redirects=True,
+            )
+            response.raise_for_status()
+            return parse_booking_results(response.text)
+        except Exception as e:
+            raise Exception(f"Booking offer lookup failed: {str(e)}") from e
+
     @staticmethod
     def _parse_flights_data(data: list) -> FlightResult:
         """Parse raw flight data into a structured FlightResult.
@@ -129,6 +195,7 @@ class SearchFlights:
         flight = FlightResult(
             price=price,
             currency=currency,
+            booking_token=SearchFlights._parse_booking_token(data),
             duration=data[0][9],
             stops=len(data[0][2]) - 1,
             legs=[
@@ -182,6 +249,17 @@ class SearchFlights:
         except (IndexError, TypeError):
             pass
         return price, currency
+
+    @staticmethod
+    def _parse_booking_token(data: list) -> str | None:
+        """Extract the booking token from a shopping result price block."""
+        try:
+            price_block = SearchFlights._get_price_block(data)
+            if price_block and len(price_block) > 1 and isinstance(price_block[1], str):
+                return price_block[1]
+        except (IndexError, TypeError):
+            pass
+        return None
 
     @staticmethod
     def _parse_currency(data: list) -> str | None:

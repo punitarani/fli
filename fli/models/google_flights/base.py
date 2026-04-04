@@ -163,8 +163,23 @@ class FlightResult(BaseModel):
     legs: list[FlightLeg]
     price: NonNegativeFloat  # in specified currency
     currency: str | None = None
+    booking_token: str | None = None
     duration: PositiveInt  # total duration in minutes
     stops: NonNegativeInt
+
+
+class BookingOffer(BaseModel):
+    """Booking offer extracted from Google Flights booking results."""
+
+    merchant_code: str
+    merchant_name: str
+    display_url: str | None = None
+    booking_url: str | None = None
+    price: NonNegativeFloat
+    currency: str | None = None
+    is_official: bool = False
+    flight_numbers: list[str] = []
+    offer_token: str | None = None
 
 
 class FlightSegment(BaseModel):

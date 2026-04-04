@@ -297,6 +297,29 @@ for flight in flights:
         print(f"📍 To: {leg.arrival_airport.value} at {leg.arrival_datetime}")
 ```
 
+### Booking Offers Example
+
+```python
+search = SearchFlights()
+flights = search.search(filters)
+
+first_result = flights[0]
+offers = search.get_booking_offers(first_result)
+
+for offer in offers:
+    print(offer.merchant_name, offer.price, offer.currency)
+    print(offer.booking_url)
+```
+
+For round-trip searches, pass the itinerary tuple directly:
+
+```python
+outbound_and_return = flights[0]
+offers = search.get_booking_offers(outbound_and_return)
+```
+
+> `booking_url` is a Google Flights clickthrough URL, not the final resolved merchant URL.
+
 ### Running Examples
 
 We provide 11 comprehensive examples in the `examples/` directory that demonstrate various use cases:

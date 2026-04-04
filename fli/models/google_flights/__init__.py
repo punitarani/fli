@@ -1,5 +1,6 @@
 from .base import (
     BagsFilter,
+    BookingOffer,
     EmissionsFilter,
     FlightLeg,
     FlightResult,
@@ -20,6 +21,7 @@ __all__ = [
     "Airline",
     "Airport",
     "BagsFilter",
+    "BookingOffer",
     "DateSearchFilters",
     "EmissionsFilter",
     "FlightLeg",

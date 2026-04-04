@@ -113,6 +113,17 @@ for flight in results:
         print(f"Flight: {leg.airline.value} {leg.flight_number}")
 ```
 
+Fetch booking offers for a found itinerary:
+
+```python
+first_result = results[0]
+offers = search.get_booking_offers(first_result)
+
+for offer in offers:
+    print(offer.merchant_name, offer.price, offer.currency)
+    print(offer.booking_url)
+```
+
 2. Round Trip Flight Search:
 
 ```python
@@ -161,6 +172,19 @@ for outbound, return_flight in results:
     
     print(f"\nTotal Price: ${outbound.price}")
 ```
+
+Fetch booking offers for the selected round-trip itinerary:
+
+```python
+outbound_and_return = results[0]
+offers = search.get_booking_offers(outbound_and_return)
+
+for offer in offers:
+    print(offer.merchant_name, offer.price, offer.currency)
+    print(offer.booking_url)
+```
+
+> `booking_url` is a Google Flights clickthrough URL rather than the final resolved merchant URL.
 
 3. Date Range Search:
 
