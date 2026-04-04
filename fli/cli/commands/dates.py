@@ -1,5 +1,6 @@
 """Date search CLI command for finding cheapest travel dates."""
 
+import re
 from datetime import datetime, timedelta
 from typing import Annotated
 
@@ -81,11 +82,11 @@ def dates(
         ),
     ] = 3,
     airlines: Annotated[
-        list[str] | None,
+        str | None,
         typer.Option(
             "--airlines",
             "-a",
-            help="List of airline IATA codes (e.g., BA KL)",
+            help="Airline IATA codes, space or comma separated (e.g., BA KL)",
         ),
     ] = None,
     is_round_trip: Annotated[
@@ -209,6 +210,11 @@ def dates(
         trip_type = TripType.ROUND_TRIP if is_round_trip else TripType.ONE_WAY
         stops = parse_max_stops(max_stops)
         seat_type = parse_cabin_class(cabin_class)
+        # Normalize airlines: accept "BA KL", "BA,KL", or ["BA", "KL"]
+        if isinstance(airlines, str):
+            airlines = [
+                code.strip().upper() for code in re.split(r"[,\s]+", airlines) if code.strip()
+            ]
         parsed_airlines = parse_airlines(airlines)
         selected_days = _build_selected_days(
             monday=monday,
