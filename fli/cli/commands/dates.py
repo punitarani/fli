@@ -82,11 +82,11 @@ def dates(
         ),
     ] = 3,
     airlines: Annotated[
-        str | None,
+        list[str] | None,
         typer.Option(
             "--airlines",
             "-a",
-            help="Airline IATA codes, space or comma separated (e.g., BA KL)",
+            help="Airline IATA codes (e.g., BA,KL or repeated --airlines BA --airlines KL)",
         ),
     ] = None,
     is_round_trip: Annotated[
@@ -210,10 +210,13 @@ def dates(
         trip_type = TripType.ROUND_TRIP if is_round_trip else TripType.ONE_WAY
         stops = parse_max_stops(max_stops)
         seat_type = parse_cabin_class(cabin_class)
-        # Normalize airlines: accept "BA KL", "BA,KL", or ["BA", "KL"]
-        if isinstance(airlines, str):
+        # Normalize airlines: split each element on commas to support "BA,KL" in a single flag
+        if airlines:
             airlines = [
-                code.strip().upper() for code in re.split(r"[,\s]+", airlines) if code.strip()
+                code.strip().upper()
+                for item in airlines
+                for code in re.split(r"[,\s]+", item)
+                if code.strip()
             ]
         parsed_airlines = parse_airlines(airlines)
         selected_days = _build_selected_days(

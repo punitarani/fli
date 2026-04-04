@@ -40,7 +40,7 @@ def _search_flights_core(
     departure_date: str,
     return_date: str | None = None,
     departure_window: str | tuple[int, int] | None = None,
-    airlines: list[str] | str | None = None,
+    airlines: list[str] | None = None,
     cabin_class: str = "ECONOMY",
     max_stops: str = "ANY",
     sort_by: str = "CHEAPEST",
@@ -53,9 +53,14 @@ def _search_flights_core(
     output_format: OutputFormat = OutputFormat.TEXT,
 ) -> None:
     """Core flight search functionality."""
-    # Normalize airlines: accept "BA KL", "BA,KL", or ["BA", "KL"]
-    if isinstance(airlines, str):
-        airlines = [code.strip().upper() for code in re.split(r"[,\s]+", airlines) if code.strip()]
+    # Normalize airlines: split each element on commas/spaces to support "BA,KL" in a single flag
+    if airlines:
+        airlines = [
+            code.strip().upper()
+            for item in airlines
+            for code in re.split(r"[,\s]+", item)
+            if code.strip()
+        ]
     query: dict[str, Any] = {
         "origin": origin.upper(),
         "destination": destination.upper(),
@@ -217,11 +222,11 @@ def flights(
         ),
     ] = None,
     airlines: Annotated[
-        str | None,
+        list[str] | None,
         typer.Option(
             "--airlines",
             "-a",
-            help="Airline IATA codes, space or comma separated (e.g., BA KL)",
+            help="Airline IATA codes (e.g., BA,KL or repeated --airlines BA --airlines KL)",
         ),
     ] = None,
     cabin_class: Annotated[
