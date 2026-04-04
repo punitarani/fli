@@ -365,7 +365,10 @@ def _serialize_date_result(date_result: Any) -> dict[str, Any]:
 
 def _resolve_airports(codes: str) -> list[Airport]:
     """Resolve one or more comma-separated airport codes."""
-    return [resolve_airport(code.strip()) for code in codes.split(",") if code.strip()]
+    airports = [resolve_airport(code.strip()) for code in codes.split(",") if code.strip()]
+    if not airports:
+        raise ParseError(f"No valid airport codes found in: '{codes}'")
+    return airports
 
 
 def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
