@@ -103,6 +103,7 @@ fli --help
 
 * 🔍 **Powerful Search**
     * One-way flight searches
+    * Multi-city flight searches
     * Flexible departure times
     * Multi-airline support
     * Cabin class selection
@@ -173,6 +174,21 @@ fli dates JFK LHR \
 > fli dates JFK LHR --from 2026-01-01 --to 2026-02-01 --format json
 > ```
 
+### Multi-city Search
+
+```bash
+# Two-leg multi-city trip
+fli multi --leg SEA,HKG,2026-12-26 --leg PEK,SEA,2027-01-02
+
+# Three-leg multi-city trip with filters
+fli multi \
+    -l SEA,NRT,2026-12-26 \
+    -l NRT,HKG,2026-12-30 \
+    -l HKG,SEA,2027-01-05 \
+    --class BUSINESS \
+    --stops 0
+```
+
 ### CLI Options
 
 #### Flights Command (`fli flights`)
@@ -202,6 +218,17 @@ fli dates JFK LHR \
 | `--sort`           | Sort by price          | (flag)                 |
 | `--[day]`          | Day filters            | `--monday`, `--friday` |
 | `--format`         | Output format          | `text`, `json`         |
+
+#### Multi Command (`fli multi`)
+
+| Option           | Description                          | Example                        |
+|------------------|--------------------------------------|--------------------------------|
+| `--leg, -l`      | Flight leg (ORIGIN,DEST,DATE format) | `SEA,HKG,2026-12-26`          |
+| `--time, -t`     | Departure time window                | `6-20`                         |
+| `--airlines, -a` | Airline IATA codes                   | `DL CX`                       |
+| `--class, -c`    | Cabin class                          | `ECONOMY`, `BUSINESS`          |
+| `--stops, -s`    | Maximum stops                        | `NON_STOP`, `ONE_STOP`         |
+| `--sort, -o`     | Sort results by                      | `CHEAPEST`, `DURATION`         |
 
 ## MCP Server Integration
 
