@@ -1,6 +1,6 @@
 services:
   fli-mcp:
-    image: ghcr.io/nicolaeser/fli:latest
+    image: ghcr.io/punitarani/fli:latest
     ports:
       - "8000:8000"
     environment:
