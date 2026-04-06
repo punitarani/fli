@@ -15,6 +15,7 @@ from fli.cli.utils import (
     normalize_cli_date,
     normalize_cli_time_range,
     serialize_date_result,
+    validate_currency,
 )
 from fli.core import (
     build_date_search_segments,
@@ -191,6 +192,14 @@ def dates(
             case_sensitive=False,
         ),
     ] = OutputFormat.TEXT,
+    currency: Annotated[
+        str,
+        typer.Option(
+            "--currency",
+            callback=validate_currency,
+            help="Fallback currency code when not returned by Google (e.g., CAD, EUR).",
+        ),
+    ] = "USD",
 ):
     """Find the cheapest dates to fly between two airports.
 
@@ -295,7 +304,10 @@ def dates(
                     trip_type=trip_type,
                     query=query,
                     results_key="dates",
-                    results=[serialize_date_result(result, trip_type) for result in results],
+                    results=[
+                        serialize_date_result(result, trip_type, default_currency=currency)
+                        for result in results
+                    ],
                 )
             )
             return
@@ -309,7 +321,7 @@ def dates(
             typer.echo(message)
             raise typer.Exit(1)
 
-        display_date_results(results, trip_type)
+        display_date_results(results, trip_type, default_currency=currency)
 
     except ParseError as e:
         if output_format == OutputFormat.JSON:

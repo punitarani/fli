@@ -193,38 +193,45 @@ def test_multiple_searches(search, basic_search_params, complex_search_params):
 # def test_round_trip_result_structure(search, search_params_fixture, request):
 
 
-class TestParsePrice:
-    """Tests for _parse_price method handling missing/malformed price data."""
+class TestParsePriceInfo:
+    """Tests for _parse_price_info method handling missing/malformed price data."""
 
-    def test_parse_price_valid_data(self):
-        """Test _parse_price with valid price data."""
+    def test_parse_price_info_valid_data(self):
+        """Test _parse_price_info with valid price data."""
         data = [None, [[100, 200, 299.99]]]
-        assert SearchFlights._parse_price(data) == 299.99
+        price, currency = SearchFlights._parse_price_info(data)
+        assert price == 299.99
+        assert currency is None
 
-    def test_parse_price_empty_inner_list(self):
-        """Test _parse_price returns 0.0 when inner price list is empty."""
+    def test_parse_price_info_empty_inner_list(self):
+        """Test _parse_price_info returns 0.0 when inner price list is empty."""
         data = [None, [[]]]
-        assert SearchFlights._parse_price(data) == 0.0
+        price, _ = SearchFlights._parse_price_info(data)
+        assert price == 0.0
 
-    def test_parse_price_empty_outer_list(self):
-        """Test _parse_price returns 0.0 when outer price list is empty."""
+    def test_parse_price_info_empty_outer_list(self):
+        """Test _parse_price_info returns 0.0 when outer price list is empty."""
         data = [None, []]
-        assert SearchFlights._parse_price(data) == 0.0
+        price, _ = SearchFlights._parse_price_info(data)
+        assert price == 0.0
 
-    def test_parse_price_none_price_section(self):
-        """Test _parse_price returns 0.0 when price section is None."""
+    def test_parse_price_info_none_price_section(self):
+        """Test _parse_price_info returns 0.0 when price section is None."""
         data = [None, None]
-        assert SearchFlights._parse_price(data) == 0.0
+        price, _ = SearchFlights._parse_price_info(data)
+        assert price == 0.0
 
-    def test_parse_price_missing_price_section(self):
-        """Test _parse_price returns 0.0 when data has no price section."""
+    def test_parse_price_info_missing_price_section(self):
+        """Test _parse_price_info returns 0.0 when data has no price section."""
         data = [None]
-        assert SearchFlights._parse_price(data) == 0.0
+        price, _ = SearchFlights._parse_price_info(data)
+        assert price == 0.0
 
-    def test_parse_price_inner_list_none(self):
-        """Test _parse_price returns 0.0 when inner list is None."""
+    def test_parse_price_info_inner_list_none(self):
+        """Test _parse_price_info returns 0.0 when inner list is None."""
         data = [None, [None]]
-        assert SearchFlights._parse_price(data) == 0.0
+        price, _ = SearchFlights._parse_price_info(data)
+        assert price == 0.0
 
     def test_parse_currency_from_live_price_token(self):
         """_parse_currency should decode the returned currency from a live token sample."""
