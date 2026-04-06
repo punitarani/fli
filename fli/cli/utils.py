@@ -1,7 +1,6 @@
 """CLI utility functions for display and validation."""
 
 import json
-import os
 import re
 from typing import Any
 
@@ -22,8 +21,6 @@ from fli.core.parsers import ParseError
 from fli.core.parsers import parse_airlines as core_parse_airlines
 from fli.core.parsers import parse_max_stops as core_parse_max_stops
 from fli.models import Airline, Airport, MaxStops, TripType
-
-DEFAULT_CURRENCY = os.environ.get("FLI_DEFAULT_CURRENCY", "USD").upper()
 
 
 def validate_currency(ctx: Context, param: Parameter, value: str | None) -> str | None:
@@ -219,7 +216,7 @@ def _serialize_flight_segment_result(
 
 def serialize_flight_result(
     flight_data: Any,
-    default_currency: str = DEFAULT_CURRENCY,
+    default_currency: str = "USD",
 ) -> dict[str, Any]:
     """Serialize a flight result or round-trip/multi-city tuple for JSON output."""
     if not isinstance(flight_data, tuple):
@@ -255,7 +252,7 @@ def serialize_flight_result(
 def serialize_date_result(
     date_result: Any,
     trip_type: TripType,
-    default_currency: str = DEFAULT_CURRENCY,
+    default_currency: str = "USD",
 ) -> dict[str, Any]:
     """Serialize a date search result for JSON output."""
     payload = {
@@ -316,7 +313,7 @@ def emit_json(payload: dict[str, Any]) -> None:
     typer.echo(json.dumps(payload, indent=2))
 
 
-def display_flight_results(flights: list, default_currency: str = DEFAULT_CURRENCY):
+def display_flight_results(flights: list, default_currency: str = "USD"):
     """Display flight results in a beautiful format.
 
     Args:
@@ -406,9 +403,7 @@ def display_flight_results(flights: list, default_currency: str = DEFAULT_CURREN
         console.print()
 
 
-def display_date_results(
-    dates: list, trip_type: TripType, default_currency: str = DEFAULT_CURRENCY
-):
+def display_date_results(dates: list, trip_type: TripType, default_currency: str = "USD"):
     """Display date search results with sparkline chart and table."""
     if not dates:
         console.print(Panel("No flights found for these dates", style="red"))
