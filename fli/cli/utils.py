@@ -269,11 +269,12 @@ def build_json_error_response(
     message: str,
     error_type: str = "validation_error",
     query: dict[str, Any] | None = None,
+    data_source: str = "google_flights",
 ) -> dict[str, Any]:
     """Build a JSON error payload for CLI commands."""
     payload = {
         "success": False,
-        "data_source": "google_flights",
+        "data_source": data_source,
         "search_type": search_type,
         "error": {
             "type": error_type,

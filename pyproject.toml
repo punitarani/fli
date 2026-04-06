@@ -39,6 +39,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+hotels = [
+    "fast-hotels>=0.2.0",
+]
 dev = [
     "mkdocs-material[imaging]>=9.5.49",
     "mkdocstrings[python]>=0.27.0",
