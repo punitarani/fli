@@ -12,8 +12,71 @@ jobs:
   lint:
     uses: ./.github/workflows/lint.yml
 
+  railway-build:
+    name: Railway build validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Install Nixpacks CLI
+        run: curl -fsSL https://raw.githubusercontent.com/railwayapp/nixpacks/main/install.sh | bash -s -- -f -b "$HOME/.local/bin"
+
+      - name: Add local bin to PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Validate Railway and Nixpacks config
+        run: |
+          python - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          railway = tomllib.loads(Path("railway.toml").read_text())
+          nixpacks = tomllib.loads(Path("nixpacks.toml").read_text())
+
+          assert railway["build"]["builder"] == "NIXPACKS"
+          assert "nixpacksPlan" not in railway["build"]
+          assert railway["deploy"]["startCommand"] == "uv run fli-mcp-http"
+          assert nixpacks["variables"]["NIXPACKS_UV_VERSION"]
+          assert nixpacks["start"]["cmd"] == "uv run fli-mcp-http"
+          PY
+
+      - name: Generate Nixpacks plan
+        run: nixpacks plan . > /tmp/nixpacks-plan.json
+
+      - name: Assert plan pins uv for install
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          plan = json.loads(Path("/tmp/nixpacks-plan.json").read_text())
+          install_cmds = plan["phases"]["install"]["cmds"]
+          joined = "\n".join(install_cmds)
+
+          assert "pip install uv==$NIXPACKS_UV_VERSION" in joined
+          assert "uv sync --no-dev --frozen" in joined
+          PY
+
+      - name: Smoke test Railway production install
+        run: |
+          uv venv /tmp/fli-railway-venv --python 3.12
+          . /tmp/fli-railway-venv/bin/activate
+          uv sync --active --no-dev --frozen
+          uv run python -c "import fastmcp, fli.mcp.server"
+
   test:
-    needs: [ lint ]
+    needs: [ lint, railway-build ]
     runs-on: ubuntu-latest
     strategy:
       matrix:
