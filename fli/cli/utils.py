@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 from typing import Any
 
 import plotext as plt
@@ -22,7 +23,17 @@ from fli.core.parsers import parse_airlines as core_parse_airlines
 from fli.core.parsers import parse_max_stops as core_parse_max_stops
 from fli.models import Airline, Airport, MaxStops, TripType
 
-DEFAULT_CURRENCY = os.environ.get("FLI_DEFAULT_CURRENCY", "USD")
+DEFAULT_CURRENCY = os.environ.get("FLI_DEFAULT_CURRENCY", "USD").upper()
+
+
+def validate_currency(ctx: Context, param: Parameter, value: str | None) -> str | None:
+    """Validate currency code format for typer callbacks."""
+    if value is None:
+        return None
+    normalized = value.upper()
+    if not re.fullmatch(r"[A-Z]{3}", normalized):
+        raise typer.BadParameter(f"'{value}' is not a valid 3-letter currency code")
+    return normalized
 
 
 def validate_date(ctx: Context, param: Parameter, value: str) -> str | None:

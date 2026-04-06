@@ -16,6 +16,7 @@ from fli.cli.utils import (
     normalize_cli_date,
     normalize_cli_time_range,
     serialize_date_result,
+    validate_currency,
 )
 from fli.core import (
     build_date_search_segments,
@@ -196,6 +197,7 @@ def dates(
         str | None,
         typer.Option(
             "--currency",
+            callback=validate_currency,
             help="Fallback currency code when not returned by Google (e.g., CAD, EUR). "
             "Overrides FLI_DEFAULT_CURRENCY env var.",
         ),

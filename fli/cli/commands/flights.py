@@ -14,6 +14,7 @@ from fli.cli.utils import (
     normalize_cli_date,
     normalize_cli_time_range,
     serialize_flight_result,
+    validate_currency,
 )
 from fli.core import (
     build_flight_segments,
@@ -310,6 +311,7 @@ def flights(
         str | None,
         typer.Option(
             "--currency",
+            callback=validate_currency,
             help="Fallback currency code when not returned by Google (e.g., CAD, EUR). "
             "Overrides FLI_DEFAULT_CURRENCY env var.",
         ),
