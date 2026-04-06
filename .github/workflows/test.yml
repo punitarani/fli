@@ -29,6 +29,9 @@ jobs:
         with:
           version: "latest"
 
+      - name: Create local bin directory
+        run: mkdir -p "$HOME/.local/bin"
+
       - name: Install Nixpacks CLI
         run: curl -fsSL https://raw.githubusercontent.com/railwayapp/nixpacks/main/install.sh | bash -s -- -f -b "$HOME/.local/bin"
 
@@ -113,9 +116,9 @@ jobs:
 
   publish-test-results:
     name: "Publish Test Results"
-    needs: test
+    needs: [ railway-build, test ]
     runs-on: ubuntu-latest
-    if: always()
+    if: always() && needs.test.result != 'skipped'
     permissions:
       checks: write
       pull-requests: write
