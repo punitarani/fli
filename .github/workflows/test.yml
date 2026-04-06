@@ -70,15 +70,15 @@ jobs:
           joined = "\n".join(install_cmds)
 
           assert "pip install uv==$NIXPACKS_UV_VERSION" in joined
-          assert "uv sync --active --no-dev --frozen" in joined
+          assert "uv sync --active --no-dev --frozen --extra mcp" in joined
           PY
 
       - name: Smoke test Railway production install
         run: |
           uv venv /tmp/fli-railway-venv --python 3.12
           . /tmp/fli-railway-venv/bin/activate
-          uv sync --active --no-dev --frozen
-          uv run python -c "import fastmcp, fli.mcp.server"
+          uv sync --active --no-dev --frozen --extra mcp
+          python -c "import fastmcp, fli.mcp.server"
 
   test:
     needs: [ lint, railway-build ]
@@ -100,7 +100,7 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --extra dev
+        run: uv sync --extra dev --extra mcp
 
       - name: Run tests
         run: |
