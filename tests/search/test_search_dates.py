@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta
 
 import pytest
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from fli.models import (
     Airport,
@@ -15,6 +16,15 @@ from fli.models import (
 )
 from fli.models.google_flights.base import TripType
 from fli.search import SearchDates
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), reraise=True)
+def search_with_retry(search: SearchDates, search_params):
+    """Search with retry logic for flaky API responses."""
+    results = search.search(search_params)
+    if not results:
+        raise ValueError("Empty results, retrying...")
+    return results
 
 
 @pytest.fixture
@@ -157,28 +167,28 @@ def complex_round_trip_params():
 def test_search_functionality(search, search_params_fixture, request):
     """Test date search functionality with different data sets."""
     search_params = request.getfixturevalue(search_params_fixture)
-    results = search.search(search_params)
+    results = search_with_retry(search, search_params)
     assert isinstance(results, list)
 
 
 def test_multiple_searches(search, basic_search_params, complex_search_params):
     """Test performing multiple searches with the same SearchDates instance."""
     # First search
-    results1 = search.search(basic_search_params)
+    results1 = search_with_retry(search, basic_search_params)
     assert isinstance(results1, list)
 
     # Second search with different data
-    results2 = search.search(complex_search_params)
+    results2 = search_with_retry(search, complex_search_params)
     assert isinstance(results2, list)
 
     # Third search reusing first search data
-    results3 = search.search(basic_search_params)
+    results3 = search_with_retry(search, basic_search_params)
     assert isinstance(results3, list)
 
 
 def test_date_price_sorting(search, basic_search_params):
     """Test that date prices are sorted chronologically."""
-    results = search.search(basic_search_params)
+    results = search_with_retry(search, basic_search_params)
     assert len(results) > 0
 
     # Verify dates are sorted
@@ -206,7 +216,7 @@ def test_parse_price_from_calendar_item():
 
 def test_basic_round_trip_search(search, round_trip_search_params):
     """Test basic round trip date search functionality."""
-    results = search.search(round_trip_search_params)
+    results = search_with_retry(search, round_trip_search_params)
     assert isinstance(results, list)
     assert len(results) > 0
 
@@ -225,7 +235,7 @@ def test_basic_round_trip_search(search, round_trip_search_params):
 
 def test_complex_round_trip_search(search, complex_round_trip_params):
     """Test complex round trip date search with multiple passengers and stops."""
-    results = search.search(complex_round_trip_params)
+    results = search_with_retry(search, complex_round_trip_params)
     assert isinstance(results, list)
     assert len(results) > 0
 
@@ -252,7 +262,7 @@ def test_complex_round_trip_search(search, complex_round_trip_params):
 def test_round_trip_result_structure(search, search_params_fixture, request):
     """Test the structure of round trip date search results with different parameters."""
     search_params = request.getfixturevalue(search_params_fixture)
-    results = search.search(search_params)
+    results = search_with_retry(search, search_params)
 
     assert isinstance(results, list)
     assert len(results) > 0
