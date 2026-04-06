@@ -33,7 +33,9 @@ jobs:
         run: mkdir -p "$HOME/.local/bin"
 
       - name: Install Nixpacks CLI
-        run: curl -fsSL https://raw.githubusercontent.com/railwayapp/nixpacks/main/install.sh | bash -s -- -f -b "$HOME/.local/bin"
+        run: |
+          NIXPACKS_VERSION="1.41.0"
+          curl -fsSL "https://github.com/railwayapp/nixpacks/releases/download/v${NIXPACKS_VERSION}/nixpacks-x86_64-unknown-linux-musl.tar.gz" | tar xz -C "$HOME/.local/bin"
 
       - name: Add local bin to PATH
         run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -68,7 +70,7 @@ jobs:
           joined = "\n".join(install_cmds)
 
           assert "pip install uv==$NIXPACKS_UV_VERSION" in joined
-          assert "uv sync --no-dev --frozen" in joined
+          assert "uv sync --active --no-dev --frozen" in joined
           PY
 
       - name: Smoke test Railway production install

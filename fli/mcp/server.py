@@ -75,11 +75,7 @@ CONFIG = FlightSearchConfig()
 CONFIG_SCHEMA = FlightSearchConfig.model_json_schema()
 
 
-class FliMCP(FastMCP):
-    """FastMCP server configured for fli."""
-
-
-mcp = FliMCP("Flight Search MCP Server")
+mcp = FastMCP("Flight Search MCP Server")
 
 
 # =============================================================================
@@ -474,11 +470,8 @@ def search_flights(
 
 
 def _search_flights_from_params(params: FlightSearchParams) -> dict[str, Any]:
-    """Compatibility wrapper for tests expecting the params-based signature."""
+    """Entry point for tests that call the tool via a params object."""
     return _execute_flight_search(params)
-
-
-search_flights.fn = _search_flights_from_params  # type: ignore[attr-defined]
 
 
 @mcp.tool(
@@ -550,11 +543,8 @@ def search_dates(
 
 
 def _search_dates_from_params(params: DateSearchParams) -> dict[str, Any]:
-    """Compatibility wrapper for tests expecting the params-based signature."""
+    """Entry point for tests that call the tool via a params object."""
     return _execute_date_search(params)
-
-
-search_dates.fn = _search_dates_from_params  # type: ignore[attr-defined]
 
 
 # =============================================================================

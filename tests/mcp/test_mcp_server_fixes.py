@@ -8,8 +8,9 @@ Covers:
 from unittest.mock import MagicMock
 
 import pytest
+from fastmcp import FastMCP
 
-from fli.mcp.server import FliMCP, _serialize_flight_result, mcp
+from fli.mcp.server import _serialize_flight_result, mcp
 
 # ---------------------------------------------------------------------------
 # Bug 1: list_tools — FastMCP 3.x compatibility
@@ -22,7 +23,7 @@ class TestListTools:
     @pytest.mark.asyncio
     async def test_list_tools_returns_registered_tools_with_annotations(self):
         """Registered tools should be listed with their schemas and annotations."""
-        server = FliMCP("test")
+        server = FastMCP("test")
 
         @server.tool(
             description="Search flights",
@@ -44,7 +45,7 @@ class TestListTools:
 
     def test_tool_decorator_preserves_function_usage(self):
         """The FastMCP 3 decorator should still leave a normal callable behind."""
-        server = FliMCP("test")
+        server = FastMCP("test")
 
         @server.tool()
         def search_flights(origin: str, destination: str) -> dict[str, str]:
