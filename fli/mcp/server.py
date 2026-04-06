@@ -7,23 +7,10 @@ travel dates.
 
 import json
 import os
-from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
 
 from fastmcp import FastMCP
-from fastmcp.tools import Tool as FastMCPTool
-from mcp.types import (
-    GetPromptResult,
-    ListPromptsResult,
-    Prompt,
-    PromptArgument,
-    PromptMessage,
-    TextContent,
-    Tool,
-    ToolAnnotations,
-)
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -88,122 +75,7 @@ CONFIG = FlightSearchConfig()
 CONFIG_SCHEMA = FlightSearchConfig.model_json_schema()
 
 
-@dataclass
-class PromptSpec:
-    """Container for prompt metadata and builder."""
-
-    description: str
-    build_messages: Callable[[dict[str, str]], list[PromptMessage]]
-    arguments: list[PromptArgument] | None = None
-
-
-class FliMCP(FastMCP):
-    """Extended FastMCP server with prompt and annotation support."""
-
-    def __init__(self, name: str | None = None, **settings: Any):
-        """Initialize the MCP server with metadata tracking for tools and prompts."""
-        self._tool_annotations: dict[str, ToolAnnotations] = {}
-        self._prompts: dict[str, PromptSpec] = {}
-        super().__init__(name=name, **settings)
-
-    def _setup_handlers(self) -> None:
-        """Register MCP protocol handlers including prompts."""
-        super()._setup_handlers()
-        self._mcp_server.list_tools()(self.list_tools)
-        self._mcp_server.list_prompts()(self.list_prompts)
-        self._mcp_server.get_prompt()(self.get_prompt)
-
-    def add_tool(
-        self,
-        func: Callable,
-        name: str | None = None,
-        description: str | None = None,
-        annotations: dict[str, Any] | ToolAnnotations | None = None,
-    ) -> None:
-        """Register a tool with optional annotations."""
-        tool = FastMCPTool.from_function(fn=func, name=name, description=description)
-        self._tool_manager.add_tool(tool)
-        tool_name = name or func.__name__
-        if annotations:
-            self._tool_annotations[tool_name] = (
-                annotations
-                if isinstance(annotations, ToolAnnotations)
-                else ToolAnnotations(**annotations)
-            )
-
-    def tool(
-        self,
-        name: str | None = None,
-        description: str | None = None,
-        annotations: dict[str, Any] | ToolAnnotations | None = None,
-    ) -> Callable:
-        """Register a tool with optional annotations."""
-        if callable(name):
-            raise TypeError(
-                "The @tool decorator was used incorrectly. "
-                "Did you forget to call it? Use @tool() instead of @tool"
-            )
-
-        def decorator(func: Callable) -> Callable:
-            self.add_tool(func, name=name, description=description, annotations=annotations)
-            return func
-
-        return decorator
-
-    async def list_tools(self) -> list[Tool]:
-        """List all available tools with annotations."""
-        tools = list((await self._tool_manager.get_tools()).values())
-        return [
-            Tool(
-                name=info.name,
-                description=info.description,
-                inputSchema=info.parameters,
-                annotations=self._tool_annotations.get(info.name),
-            )
-            for info in tools
-        ]
-
-    def add_prompt(
-        self,
-        name: str,
-        description: str,
-        *,
-        arguments: list[PromptArgument] | None = None,
-        build_messages: Callable[[dict[str, str]], list[PromptMessage]],
-    ) -> None:
-        """Register a prompt template that can be listed and fetched."""
-        self._prompts[name] = PromptSpec(
-            description=description,
-            arguments=arguments,
-            build_messages=build_messages,
-        )
-
-    async def list_prompts(self) -> ListPromptsResult:
-        """Return all registered prompts."""
-        prompts = [
-            Prompt(
-                name=name,
-                description=spec.description,
-                arguments=spec.arguments,
-            )
-            for name, spec in self._prompts.items()
-        ]
-        return ListPromptsResult(prompts=prompts)
-
-    async def get_prompt(
-        self,
-        name: str,
-        arguments: dict[str, str] | None = None,
-    ) -> GetPromptResult:
-        """Generate prompt content by name."""
-        spec = self._prompts.get(name)
-        if not spec:
-            raise ValueError(f"Unknown prompt: {name}")
-        messages = spec.build_messages(arguments or {})
-        return GetPromptResult(description=spec.description, messages=messages)
-
-
-mcp = FliMCP("Flight Search MCP Server")
+mcp = FastMCP("Flight Search MCP Server")
 
 
 # =============================================================================
@@ -598,11 +470,8 @@ def search_flights(
 
 
 def _search_flights_from_params(params: FlightSearchParams) -> dict[str, Any]:
-    """Compatibility wrapper for tests expecting the params-based signature."""
+    """Entry point for tests that call the tool via a params object."""
     return _execute_flight_search(params)
-
-
-search_flights.fn = _search_flights_from_params  # type: ignore[attr-defined]
 
 
 @mcp.tool(
@@ -674,11 +543,8 @@ def search_dates(
 
 
 def _search_dates_from_params(params: DateSearchParams) -> dict[str, Any]:
-    """Compatibility wrapper for tests expecting the params-based signature."""
+    """Entry point for tests that call the tool via a params object."""
     return _execute_date_search(params)
-
-
-search_dates.fn = _search_dates_from_params  # type: ignore[attr-defined]
 
 
 # =============================================================================
@@ -686,103 +552,49 @@ search_dates.fn = _search_dates_from_params  # type: ignore[attr-defined]
 # =============================================================================
 
 
-def _build_search_prompt(args: dict[str, str]) -> list[PromptMessage]:
-    """Create a helper prompt to guide flight searches."""
-    origin = args.get("origin", "JFK").upper()
-    destination = args.get("destination", "LHR").upper()
-    date = args.get("date") or datetime.now(timezone.utc).date().isoformat()
-    prefer_non_stop = args.get("prefer_non_stop", "true").lower()
-    max_stops_hint = "NON_STOP" if prefer_non_stop in {"true", "1", "yes"} else "ANY"
-    text = (
-        "Use the `search_flights` tool to look for flights from "
-        f"{origin} to {destination} departing on {date}. "
-        f"Set `max_stops` to '{max_stops_hint}' and highlight the three most affordable options."
-    )
-    return [
-        PromptMessage(role="user", content=TextContent(type="text", text=text)),
-    ]
-
-
-def _build_budget_prompt(args: dict[str, str]) -> list[PromptMessage]:
-    """Create a helper prompt to guide flexible date searches."""
-    origin = args.get("origin", "SFO").upper()
-    destination = args.get("destination", "NRT").upper()
-    today = datetime.now(timezone.utc).date()
-    start_date = args.get("start_date") or (today + timedelta(days=30)).isoformat()
-    end_date = args.get("end_date") or (today + timedelta(days=90)).isoformat()
-    duration = args.get("duration", "7")
-    text = (
-        "Use the `search_dates` tool to find the lowest fares between "
-        f"{origin} and {destination} for trips between {start_date} and {end_date}. "
-        f"Set trip_duration to {duration} days and sort the results by price."
-    )
-    return [
-        PromptMessage(role="user", content=TextContent(type="text", text=text)),
-    ]
-
-
-mcp.add_prompt(
+@mcp.prompt(
     name="search-direct-flight",
     description=(
         "Generate a tool call to find direct flights between two airports on a target date."
     ),
-    arguments=[
-        PromptArgument(
-            name="origin",
-            description="Departure airport IATA code",
-            required=True,
-        ),
-        PromptArgument(
-            name="destination",
-            description="Arrival airport IATA code",
-            required=True,
-        ),
-        PromptArgument(
-            name="date",
-            description="Departure date (YYYY-MM-DD)",
-            required=False,
-        ),
-        PromptArgument(
-            name="prefer_non_stop",
-            description="Set to true to prefer nonstop itineraries",
-            required=False,
-        ),
-    ],
-    build_messages=_build_search_prompt,
 )
+def search_direct_flight_prompt(
+    origin: str,
+    destination: str,
+    date: str | None = None,
+    prefer_non_stop: bool = True,
+) -> str:
+    """Create a helper prompt to guide flight searches."""
+    travel_date = date or datetime.now(timezone.utc).date().isoformat()
+    max_stops_hint = "NON_STOP" if prefer_non_stop else "ANY"
+    return (
+        "Use the `search_flights` tool to look for flights from "
+        f"{origin.upper()} to {destination.upper()} departing on {travel_date}. "
+        f"Set `max_stops` to '{max_stops_hint}' and highlight the three most affordable options."
+    )
 
-mcp.add_prompt(
+
+@mcp.prompt(
     name="find-budget-window",
-    description=("Suggest the cheapest travel dates for a route within a flexible window."),
-    arguments=[
-        PromptArgument(
-            name="origin",
-            description="Departure airport IATA code",
-            required=True,
-        ),
-        PromptArgument(
-            name="destination",
-            description="Arrival airport IATA code",
-            required=True,
-        ),
-        PromptArgument(
-            name="start_date",
-            description="Start of the travel window (YYYY-MM-DD)",
-            required=False,
-        ),
-        PromptArgument(
-            name="end_date",
-            description="End of the travel window (YYYY-MM-DD)",
-            required=False,
-        ),
-        PromptArgument(
-            name="duration",
-            description="Desired trip length in days",
-            required=False,
-        ),
-    ],
-    build_messages=_build_budget_prompt,
+    description="Suggest the cheapest travel dates for a route within a flexible window.",
 )
+def find_budget_window_prompt(
+    origin: str,
+    destination: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    duration: int = 7,
+) -> str:
+    """Create a helper prompt to guide flexible date searches."""
+    today = datetime.now(timezone.utc).date()
+    travel_start = start_date or (today + timedelta(days=30)).isoformat()
+    travel_end = end_date or (today + timedelta(days=90)).isoformat()
+    return (
+        "Use the `search_dates` tool to find the lowest fares between "
+        f"{origin.upper()} and {destination.upper()} for trips between "
+        f"{travel_start} and {travel_end}. "
+        f"Set trip_duration to {duration} days and sort the results by price."
+    )
 
 
 # =============================================================================

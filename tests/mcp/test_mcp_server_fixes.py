@@ -1,58 +1,79 @@
 """Tests for MCP server bug fixes.
 
 Covers:
-  1. list_tools FastMCP 2.x compatibility (get_tools async dict API)
+  1. list_tools FastMCP 3.x registration and annotations
   2. Round-trip price doubling (Google Flights returns combined RT price on outbound leg)
 """
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
+from fastmcp import FastMCP
 
-from fli.mcp.server import FliMCP, _serialize_flight_result
+from fli.mcp.server import _serialize_flight_result, mcp
 
 # ---------------------------------------------------------------------------
-# Bug 1: list_tools — FastMCP 2.x compatibility
+# Bug 1: list_tools — FastMCP 3.x compatibility
 # ---------------------------------------------------------------------------
 
 
 class TestListTools:
-    """FliMCP.list_tools() must use the async get_tools() dict API."""
+    """FliMCP.list_tools() should expose native FastMCP 3 tool metadata."""
 
     @pytest.mark.asyncio
-    async def test_list_tools_uses_get_tools(self):
-        """list_tools() should call get_tools() (FastMCP 2.x) not list_tools()."""
-        server = FliMCP("test")
+    async def test_list_tools_returns_registered_tools_with_annotations(self):
+        """Registered tools should be listed with their schemas and annotations."""
+        server = FastMCP("test")
 
-        fake_tool = MagicMock()
-        fake_tool.name = "search_flights"
-        fake_tool.description = "Search flights"
-        fake_tool.parameters = {}
-
-        # get_tools() returns a dict in FastMCP 2.x
-        server._tool_manager.get_tools = AsyncMock(return_value={"search_flights": fake_tool})
+        @server.tool(
+            description="Search flights",
+            annotations={"title": "Search Flights", "readOnlyHint": True, "idempotentHint": True},
+        )
+        def search_flights(origin: str, destination: str) -> dict[str, str]:
+            return {"origin": origin, "destination": destination}
 
         tools = await server.list_tools()
-
-        server._tool_manager.get_tools.assert_awaited_once()
         assert len(tools) == 1
         assert tools[0].name == "search_flights"
+        assert tools[0].description == "Search flights"
+        assert tools[0].parameters["type"] == "object"
+        assert tools[0].parameters["properties"]["origin"]["type"] == "string"
+        assert tools[0].parameters["properties"]["destination"]["type"] == "string"
+        assert tools[0].annotations.title == "Search Flights"
+        assert tools[0].annotations.readOnlyHint is True
+        assert tools[0].annotations.idempotentHint is True
+
+    def test_tool_decorator_preserves_function_usage(self):
+        """The FastMCP 3 decorator should still leave a normal callable behind."""
+        server = FastMCP("test")
+
+        @server.tool()
+        def search_flights(origin: str, destination: str) -> dict[str, str]:
+            return {"route": f"{origin}-{destination}"}
+
+        assert search_flights("JFK", "LHR") == {"route": "JFK-LHR"}
+
+
+class TestPrompts:
+    """Module prompts should use FastMCP 3's native prompt registration."""
 
     @pytest.mark.asyncio
-    async def test_list_tools_does_not_call_sync_list_tools(self):
-        """list_tools() must not call the old synchronous list_tools() method."""
-        server = FliMCP("test")
+    async def test_builtin_prompts_are_registered_and_render(self):
+        """The module-level prompts should be listable and render expected guidance."""
+        prompts = await mcp.list_prompts()
+        prompt_names = {prompt.name for prompt in prompts}
 
-        server._tool_manager.get_tools = AsyncMock(return_value={})
-        # If the old sync path is called it would raise AttributeError on FastMCP 2.x
-        server._tool_manager.list_tools = MagicMock(
-            side_effect=AttributeError("list_tools removed in FastMCP 2.x")
+        assert "search-direct-flight" in prompt_names
+        assert "find-budget-window" in prompt_names
+
+        result = await mcp.render_prompt(
+            "search-direct-flight",
+            {"origin": "jfk", "destination": "lhr", "prefer_non_stop": "true"},
         )
-
-        # Should not raise
-        tools = await server.list_tools()
-        server._tool_manager.list_tools.assert_not_called()
-        assert tools == []
+        assert result.messages[0].content.text.startswith(
+            "Use the `search_flights` tool to look for flights from JFK to LHR"
+        )
+        assert "NON_STOP" in result.messages[0].content.text
 
 
 # ---------------------------------------------------------------------------
