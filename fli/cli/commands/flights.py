@@ -6,6 +6,7 @@ import typer
 
 from fli.cli.enums import OutputFormat
 from fli.cli.utils import (
+    DEFAULT_CURRENCY,
     build_json_error_response,
     build_json_success_response,
     display_flight_results,
@@ -50,8 +51,10 @@ def _search_flights_core(
     carry_on: bool = False,
     all_results: bool = True,
     output_format: OutputFormat = OutputFormat.TEXT,
+    currency: str | None = None,
 ) -> None:
     """Core flight search functionality."""
+    effective_currency = currency or DEFAULT_CURRENCY
     query: dict[str, Any] = {
         "origin": origin.upper(),
         "destination": destination.upper(),
@@ -156,12 +159,15 @@ def _search_flights_core(
                     trip_type=trip_type,
                     query=query,
                     results_key="flights",
-                    results=[serialize_flight_result(result) for result in results],
+                    results=[
+                        serialize_flight_result(result, default_currency=effective_currency)
+                        for result in results
+                    ],
                 )
             )
             return
 
-        display_flight_results(results)
+        display_flight_results(results, default_currency=effective_currency)
 
     except ParseError as e:
         if output_format == OutputFormat.JSON:
@@ -300,6 +306,14 @@ def flights(
             case_sensitive=False,
         ),
     ] = OutputFormat.TEXT,
+    currency: Annotated[
+        str | None,
+        typer.Option(
+            "--currency",
+            help="Fallback currency code when not returned by Google (e.g., CAD, EUR). "
+            "Overrides FLI_DEFAULT_CURRENCY env var.",
+        ),
+    ] = None,
 ):
     """Search for flights on a specific date.
 
@@ -329,4 +343,5 @@ def flights(
         carry_on=carry_on,
         all_results=all_results,
         output_format=output_format,
+        currency=currency,
     )

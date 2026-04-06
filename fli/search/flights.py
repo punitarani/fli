@@ -147,25 +147,6 @@ class SearchFlights:
         return flight
 
     @staticmethod
-    def _parse_price(data: list) -> float:
-        """Extract the numeric price from raw flight data.
-
-        Args:
-            data: Raw flight data from the API response
-
-        Returns:
-            Flight price, or 0.0 if price data is unavailable
-
-        """
-        try:
-            price_block = SearchFlights._get_price_block(data)
-            if price_block and price_block[0]:
-                return float(price_block[0][-1])
-        except (IndexError, TypeError):
-            pass
-        return 0.0
-
-    @staticmethod
     def _parse_price_info(data: list) -> tuple[float, str | None]:
         """Extract the numeric price and returned currency from raw flight data."""
         price_block = SearchFlights._get_price_block(data)

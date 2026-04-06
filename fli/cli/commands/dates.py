@@ -7,6 +7,7 @@ import typer
 
 from fli.cli.enums import DayOfWeek, OutputFormat
 from fli.cli.utils import (
+    DEFAULT_CURRENCY,
     build_json_error_response,
     build_json_success_response,
     display_date_results,
@@ -191,6 +192,14 @@ def dates(
             case_sensitive=False,
         ),
     ] = OutputFormat.TEXT,
+    currency: Annotated[
+        str | None,
+        typer.Option(
+            "--currency",
+            help="Fallback currency code when not returned by Google (e.g., CAD, EUR). "
+            "Overrides FLI_DEFAULT_CURRENCY env var.",
+        ),
+    ] = None,
 ):
     """Find the cheapest dates to fly between two airports.
 
@@ -198,6 +207,7 @@ def dates(
         fli dates LAX MIA --class BUSINESS --stops NON_STOP --friday
 
     """
+    effective_currency = currency or DEFAULT_CURRENCY
     try:
         start_date = normalize_cli_date(start_date)
         end_date = normalize_cli_date(end_date)
@@ -295,7 +305,12 @@ def dates(
                     trip_type=trip_type,
                     query=query,
                     results_key="dates",
-                    results=[serialize_date_result(result, trip_type) for result in results],
+                    results=[
+                        serialize_date_result(
+                            result, trip_type, default_currency=effective_currency
+                        )
+                        for result in results
+                    ],
                 )
             )
             return
@@ -309,7 +324,7 @@ def dates(
             typer.echo(message)
             raise typer.Exit(1)
 
-        display_date_results(results, trip_type)
+        display_date_results(results, trip_type, default_currency=effective_currency)
 
     except ParseError as e:
         if output_format == OutputFormat.JSON:
