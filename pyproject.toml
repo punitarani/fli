@@ -41,6 +41,8 @@ dependencies = [
 [project.optional-dependencies]
 hotels = [
     "fast-hotels>=0.2.0",
+    "primp>=0.8.0",
+    "selectolax>=0.3.21",
 ]
 dev = [
     "mkdocs-material[imaging]>=9.5.49",

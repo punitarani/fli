@@ -201,7 +201,7 @@ def hotels(
         typer.Option(
             "--currency",
             "-c",
-            help="Currency code (e.g., USD, EUR, GBP)",
+            help="Currency code for displaying prices (e.g., USD, EUR, GBP)",
         ),
     ] = "USD",
     sort_by: Annotated[

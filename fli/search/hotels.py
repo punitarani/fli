@@ -86,7 +86,6 @@ class SearchHotels:
             result = get_hotels(
                 hotel_data=hotel_data,
                 guests=guests,
-                currency=currency,
                 sort_by=sort_by,
                 limit=limit,
             )
