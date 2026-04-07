@@ -184,6 +184,7 @@ def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[s
         return {
             "price": flight.price,
             "currency": flight.currency or CONFIG.default_currency,
+            "booking_link": flight.booking_link,
             "legs": [_serialize_flight_leg(leg) for leg in flight.legs],
         }
 
@@ -195,6 +196,7 @@ def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[s
         return {
             "price": outbound.price,
             "currency": outbound.currency or CONFIG.default_currency,
+            "booking_link": outbound.booking_link,
             "legs": [
                 *[_serialize_flight_leg(leg) for leg in outbound.legs],
                 *[_serialize_flight_leg(leg) for leg in return_flight.legs],
@@ -207,6 +209,7 @@ def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[s
     return {
         "price": price_segment.price,
         "currency": price_segment.currency or CONFIG.default_currency,
+        "booking_link": price_segment.booking_link,
         "legs": [_serialize_flight_leg(leg) for segment in segments for leg in segment.legs],
     }
 

@@ -256,3 +256,35 @@ class TestParsePriceInfo:
             ],
         ]
         assert SearchFlights._parse_price_info(data) == (118.0, "USD")
+
+
+class TestParseBookingLink:
+    """Tests for _parse_booking_link method."""
+
+    def test_parse_booking_link_with_valid_token(self):
+        """_parse_booking_link should return a Google Flights URL when a token is present."""
+        token = "SampleBookingToken123"
+        data = [[token]]
+        link = SearchFlights._parse_booking_link(data)
+        assert link == f"https://www.google.com/travel/flights?tfs={token}"
+
+    def test_parse_booking_link_with_empty_token(self):
+        """_parse_booking_link should return None when the token is an empty string."""
+        data = [[""]]
+        assert SearchFlights._parse_booking_link(data) is None
+
+    def test_parse_booking_link_with_none_token(self):
+        """_parse_booking_link should return None when the token is None."""
+        data = [[None]]
+        assert SearchFlights._parse_booking_link(data) is None
+
+    def test_parse_booking_link_missing_inner_list(self):
+        """_parse_booking_link should return None when data[0] is missing or too short."""
+        assert SearchFlights._parse_booking_link([[]]) is None
+        assert SearchFlights._parse_booking_link([None]) is None
+        assert SearchFlights._parse_booking_link([]) is None
+
+    def test_parse_booking_link_non_string_token(self):
+        """_parse_booking_link should return None when the token is not a string."""
+        data = [[42]]
+        assert SearchFlights._parse_booking_link(data) is None

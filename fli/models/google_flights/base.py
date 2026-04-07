@@ -165,6 +165,7 @@ class FlightResult(BaseModel):
     currency: str | None = None
     duration: PositiveInt  # total duration in minutes
     stops: NonNegativeInt
+    booking_link: str | None = None
 
 
 class FlightSegment(BaseModel):

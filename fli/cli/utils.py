@@ -211,6 +211,7 @@ def _serialize_flight_segment_result(
     if include_price:
         payload["price"] = flight.price
         payload["currency"] = flight.currency or default_currency
+        payload["booking_link"] = flight.booking_link
     return payload
 
 
@@ -232,6 +233,7 @@ def serialize_flight_result(
         return {
             "price": outbound.price,
             "currency": outbound.currency or default_currency,
+            "booking_link": outbound.booking_link,
             "duration": outbound.duration + return_flight.duration,
             "stops": outbound.stops + return_flight.stops,
             "outbound": _serialize_flight_segment_result(outbound),
@@ -243,6 +245,7 @@ def serialize_flight_result(
     return {
         "price": price_segment.price,
         "currency": price_segment.currency or default_currency,
+        "booking_link": price_segment.booking_link,
         "duration": sum(s.duration for s in segments),
         "stops": sum(s.stops for s in segments),
         "segments": [_serialize_flight_segment_result(s) for s in segments],
@@ -348,6 +351,10 @@ def display_flight_results(flights: list, default_currency: str = "USD"):
         table.add_row("Total Duration", format_duration(total_duration))
         total_stops = sum(flight.stops for flight in flight_segments)
         table.add_row("Total Stops", str(total_stops))
+
+        # Add booking link if available (from the price-bearing segment)
+        if price_segment.booking_link:
+            table.add_row("Book on Google", price_segment.booking_link)
 
         # Create segments tables for each direction
         all_segments = []
