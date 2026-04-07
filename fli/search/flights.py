@@ -31,6 +31,10 @@ class SearchFlights:
     DEFAULT_HEADERS = {
         "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
     }
+    BOOKING_URL = "https://www.google.com/travel/flights?tfs={token}"
+    FALLBACK_SEARCH_URL = (
+        "https://www.google.com/travel/flights?q=Flights+from+{origin}+to+{dest}+on+{date}"
+    )
 
     def __init__(self):
         """Initialize the search client for flight searches."""
@@ -114,8 +118,6 @@ class SearchFlights:
         except Exception as e:
             raise Exception(f"Search failed: {str(e)}") from e
 
-    BOOKING_URL = "https://www.google.com/travel/flights?tfs={token}"
-
     @staticmethod
     def _parse_booking_link(data: list) -> str | None:
         """Extract the booking link from raw flight data.
@@ -147,26 +149,35 @@ class SearchFlights:
 
         """
         price, currency = SearchFlights._parse_price_info(data)
-        flight = FlightResult(
+        legs = [
+            FlightLeg(
+                airline=SearchFlights._parse_airline(fl[22][0]),
+                flight_number=fl[22][1],
+                departure_airport=SearchFlights._parse_airport(fl[3]),
+                arrival_airport=SearchFlights._parse_airport(fl[6]),
+                departure_datetime=SearchFlights._parse_datetime(fl[20], fl[8]),
+                arrival_datetime=SearchFlights._parse_datetime(fl[21], fl[10]),
+                duration=fl[11],
+            )
+            for fl in data[0][2]
+        ]
+
+        booking_link = SearchFlights._parse_booking_link(data)
+        if not booking_link and legs:
+            booking_link = SearchFlights.FALLBACK_SEARCH_URL.format(
+                origin=legs[0].departure_airport.name,
+                dest=legs[-1].arrival_airport.name,
+                date=legs[0].departure_datetime.strftime("%Y-%m-%d"),
+            )
+
+        return FlightResult(
             price=price,
             currency=currency,
             duration=data[0][9],
             stops=len(data[0][2]) - 1,
-            booking_link=SearchFlights._parse_booking_link(data),
-            legs=[
-                FlightLeg(
-                    airline=SearchFlights._parse_airline(fl[22][0]),
-                    flight_number=fl[22][1],
-                    departure_airport=SearchFlights._parse_airport(fl[3]),
-                    arrival_airport=SearchFlights._parse_airport(fl[6]),
-                    departure_datetime=SearchFlights._parse_datetime(fl[20], fl[8]),
-                    arrival_datetime=SearchFlights._parse_datetime(fl[21], fl[10]),
-                    duration=fl[11],
-                )
-                for fl in data[0][2]
-            ],
+            booking_link=booking_link,
+            legs=legs,
         )
-        return flight
 
     @staticmethod
     def _parse_price_info(data: list) -> tuple[float, str | None]:

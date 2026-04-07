@@ -637,7 +637,7 @@ wheels = [
 
 [[package]]
 name = "flights"
-version = "0.8.2"
+version = "0.8.4"
 source = { editable = "." }
 dependencies = [
     { name = "babel" },

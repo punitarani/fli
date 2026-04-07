@@ -347,14 +347,14 @@ def display_flight_results(flights: list, default_currency: str = "USD"):
             "Total Price", format_price(total_price, price_segment.currency or default_currency)
         )
 
+        # Add booking link immediately after price (from the price-bearing segment)
+        if price_segment.booking_link:
+            table.add_row("Book on Google", price_segment.booking_link)
+
         total_duration = sum(flight.duration for flight in flight_segments)
         table.add_row("Total Duration", format_duration(total_duration))
         total_stops = sum(flight.stops for flight in flight_segments)
         table.add_row("Total Stops", str(total_stops))
-
-        # Add booking link if available (from the price-bearing segment)
-        if price_segment.booking_link:
-            table.add_row("Book on Google", price_segment.booking_link)
 
         # Create segments tables for each direction
         all_segments = []
