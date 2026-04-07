@@ -114,6 +114,27 @@ class SearchFlights:
         except Exception as e:
             raise Exception(f"Search failed: {str(e)}") from e
 
+    BOOKING_URL = "https://www.google.com/travel/flights?tfs={token}"
+
+    @staticmethod
+    def _parse_booking_link(data: list) -> str | None:
+        """Extract the booking link from raw flight data.
+
+        Args:
+            data: Raw flight data from the API response
+
+        Returns:
+            Google Flights booking URL, or None if unavailable
+
+        """
+        try:
+            token = data[0][0]
+            if isinstance(token, str) and token:
+                return SearchFlights.BOOKING_URL.format(token=token)
+        except (IndexError, TypeError):
+            pass
+        return None
+
     @staticmethod
     def _parse_flights_data(data: list) -> FlightResult:
         """Parse raw flight data into a structured FlightResult.
@@ -131,6 +152,7 @@ class SearchFlights:
             currency=currency,
             duration=data[0][9],
             stops=len(data[0][2]) - 1,
+            booking_link=SearchFlights._parse_booking_link(data),
             legs=[
                 FlightLeg(
                     airline=SearchFlights._parse_airline(fl[22][0]),
