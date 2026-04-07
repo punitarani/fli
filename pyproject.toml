@@ -1,6 +1,6 @@
 [project]
 name = "flights"
-version = "0.8.2"
+version = "0.8.4"
 description = "A Python wrapper for Google Flights API"
 authors = [
     { name = "Punit Arani", email = "punitsai36@gmail.com" }
