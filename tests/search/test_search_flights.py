@@ -256,3 +256,39 @@ class TestParsePriceInfo:
             ],
         ]
         assert SearchFlights._parse_price_info(data) == (118.0, "USD")
+
+
+class TestParseGoogleFlightsTokens:
+    """Tests for preserving raw Google Flights booking tokens."""
+
+    def _make_leg(self):
+        leg = [None] * 23
+        leg[3] = "JFK"
+        leg[6] = "LAX"
+        leg[8] = [10, 30]
+        leg[10] = [13, 45]
+        leg[11] = 195
+        leg[20] = [2026, 5, 1]
+        leg[21] = [2026, 5, 1]
+        leg[22] = ["DL", "123"]
+        return leg
+
+    def test_parse_tfu_inner_token(self):
+        data = [None, [[100, 200, 299.99], "inner-token"]]
+        assert SearchFlights._parse_tfu_inner_token(data) == "inner-token"
+
+    def test_parse_tfs_tokens(self):
+        data = [None, None, None, None, None, None, None, None, '["token-a","token-b"]']
+        assert SearchFlights._parse_tfs_tokens(data) == ["token-a", "token-b"]
+
+    def test_parse_flights_data_preserves_google_tokens(self):
+        data = [[None] * 25, [[100, 200, 299.99], "inner-token"]]
+        data[0][2] = [self._make_leg()]
+        data[0][9] = 195
+        data.extend([None] * 7)
+        data[8] = '["token-a","token-b"]'
+
+        result = SearchFlights._parse_flights_data(data)
+
+        assert result.google_flights_tfu_inner_token == "inner-token"
+        assert result.google_flights_tfs_tokens == ["token-a", "token-b"]

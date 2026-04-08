@@ -331,6 +331,8 @@ def test_serialize_airline_normal_code():
 def test_serialize_flight_result_one_way():
     """JSON flight serialization should use machine-readable nested fields."""
     flight = _make_flight_result(price=159.0)
+    flight.google_flights_tfu_inner_token = "inner-token"
+    flight.google_flights_tfs_tokens = ["token-a", "token-b"]
 
     payload = serialize_flight_result(flight)
 
@@ -338,6 +340,21 @@ def test_serialize_flight_result_one_way():
     assert payload["currency"] == "USD"
     assert payload["legs"][0]["departure_airport"]["code"] == "JFK"
     assert payload["legs"][0]["airline"]["code"] == "DL"
+    assert payload["google_flights_tfu_inner_token"] == "inner-token"
+    assert payload["google_flights_tfs_tokens"] == ["token-a", "token-b"]
+
+
+def test_serialize_flight_result_round_trip_uses_outbound_tokens():
+    """Round-trip serialization should preserve the outbound booking tokens."""
+    outbound = _make_flight_result(price=317.0, flight_number="DL100")
+    return_flight = _make_flight_result(price=317.0, flight_number="DL200")
+    outbound.google_flights_tfu_inner_token = "rt-inner-token"
+    outbound.google_flights_tfs_tokens = ["rt-token-a", "rt-token-b"]
+
+    payload = serialize_flight_result((outbound, return_flight))
+
+    assert payload["google_flights_tfu_inner_token"] == "rt-inner-token"
+    assert payload["google_flights_tfs_tokens"] == ["rt-token-a", "rt-token-b"]
 
 
 def test_serialize_flight_result_numeric_prefix_airline():

@@ -211,6 +211,16 @@ def _serialize_flight_segment_result(
     if include_price:
         payload["price"] = flight.price
         payload["currency"] = flight.currency or default_currency
+    _attach_google_flights_tokens(payload, flight)
+    return payload
+
+
+def _attach_google_flights_tokens(payload: dict[str, Any], flight: Any) -> dict[str, Any]:
+    """Attach raw Google Flights booking tokens when they are available."""
+    if getattr(flight, "google_flights_tfu_inner_token", None):
+        payload["google_flights_tfu_inner_token"] = flight.google_flights_tfu_inner_token
+    if getattr(flight, "google_flights_tfs_tokens", None):
+        payload["google_flights_tfs_tokens"] = flight.google_flights_tfs_tokens
     return payload
 
 
@@ -229,7 +239,7 @@ def serialize_flight_result(
     if len(segments) == 2:
         # Round-trip: Google Flights returns the full RT price on the outbound leg.
         outbound, return_flight = segments
-        return {
+        payload = {
             "price": outbound.price,
             "currency": outbound.currency or default_currency,
             "duration": outbound.duration + return_flight.duration,
@@ -237,16 +247,18 @@ def serialize_flight_result(
             "outbound": _serialize_flight_segment_result(outbound),
             "return": _serialize_flight_segment_result(return_flight),
         }
+        return _attach_google_flights_tokens(payload, outbound)
 
     # Multi-city (3+ legs): combined price is on the final leg.
     price_segment = segments[-1]
-    return {
+    payload = {
         "price": price_segment.price,
         "currency": price_segment.currency or default_currency,
         "duration": sum(s.duration for s in segments),
         "stops": sum(s.stops for s in segments),
         "segments": [_serialize_flight_segment_result(s) for s in segments],
     }
+    return _attach_google_flights_tokens(payload, price_segment)
 
 
 def serialize_date_result(

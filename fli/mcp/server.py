@@ -181,18 +181,19 @@ def _serialize_flight_leg(leg: Any) -> dict[str, Any]:
 def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[str, Any]:
     """Serialize a flight result (or round-trip/multi-city tuple) to a dictionary."""
     if not isinstance(flight, tuple):
-        return {
+        payload = {
             "price": flight.price,
             "currency": flight.currency or CONFIG.default_currency,
             "legs": [_serialize_flight_leg(leg) for leg in flight.legs],
         }
+        return _attach_google_flights_tokens(payload, flight)
 
     segments = list(flight)
 
     if len(segments) == 2 and is_round_trip:
         # Google Flights returns the full round-trip price on the outbound leg
         outbound, return_flight = segments
-        return {
+        payload = {
             "price": outbound.price,
             "currency": outbound.currency or CONFIG.default_currency,
             "legs": [
@@ -200,15 +201,26 @@ def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[s
                 *[_serialize_flight_leg(leg) for leg in return_flight.legs],
             ],
         }
+        return _attach_google_flights_tokens(payload, outbound)
 
     # Multi-city (3+ legs) or 2-leg non-round-trip: combined price on the
     # final leg (matches Google Flights pricing and the CLI display logic).
     price_segment = segments[-1] if len(segments) > 2 else segments[0]
-    return {
+    payload = {
         "price": price_segment.price,
         "currency": price_segment.currency or CONFIG.default_currency,
         "legs": [_serialize_flight_leg(leg) for segment in segments for leg in segment.legs],
     }
+    return _attach_google_flights_tokens(payload, price_segment)
+
+
+def _attach_google_flights_tokens(payload: dict[str, Any], flight: Any) -> dict[str, Any]:
+    """Attach raw Google Flights booking tokens when they are available."""
+    if getattr(flight, "google_flights_tfu_inner_token", None):
+        payload["google_flights_tfu_inner_token"] = flight.google_flights_tfu_inner_token
+    if getattr(flight, "google_flights_tfs_tokens", None):
+        payload["google_flights_tfs_tokens"] = flight.google_flights_tfs_tokens
+    return payload
 
 
 def _serialize_date_result(date_result: Any) -> dict[str, Any]:

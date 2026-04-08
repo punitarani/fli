@@ -107,14 +107,20 @@ class TestSerializeFlightResult:
     def test_one_way_price_unchanged(self):
         """One-way flight price should pass through unchanged."""
         flight = _make_flight(price=250.0)
+        flight.google_flights_tfu_inner_token = "inner-token"
+        flight.google_flights_tfs_tokens = ["token-a", "token-b"]
         result = _serialize_flight_result(flight, is_round_trip=False)
         assert result["price"] == 250.0
         assert result["currency"] == "USD"
+        assert result["google_flights_tfu_inner_token"] == "inner-token"
+        assert result["google_flights_tfs_tokens"] == ["token-a", "token-b"]
 
     def test_round_trip_uses_outbound_price_only(self):
         """Round-trip price must equal outbound.price (Google already includes full RT price)."""
         outbound = _make_flight(price=454.0, legs=[_make_leg("TLV", "ATH")])
         return_flight = _make_flight(price=454.0, legs=[_make_leg("ATH", "TLV")])
+        outbound.google_flights_tfu_inner_token = "rt-inner-token"
+        outbound.google_flights_tfs_tokens = ["rt-token-a", "rt-token-b"]
 
         result = _serialize_flight_result((outbound, return_flight), is_round_trip=True)
 
@@ -123,6 +129,8 @@ class TestSerializeFlightResult:
             f"Expected 454.0 (outbound price only), got {result['price']}. "
             "Google Flights already includes the full RT price on the outbound leg."
         )
+        assert result["google_flights_tfu_inner_token"] == "rt-inner-token"
+        assert result["google_flights_tfs_tokens"] == ["rt-token-a", "rt-token-b"]
 
     def test_round_trip_price_not_doubled(self):
         """Explicit check that the price is not the sum of both legs."""

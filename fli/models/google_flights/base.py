@@ -165,6 +165,8 @@ class FlightResult(BaseModel):
     currency: str | None = None
     duration: PositiveInt  # total duration in minutes
     stops: NonNegativeInt
+    google_flights_tfu_inner_token: str | None = None
+    google_flights_tfs_tokens: list[str] | None = None
 
 
 class FlightSegment(BaseModel):

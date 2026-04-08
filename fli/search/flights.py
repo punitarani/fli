@@ -131,6 +131,8 @@ class SearchFlights:
             currency=currency,
             duration=data[0][9],
             stops=len(data[0][2]) - 1,
+            google_flights_tfu_inner_token=SearchFlights._parse_tfu_inner_token(data),
+            google_flights_tfs_tokens=SearchFlights._parse_tfs_tokens(data),
             legs=[
                 FlightLeg(
                     airline=SearchFlights._parse_airline(fl[22][0]),
@@ -145,6 +147,39 @@ class SearchFlights:
             ],
         )
         return flight
+
+    @staticmethod
+    def _parse_tfu_inner_token(data: list) -> str | None:
+        """Extract the opaque Google Flights booking token from a result row."""
+        try:
+            token = data[1][1]
+        except (IndexError, TypeError):
+            return None
+        return token if isinstance(token, str) and token else None
+
+    @staticmethod
+    def _parse_tfs_tokens(data: list) -> list[str] | None:
+        """Extract candidate itinerary tokens from a result row."""
+        try:
+            raw_value = data[8]
+        except (IndexError, TypeError):
+            return None
+        if not raw_value:
+            return None
+
+        parsed = raw_value
+        if isinstance(raw_value, str):
+            try:
+                parsed = json.loads(raw_value)
+            except json.JSONDecodeError:
+                parsed = raw_value
+
+        if isinstance(parsed, list):
+            tokens = [item for item in parsed if isinstance(item, str) and item]
+            return tokens or None
+        if isinstance(parsed, str):
+            return [parsed]
+        return None
 
     @staticmethod
     def _parse_price_info(data: list) -> tuple[float, str | None]:
