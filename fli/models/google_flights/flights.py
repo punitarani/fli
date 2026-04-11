@@ -113,7 +113,10 @@ class FlightSearchFilters(BaseModel):
                 if self.layover_restrictions and self.layover_restrictions.airports
                 else None
             )
-            layover_duration = (
+            layover_min_duration = (
+                self.layover_restrictions.min_duration if self.layover_restrictions else None
+            )
+            layover_max_duration = (
                 self.layover_restrictions.max_duration if self.layover_restrictions else None
             )
 
@@ -150,8 +153,8 @@ class FlightSearchFilters(BaseModel):
                 selected_flights,  # selected flight (to fetch return flights)
                 layover_airports,  # layover airports
                 None,  # unknown: accepts [] but 400s on scalars; seemingly no effect
-                None,  # seemingly no effect: accepts any value (0-3, bool) without changing results
-                layover_duration,  # layover duration
+                layover_min_duration,  # minimum layover duration (minutes)
+                layover_max_duration,  # maximum layover duration (minutes)
                 emissions_filter,  # emissions filter: [1]=less emissions
                 3,  # seemingly no effect: accepts any value (0-5, None) without changing results
             ]

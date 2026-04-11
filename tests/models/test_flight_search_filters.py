@@ -218,6 +218,7 @@ TEST_CASES = [
             max_duration=660,
             layover_restrictions=LayoverRestrictions(
                 airports=[Airport.LAX],
+                min_duration=120,
                 max_duration=420,
             ),
         ),
@@ -250,7 +251,7 @@ TEST_CASES = [
                         None,
                         ["LAX"],
                         None,
-                        None,
+                        120,
                         420,
                         None,
                         3,

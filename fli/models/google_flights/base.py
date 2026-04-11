@@ -142,7 +142,23 @@ class LayoverRestrictions(BaseModel):
     """Constraints for layovers in multi-leg flights."""
 
     airports: list[Airport] | None = None
+    min_duration: PositiveInt | None = None
     max_duration: PositiveInt | None = None
+
+    @model_validator(mode="after")
+    def validate_duration_range(self) -> "LayoverRestrictions":
+        """Validate that minimum layover duration does not exceed maximum."""
+        if (
+            self.min_duration is not None
+            and self.max_duration is not None
+            and self.min_duration > self.max_duration
+        ):
+            raise ValueError(
+                f"Minimum layover ({self.min_duration} min) exceeds "
+                f"maximum layover ({self.max_duration} min)"
+            )
+
+        return self
 
 
 class FlightLeg(BaseModel):

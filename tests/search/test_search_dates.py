@@ -8,6 +8,7 @@ from fli.models import (
     Airport,
     DateSearchFilters,
     FlightSegment,
+    LayoverRestrictions,
     MaxStops,
     PassengerInfo,
     SeatType,
@@ -142,6 +143,10 @@ def complex_round_trip_params():
         seat_type=SeatType.BUSINESS,
         sort_by=SortBy.TOP_FLIGHTS,
         trip_type=TripType.ROUND_TRIP,
+        layover_restrictions=LayoverRestrictions(
+            min_duration=60,
+            max_duration=360,
+        ),
         from_date=(outbound_date - timedelta(days=30)).strftime("%Y-%m-%d"),
         to_date=(outbound_date + timedelta(days=30)).strftime("%Y-%m-%d"),
     )

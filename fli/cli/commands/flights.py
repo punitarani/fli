@@ -46,6 +46,8 @@ def _search_flights_core(
     sort_by: str = "CHEAPEST",
     exclude_basic_economy: bool = False,
     layover: list[str] | None = None,
+    min_layover: int | None = None,
+    max_layover: int | None = None,
     emissions: str = "ALL",
     checked_bags: int = 0,
     carry_on: bool = False,
@@ -64,6 +66,9 @@ def _search_flights_core(
         "cabin_class": cabin_class.upper(),
         "max_stops": max_stops.upper(),
         "sort_by": sort_by.upper(),
+        "layover": [code.upper() for code in layover] if layover else None,
+        "min_layover": min_layover,
+        "max_layover": max_layover,
     }
 
     try:
@@ -106,9 +111,13 @@ def _search_flights_core(
 
         # Parse layover airports
         layover_restrictions = None
-        if layover:
-            layover_airports = [resolve_airport(code) for code in layover]
-            layover_restrictions = LayoverRestrictions(airports=layover_airports)
+        if layover or min_layover is not None or max_layover is not None:
+            layover_airports = [resolve_airport(code) for code in layover] if layover else None
+            layover_restrictions = LayoverRestrictions(
+                airports=layover_airports,
+                min_duration=min_layover,
+                max_duration=max_layover,
+            )
 
         # Build bags filter
         bags_filter = None
@@ -266,6 +275,22 @@ def flights(
             help="Restrict layover to these airports (e.g., -l ORD -l MDW)",
         ),
     ] = None,
+    min_layover: Annotated[
+        int | None,
+        typer.Option(
+            "--min-layover",
+            help="Minimum layover length in minutes",
+            min=1,
+        ),
+    ] = None,
+    max_layover: Annotated[
+        int | None,
+        typer.Option(
+            "--max-layover",
+            help="Maximum layover length in minutes",
+            min=1,
+        ),
+    ] = None,
     emissions: Annotated[
         str,
         typer.Option(
@@ -318,6 +343,7 @@ def flights(
 
     Example:
         fli flights JFK LHR 2025-10-25 --time 6-20 --airlines BA KL --stops NON_STOP
+        fli flights JFK HNL 2025-10-25 --min-layover 60 --max-layover 180
         fli flights JFK LHR 2025-10-25 --format json
         fli flights JFK LHR 2025-10-25 --exclude-basic
         fli flights JFK LAX 2025-10-25 --bags 1 --carry-on
@@ -337,6 +363,8 @@ def flights(
         sort_by=sort_by,
         exclude_basic_economy=exclude_basic_economy,
         layover=layover,
+        min_layover=min_layover,
+        max_layover=max_layover,
         emissions=emissions,
         checked_bags=checked_bags,
         carry_on=carry_on,

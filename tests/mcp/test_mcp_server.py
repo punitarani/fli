@@ -245,3 +245,30 @@ class TestMCPServer:
         assert params.cabin_class == "ECONOMY"  # default
         assert params.max_stops == "ANY"  # default
         assert params.sort_by_price is False  # default
+
+    def test_flight_search_params_layover_filters(self):
+        """Test FlightSearchParams with layover filters."""
+        params = FlightSearchParams(
+            origin="JFK",
+            destination="HNL",
+            departure_date=get_future_date(30),
+            layover_airports=["SFO"],
+            min_layover=60,
+            max_layover=180,
+        )
+        assert params.layover_airports == ["SFO"]
+        assert params.min_layover == 60
+        assert params.max_layover == 180
+
+    def test_date_search_params_layover_filters(self):
+        """Test DateSearchParams with layover filters."""
+        params = DateSearchParams(
+            origin="JFK",
+            destination="HNL",
+            start_date=get_future_date(30),
+            end_date=get_future_date(60),
+            min_layover=45,
+            max_layover=150,
+        )
+        assert params.min_layover == 45
+        assert params.max_layover == 150

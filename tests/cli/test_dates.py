@@ -220,6 +220,65 @@ def test_dates_round_trip_with_duration(runner, mock_search_dates, mock_console)
     assert args[0].duration == 14
 
 
+def test_dates_with_min_layover(runner, mock_search_dates, mock_console):
+    """Test dates search with a minimum layover filter."""
+    mock_search_dates.search.return_value = [
+        DatePrice(
+            date=(datetime.now() + timedelta(days=1),),
+            price=299.99,
+        ),
+    ]
+
+    result = runner.invoke(
+        app,
+        ["dates", "JFK", "HNL", "--min-layover", "75"],
+    )
+
+    assert result.exit_code == 0
+    args, _ = mock_search_dates.search.call_args
+    assert args[0].layover_restrictions is not None
+    assert args[0].layover_restrictions.min_duration == 75
+
+def test_dates_with_layover_range(runner, mock_search_dates, mock_console):
+    """Test dates search with both minimum and maximum layover filters."""
+    mock_search_dates.search.return_value = [
+        DatePrice(
+            date=(datetime.now() + timedelta(days=1),),
+            price=299.99,
+        ),
+    ]
+
+    result = runner.invoke(
+        app,
+        ["dates", "JFK", "HNL", "--min-layover", "45", "--max-layover", "150"],
+    )
+
+    assert result.exit_code == 0
+    args, _ = mock_search_dates.search.call_args
+    assert args[0].layover_restrictions is not None
+    assert args[0].layover_restrictions.min_duration == 45
+    assert args[0].layover_restrictions.max_duration == 150
+
+def test_dates_with_layover_airports(runner, mock_search_dates, mock_console):
+    """Test dates search with layover airport filter."""
+    mock_search_dates.search.return_value = [
+        DatePrice(
+            date=(datetime.now() + timedelta(days=1),),
+            price=299.99,
+        ),
+    ]
+
+    result = runner.invoke(
+        app,
+        ["dates", "JFK", "HNL", "--layover", "ORD", "--layover", "SFO"],
+    )
+
+    assert result.exit_code == 0
+    args, _ = mock_search_dates.search.call_args
+    assert args[0].layover_restrictions is not None
+    airport_names = [a.name for a in args[0].layover_restrictions.airports]
+    assert airport_names == ["ORD", "SFO"]
+
 def test_dates_json_output(runner, mock_search_dates, mock_console):
     """Test dates search JSON output."""
     departure_date = datetime.now() + timedelta(days=1)

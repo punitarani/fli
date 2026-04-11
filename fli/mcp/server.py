@@ -30,6 +30,7 @@ from fli.models import (
     BagsFilter,
     DateSearchFilters,
     FlightSearchFilters,
+    LayoverRestrictions,
     PassengerInfo,
     TripType,
 )
@@ -98,6 +99,20 @@ class FlightSearchParams(BaseModel):
     airlines: list[str] | None = Field(
         None, description="Filter by airline IATA codes (e.g., ['BA', 'AA'])"
     )
+    layover_airports: list[str] | None = Field(
+        None,
+        description="Restrict layovers to these airport IATA codes (e.g., ['ORD', 'MDW'])",
+    )
+    min_layover: int | None = Field(
+        None,
+        ge=1,
+        description="Minimum layover length in minutes",
+    )
+    max_layover: int | None = Field(
+        None,
+        ge=1,
+        description="Maximum layover length in minutes",
+    )
     cabin_class: str = Field(
         CONFIG.default_cabin_class,
         description="Cabin class: ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST",
@@ -140,6 +155,20 @@ class DateSearchParams(BaseModel):
     is_round_trip: bool = Field(False, description="Search for round-trip flights")
     airlines: list[str] | None = Field(
         None, description="Filter by airline IATA codes (e.g., ['BA', 'AA'])"
+    )
+    layover_airports: list[str] | None = Field(
+        None,
+        description="Restrict layovers to these airport IATA codes (e.g., ['ORD', 'MDW'])",
+    )
+    min_layover: int | None = Field(
+        None,
+        ge=1,
+        description="Minimum layover length in minutes",
+    )
+    max_layover: int | None = Field(
+        None,
+        ge=1,
+        description="Maximum layover length in minutes",
     )
     cabin_class: str = Field(
         CONFIG.default_cabin_class,
@@ -236,6 +265,11 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
         max_stops = parse_max_stops(params.max_stops)
         sort_by = parse_sort_by(params.sort_by)
         airlines = parse_airlines(params.airlines)
+        layover_airports = (
+            [resolve_airport(code) for code in params.layover_airports]
+            if params.layover_airports
+            else None
+        )
 
         # Build time restrictions
         departure_window = params.departure_window or CONFIG.default_departure_window
@@ -255,6 +289,13 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
         bags_filter = None
         if params.checked_bags > 0 or params.carry_on:
             bags_filter = BagsFilter(checked_bags=params.checked_bags, carry_on=params.carry_on)
+        layover_restrictions = None
+        if layover_airports or params.min_layover is not None or params.max_layover is not None:
+            layover_restrictions = LayoverRestrictions(
+                airports=layover_airports,
+                min_duration=params.min_layover,
+                max_duration=params.max_layover,
+            )
 
         # Create search filters
         filters = FlightSearchFilters(
@@ -266,6 +307,7 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
             airlines=airlines,
             sort_by=sort_by,
             exclude_basic_economy=params.exclude_basic_economy,
+            layover_restrictions=layover_restrictions,
             emissions=emissions_filter,
             bags=bags_filter,
             show_all_results=params.show_all_results,
@@ -325,6 +367,19 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
             time_restrictions=time_restrictions,
         )
 
+        layover_airports = (
+            [resolve_airport(code) for code in params.layover_airports]
+            if params.layover_airports
+            else None
+        )
+        layover_restrictions = None
+        if layover_airports or params.min_layover is not None or params.max_layover is not None:
+            layover_restrictions = LayoverRestrictions(
+                airports=layover_airports,
+                min_duration=params.min_layover,
+                max_duration=params.max_layover,
+            )
+
         # Create search filters
         filters = DateSearchFilters(
             trip_type=trip_type,
@@ -333,6 +388,7 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
             stops=max_stops,
             seat_type=cabin_class,
             airlines=airlines,
+            layover_restrictions=layover_restrictions,
             from_date=params.start_date,
             to_date=params.end_date,
             duration=params.trip_duration if params.is_round_trip else None,
@@ -403,6 +459,18 @@ def search_flights(
         list[str] | None,
         Field(description="Filter by airline IATA codes (e.g., ['BA', 'AA'])"),
     ] = None,
+    layover_airports: Annotated[
+        list[str] | None,
+        Field(description="Restrict layovers to these airport IATA codes (e.g., ['ORD', 'MDW'])"),
+    ] = None,
+    min_layover: Annotated[
+        int | None,
+        Field(description="Minimum layover length in minutes", ge=1),
+    ] = None,
+    max_layover: Annotated[
+        int | None,
+        Field(description="Maximum layover length in minutes", ge=1),
+    ] = None,
     cabin_class: Annotated[
         str,
         Field(description="Cabin class: ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST"),
@@ -456,6 +524,9 @@ def search_flights(
         return_date=return_date,
         departure_window=effective_departure_window,
         airlines=airlines,
+        layover_airports=layover_airports,
+        min_layover=min_layover,
+        max_layover=max_layover,
         cabin_class=cabin_class,
         max_stops=max_stops,
         sort_by=sort_by,
@@ -498,6 +569,18 @@ def search_dates(
         list[str] | None,
         Field(description="Filter by airline IATA codes (e.g., ['BA', 'AA'])"),
     ] = None,
+    layover_airports: Annotated[
+        list[str] | None,
+        Field(description="Restrict layovers to these airport IATA codes (e.g., ['ORD', 'MDW'])"),
+    ] = None,
+    min_layover: Annotated[
+        int | None,
+        Field(description="Minimum layover length in minutes", ge=1),
+    ] = None,
+    max_layover: Annotated[
+        int | None,
+        Field(description="Maximum layover length in minutes", ge=1),
+    ] = None,
     cabin_class: Annotated[
         str,
         Field(description="Cabin class: ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST"),
@@ -533,6 +616,9 @@ def search_dates(
         trip_duration=trip_duration,
         is_round_trip=is_round_trip,
         airlines=airlines,
+        layover_airports=layover_airports,
+        min_layover=min_layover,
+        max_layover=max_layover,
         cabin_class=cabin_class,
         max_stops=max_stops,
         departure_window=effective_departure_window,

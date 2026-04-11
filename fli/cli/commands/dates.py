@@ -27,6 +27,7 @@ from fli.core import (
 from fli.core.parsers import ParseError
 from fli.models import (
     DateSearchFilters,
+    LayoverRestrictions,
     PassengerInfo,
     TimeRestrictions,
     TripType,
@@ -184,6 +185,29 @@ def dates(
             help="Departure time window in 24h format (e.g., 6-20)",
         ),
     ] = None,
+    layover: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--layover",
+            help="Restrict layovers to these airport IATA codes",
+        ),
+    ] = None,
+    min_layover: Annotated[
+        int | None,
+        typer.Option(
+            "--min-layover",
+            help="Minimum layover length in minutes",
+            min=1,
+        ),
+    ] = None,
+    max_layover: Annotated[
+        int | None,
+        typer.Option(
+            "--max-layover",
+            help="Maximum layover length in minutes",
+            min=1,
+        ),
+    ] = None,
     output_format: Annotated[
         OutputFormat,
         typer.Option(
@@ -205,6 +229,7 @@ def dates(
 
     Example:
         fli dates LAX MIA --class BUSINESS --stops NON_STOP --friday
+        fli dates JFK HNL --round --min-layover 120 --max-layover 360
 
     """
     try:
@@ -240,6 +265,9 @@ def dates(
             "departure_window": (
                 f"{departure_window[0]}-{departure_window[1]}" if departure_window else None
             ),
+            "layover": [code.upper() for code in layover] if layover else None,
+            "min_layover": min_layover,
+            "max_layover": max_layover,
             "airlines": (
                 [airline.name.lstrip("_") for airline in parsed_airlines]
                 if parsed_airlines
@@ -270,6 +298,15 @@ def dates(
             time_restrictions=time_restrictions,
         )
 
+        layover_restrictions = None
+        if layover or min_layover is not None or max_layover is not None:
+            layover_airports = [resolve_airport(code) for code in layover] if layover else None
+            layover_restrictions = LayoverRestrictions(
+                airports=layover_airports,
+                min_duration=min_layover,
+                max_duration=max_layover,
+            )
+
         # Create search filters
         filters = DateSearchFilters(
             trip_type=trip_type,
@@ -278,6 +315,7 @@ def dates(
             stops=stops,
             seat_type=seat_type,
             airlines=parsed_airlines,
+            layover_restrictions=layover_restrictions,
             from_date=start_date,
             to_date=end_date,
             duration=trip_duration if trip_type == TripType.ROUND_TRIP else None,
@@ -343,6 +381,8 @@ def dates(
                             if isinstance(departure_window, tuple)
                             else departure_window
                         ),
+                        "min_layover": min_layover,
+                        "max_layover": max_layover,
                         "airlines": airlines,
                         "sort_by_price": sort_by_price,
                         "days": [
@@ -386,6 +426,8 @@ def dates(
                             if isinstance(departure_window, tuple)
                             else departure_window
                         ),
+                        "min_layover": min_layover,
+                        "max_layover": max_layover,
                         "airlines": airlines,
                         "sort_by_price": sort_by_price,
                         "days": [

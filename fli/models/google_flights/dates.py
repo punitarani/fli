@@ -204,7 +204,10 @@ class DateSearchFilters(BaseModel):
                 if self.layover_restrictions and self.layover_restrictions.airports
                 else None
             )
-            layover_duration = (
+            layover_min_duration = (
+                self.layover_restrictions.min_duration if self.layover_restrictions else None
+            )
+            layover_max_duration = (
                 self.layover_restrictions.max_duration if self.layover_restrictions else None
             )
 
@@ -225,8 +228,8 @@ class DateSearchFilters(BaseModel):
                 None,  # selected flight (unused in date search)
                 layover_airports,  # layover airports
                 None,  # unknown: accepts [] but 400s on scalars; no observable effect
-                None,  # seemingly no effect: accepts any value without changing results
-                layover_duration,  # layover duration
+                layover_min_duration,  # minimum layover duration (minutes)
+                layover_max_duration,  # maximum layover duration (minutes)
                 emissions_filter,  # emissions filter: [1]=less emissions, None=all
                 3,  # seemingly no effect: accepts any value without changing results
             ]

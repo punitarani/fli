@@ -191,6 +191,70 @@ def test_round_trip_invalid_dates(runner, mock_search_flights, mock_console):
     assert "Error" in result.stdout
 
 
+def test_flights_with_min_layover(runner, mock_search_flights, mock_console):
+    """Test flights search with a minimum layover filter."""
+    result = runner.invoke(
+        app,
+        [
+            "flights",
+            "JFK",
+            "HNL",
+            datetime.now().strftime("%Y-%m-%d"),
+            "--min-layover",
+            "90",
+        ],
+    )
+
+    assert result.exit_code == 0
+    args, _ = mock_search_flights.search.call_args
+    assert args[0].layover_restrictions is not None
+    assert args[0].layover_restrictions.min_duration == 90
+
+def test_flights_with_layover_range(runner, mock_search_flights, mock_console):
+    """Test flights search with both minimum and maximum layover filters."""
+    result = runner.invoke(
+        app,
+        [
+            "flights",
+            "JFK",
+            "HNL",
+            datetime.now().strftime("%Y-%m-%d"),
+            "--min-layover",
+            "60",
+            "--max-layover",
+            "180",
+        ],
+    )
+
+    assert result.exit_code == 0
+    args, _ = mock_search_flights.search.call_args
+    assert args[0].layover_restrictions is not None
+    assert args[0].layover_restrictions.min_duration == 60
+    assert args[0].layover_restrictions.max_duration == 180
+
+def test_flights_with_layover_airports(runner, mock_search_flights, mock_console):
+    """Test flights search with layover airport filter."""
+    result = runner.invoke(
+        app,
+        [
+            "flights",
+            "JFK",
+            "HNL",
+            datetime.now().strftime("%Y-%m-%d"),
+            "-l",
+            "ORD",
+            "-l",
+            "SFO",
+        ],
+    )
+
+    assert result.exit_code == 0
+    args, _ = mock_search_flights.search.call_args
+    assert args[0].layover_restrictions is not None
+    airport_names = [a.name for a in args[0].layover_restrictions.airports]
+    assert airport_names == ["ORD", "SFO"]
+
+
 def test_flights_json_output(runner, mock_search_flights, mock_console):
     """Test flights search with JSON output."""
     result = runner.invoke(
