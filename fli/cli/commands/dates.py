@@ -378,9 +378,12 @@ def dates(
                         "max_stops": max_stops,
                         "departure_window": (
                             f"{departure_window[0]}-{departure_window[1]}"
+                        "departure_window": (
+                            f"{departure_window[0]}-{departure_window[1]}"
                             if isinstance(departure_window, tuple)
                             else departure_window
                         ),
+                        "layover": [code.upper() for code in layover] if layover else None,
                         "min_layover": min_layover,
                         "max_layover": max_layover,
                         "airlines": airlines,
