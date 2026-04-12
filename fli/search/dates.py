@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from fli.core import extract_currency_from_price_token
 from fli.models import DateSearchFilters
-from fli.models.google_flights.base import TripType
+from fli.models.google_flights.base import FlightSegment, TripType
 from fli.search.client import get_client
 
 
@@ -68,22 +68,35 @@ class SearchDates:
         # Split into chunks of MAX_DAYS_PER_SEARCH
         all_results = []
         current_from = from_date
+        # Snapshot the original segment travel dates so each chunk can compute
+        # its own offset without accumulating mutations across iterations.
+        original_travel_dates = [seg.travel_date for seg in filters.flight_segments]
         while current_from <= to_date:
             current_to = min(current_from + timedelta(days=self.MAX_DAYS_PER_SEARCH - 1), to_date)
 
-            # Update the travel date for the flight segments
-            if current_from > from_date:
-                for segment in filters.flight_segments:
-                    segment.travel_date = (
-                        datetime.strptime(segment.travel_date, "%Y-%m-%d")
-                        + timedelta(days=self.MAX_DAYS_PER_SEARCH)
-                    ).strftime("%Y-%m-%d")
+            # Compute the travel date offset for this chunk relative to the
+            # original from_date, then build fresh FlightSegment copies so we
+            # never mutate the caller's filters object.
+            offset = current_from - from_date
+            chunk_segments = [
+                FlightSegment(
+                    departure_airport=seg.departure_airport,
+                    arrival_airport=seg.arrival_airport,
+                    travel_date=(
+                        datetime.strptime(original_date, "%Y-%m-%d") + offset
+                    ).strftime("%Y-%m-%d"),
+                    time_restrictions=seg.time_restrictions,
+                )
+                for seg, original_date in zip(
+                    filters.flight_segments, original_travel_dates
+                )
+            ]
 
             # Create new filters for this chunk
             chunk_filters = DateSearchFilters(
                 trip_type=filters.trip_type,
                 passenger_info=filters.passenger_info,
-                flight_segments=filters.flight_segments,
+                flight_segments=chunk_segments,
                 stops=filters.stops,
                 seat_type=filters.seat_type,
                 airlines=filters.airlines,
