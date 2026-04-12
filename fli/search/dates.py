@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from fli.core import extract_currency_from_price_token
 from fli.models import DateSearchFilters
-from fli.models.google_flights.base import FlightSegment, TripType
+from fli.models.google_flights.base import TripType
 from fli.search.client import get_client
 
 
@@ -75,17 +75,16 @@ class SearchDates:
             current_to = min(current_from + timedelta(days=self.MAX_DAYS_PER_SEARCH - 1), to_date)
 
             # Compute the travel date offset for this chunk relative to the
-            # original from_date, then build fresh FlightSegment copies so we
-            # never mutate the caller's filters object.
+            # original from_date, then create shallow copies of each segment
+            # so we never mutate the caller's filters object.
             offset = current_from - from_date
             chunk_segments = [
-                FlightSegment(
-                    departure_airport=seg.departure_airport,
-                    arrival_airport=seg.arrival_airport,
-                    travel_date=(
-                        datetime.strptime(original_date, "%Y-%m-%d") + offset
-                    ).strftime("%Y-%m-%d"),
-                    time_restrictions=seg.time_restrictions,
+                seg.model_copy(
+                    update={
+                        "travel_date": (
+                            datetime.strptime(original_date, "%Y-%m-%d") + offset
+                        ).strftime("%Y-%m-%d"),
+                    }
                 )
                 for seg, original_date in zip(
                     filters.flight_segments, original_travel_dates
