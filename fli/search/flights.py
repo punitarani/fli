@@ -36,6 +36,19 @@ class SearchFlights:
         """Initialize the search client for flight searches."""
         self.client = get_client()
 
+    #: Minimum outbound pool size for round-trip searches.  The first API call
+    #: returns flights sorted by price, so cheap connecting flights dominate the
+    #: top positions.  By sampling a larger pool we ensure that nonstop and
+    #: premium-carrier options (which typically appear further down the sorted
+    #: list) are still considered when building round-trip combinations.
+    #: The final result list is still trimmed to ``top_n`` after all combos are
+    #: collected and sorted by total price.
+    ROUND_TRIP_POOL_MULTIPLIER: int = 3
+    #: Absolute minimum pool size regardless of top_n.  Nonstop flights
+    #: typically appear from position ~10 onward in price-sorted results;
+    #: this floor guarantees they are always included in the outbound pool.
+    ROUND_TRIP_MIN_POOL: int = 25
+
     def search(
         self, filters: FlightSearchFilters, top_n: int = 5
     ) -> list[FlightResult | tuple[FlightResult, ...]] | None:
@@ -56,6 +69,12 @@ class SearchFlights:
             Multi-city searches (TripType.MULTI_CITY) with distinct city pairs may
             time out due to limitations of the Google Flights API endpoint.  The
             endpoint reliably supports one-way and round-trip searches.
+
+            For round-trip searches the outbound leg is sampled from a pool of
+            ``top_n * ROUND_TRIP_POOL_MULTIPLIER`` candidates so that nonstop
+            flights (which sort below cheap connecting flights by price) are
+            included in the combination set.  The final list is sorted by total
+            price and trimmed to ``top_n``.
 
         """
         encoded_filters = filters.encode()
@@ -96,9 +115,15 @@ class SearchFlights:
             if selected_count >= num_segments - 1:
                 return flights
 
+            # Use a larger pool for the outbound selection pass so that
+            # nonstop and premium-carrier options are not silently excluded
+            # simply because cheap connecting flights dominate the top-N
+            # positions of the price-sorted first-leg results.
+            pool_n = max(top_n * self.ROUND_TRIP_POOL_MULTIPLIER, self.ROUND_TRIP_MIN_POOL)
+
             # Select each flight option and fetch the next leg
             flight_combos = []
-            for selected_flight in flights[:top_n]:
+            for selected_flight in flights[:pool_n]:
                 next_filters = deepcopy(filters)
                 next_filters.flight_segments[selected_count].selected_flight = selected_flight
                 next_results = self.search(next_filters, top_n=top_n)
@@ -109,7 +134,14 @@ class SearchFlights:
                         else:
                             flight_combos.append((selected_flight, next_result))
 
-            return flight_combos
+            # Sort all combinations by total price so the cheapest options
+            # surface first regardless of which outbound leg they belong to,
+            # then trim to the requested top_n.
+            def _combo_total_price(combo: tuple[FlightResult, ...]) -> float:
+                return sum(leg.price for leg in combo)
+
+            flight_combos.sort(key=_combo_total_price)
+            return flight_combos[:top_n] if len(flight_combos) > top_n else flight_combos
 
         except Exception as e:
             raise Exception(f"Search failed: {str(e)}") from e
