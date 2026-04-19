@@ -62,6 +62,13 @@ devcontainer:
 # Generate the requirements.txt file
 requirements:
 	uv export --format requirements-txt --no-hashes > requirements.txt
+
+# Package the Fli skill as a zip for upload to Claude.ai (mobile/web)
+skill-zip:
+	mkdir -p dist
+	rm -f dist/fli-skill.zip
+	cd skills && zip -r ../dist/fli-skill.zip fli -x "*.DS_Store"
+	@echo "Built dist/fli-skill.zip — upload at claude.ai → Settings → Capabilities → Skills."
 # Display help message by default
 .DEFAULT_GOAL := help
 help:
@@ -82,5 +89,6 @@ help:
 	@echo "  make ci-docker   - Run CI in Docker container"
 	@echo "  make devcontainer - Build dev container image"
 	@echo "  make requirements - Generate the requirements.txt file"
+	@echo "  make skill-zip   - Package the Fli skill as dist/fli-skill.zip"
 # Declare the targets as phony
-.PHONY: help install install-dev install-all mcp docs format lint lint-fix test test-mcp test-fuzz test-all ci ci-docker devcontainer requirements
+.PHONY: help install install-dev install-all mcp docs format lint lint-fix test test-mcp test-fuzz test-all ci ci-docker devcontainer requirements skill-zip
