@@ -6,6 +6,7 @@ It is intended to be used for finding the cheapest dates to fly, not the cheapes
 """
 
 import json
+import os
 from datetime import datetime, timedelta
 
 from pydantic import BaseModel
@@ -40,6 +41,32 @@ class SearchDates:
     def __init__(self):
         """Initialize the search client for date-based searches."""
         self.client = get_client()
+
+    @staticmethod
+    def _build_url() -> str:
+        """Build the API URL with locale query parameters from environment variables.
+
+        Reads FLI_MCP_COUNTRY, FLI_MCP_LANGUAGE, and FLI_MCP_CURRENCY env vars
+        and appends them as gl=, hl=, and curr= query params respectively.
+
+        Returns:
+            The BASE_URL with any configured locale parameters appended.
+
+        """
+        url = SearchDates.BASE_URL
+        params = []
+        country = os.environ.get("FLI_MCP_COUNTRY")
+        if country:
+            params.append(f"gl={country}")
+        language = os.environ.get("FLI_MCP_LANGUAGE")
+        if language:
+            params.append(f"hl={language}")
+        currency = os.environ.get("FLI_MCP_CURRENCY")
+        if currency:
+            params.append(f"curr={currency}")
+        if params:
+            url = f"{url}?{'&'.join(params)}"
+        return url
 
     def search(self, filters: DateSearchFilters) -> list[DatePrice] | None:
         """Search for flight prices across a date range and search parameters.
@@ -117,7 +144,7 @@ class SearchDates:
 
         try:
             response = self.client.post(
-                url=self.BASE_URL,
+                url=self._build_url(),
                 data=f"f.req={encoded_filters}",
                 impersonate="chrome",
                 allow_redirects=True,

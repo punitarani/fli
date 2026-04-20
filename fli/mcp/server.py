@@ -69,6 +69,14 @@ class FlightSearchConfig(BaseSettings):
         gt=0,
         description="Optional maximum number of results returned by each tool.",
     )
+    country: str | None = Field(
+        None,
+        description="ISO country code for locale-based pricing (e.g., 'BE', 'US', 'DE')",
+    )
+    language: str | None = Field(
+        None,
+        description="Language code (e.g., 'nl', 'en', 'de')",
+    )
 
 
 CONFIG = FlightSearchConfig()

@@ -5,6 +5,7 @@ with Google Flights' API to find available flights and their details.
 """
 
 import json
+import os
 from copy import deepcopy
 from datetime import datetime
 
@@ -36,6 +37,32 @@ class SearchFlights:
         """Initialize the search client for flight searches."""
         self.client = get_client()
 
+    @staticmethod
+    def _build_url() -> str:
+        """Build the API URL with locale query parameters from environment variables.
+
+        Reads FLI_MCP_COUNTRY, FLI_MCP_LANGUAGE, and FLI_MCP_CURRENCY env vars
+        and appends them as gl=, hl=, and curr= query params respectively.
+
+        Returns:
+            The BASE_URL with any configured locale parameters appended.
+
+        """
+        url = SearchFlights.BASE_URL
+        params = []
+        country = os.environ.get("FLI_MCP_COUNTRY")
+        if country:
+            params.append(f"gl={country}")
+        language = os.environ.get("FLI_MCP_LANGUAGE")
+        if language:
+            params.append(f"hl={language}")
+        currency = os.environ.get("FLI_MCP_CURRENCY")
+        if currency:
+            params.append(f"curr={currency}")
+        if params:
+            url = f"{url}?{'&'.join(params)}"
+        return url
+
     def search(
         self, filters: FlightSearchFilters, top_n: int = 5
     ) -> list[FlightResult | tuple[FlightResult, ...]] | None:
@@ -62,7 +89,7 @@ class SearchFlights:
 
         try:
             response = self.client.post(
-                url=self.BASE_URL,
+                url=self._build_url(),
                 data=f"f.req={encoded_filters}",
                 impersonate="chrome",
                 allow_redirects=True,
