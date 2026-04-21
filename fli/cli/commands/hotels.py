@@ -249,3 +249,135 @@ def hotels(
         limit=limit,
         output_format=output_format,
     )
+
+
+def hotel_price(
+    hotel_name: Annotated[
+        str, typer.Argument(help="Hotel name to look up (e.g. 'Hilton Copacabana')")
+    ],
+    location: Annotated[
+        str, typer.Argument(help="City / area the hotel is in (e.g. 'Rio de Janeiro')")
+    ],
+    check_in_date: Annotated[str, typer.Argument(help="Check-in date (YYYY-MM-DD)")],
+    check_out_date: Annotated[str, typer.Argument(help="Check-out date (YYYY-MM-DD)")],
+    adults: Annotated[int, typer.Option("--adults", "-a", help="Adult guests", min=1, max=9)] = 2,
+    children: Annotated[
+        int, typer.Option("--children", "-k", help="Child guests", min=0, max=8)
+    ] = 0,
+    currency: Annotated[
+        str, typer.Option("--currency", "-c", help="Currency code (USD, EUR, GBP)")
+    ] = "USD",
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--format", help="Output format: text or json", case_sensitive=False),
+    ] = OutputFormat.TEXT,
+):
+    """Look up the nightly price for a specific hotel on specific dates.
+
+    First tries to find the hotel in the city-level search results, then falls
+    back to querying Google Hotels with the hotel name itself.
+
+    Example:
+        fli hotel-price "Hilton Copacabana" "Rio de Janeiro" 2026-06-05 2026-06-08
+        fli hotel-price "Fera Palace" Salvador 2026-06-01 2026-06-03 --adults 4
+
+    """
+    query: dict[str, Any] = {
+        "hotel_name": hotel_name,
+        "location": location,
+        "check_in_date": check_in_date,
+        "check_out_date": check_out_date,
+        "adults": adults,
+        "children": children,
+        "currency": currency.upper(),
+    }
+
+    try:
+        check_in_date = normalize_cli_date(check_in_date)
+        check_out_date = normalize_cli_date(check_out_date)
+        query["check_in_date"] = check_in_date
+        query["check_out_date"] = check_out_date
+
+        result = SearchHotels().find_hotel(
+            hotel_name=hotel_name,
+            location=location,
+            check_in_date=check_in_date,
+            check_out_date=check_out_date,
+            adults=adults,
+            children=children,
+            currency=currency.upper(),
+        )
+    except ParseError as e:
+        if output_format == OutputFormat.JSON:
+            emit_json(
+                build_json_error_response(
+                    search_type="hotel_price",
+                    message=str(e),
+                    query=query,
+                    data_source="google_travel",
+                )
+            )
+            raise typer.Exit(1) from e
+        typer.echo(f"Error: {e}")
+        raise typer.Exit(1) from e
+    except (AttributeError, ValueError, HotelSearchError) as e:
+        if output_format == OutputFormat.JSON:
+            emit_json(
+                build_json_error_response(
+                    search_type="hotel_price",
+                    message=str(e),
+                    error_type="search_error",
+                    query=query,
+                    data_source="google_travel",
+                )
+            )
+            raise typer.Exit(1) from e
+        typer.echo(f"Error: {e}")
+        raise typer.Exit(1) from e
+
+    if result is None:
+        if output_format == OutputFormat.JSON:
+            emit_json(
+                {
+                    "success": True,
+                    "data_source": "google_travel",
+                    "search_type": "hotel_price",
+                    "query": query,
+                    "match": None,
+                }
+            )
+            return
+        console.print(
+            Panel(
+                f"No credible match for '{hotel_name}' in {location} "
+                f"({check_in_date} to {check_out_date})",
+                style="red",
+            )
+        )
+        raise typer.Exit(1)
+
+    if output_format == OutputFormat.JSON:
+        emit_json(
+            {
+                "success": True,
+                "data_source": "google_travel",
+                "search_type": "hotel_price",
+                "query": query,
+                "match": serialize_hotel_result(result),
+            }
+        )
+        return
+
+    amenities_str = ", ".join(result.amenities[:5]) if result.amenities else ""
+    rating_str = f"{result.rating:.1f}/5" if result.rating else "N/A"
+    console.print(
+        Panel(
+            f"[cyan]{result.name}[/cyan]\n"
+            f"Price: [green]{format_price(result.price, currency.upper())}[/green]"
+            f"  Rating: [yellow]{rating_str}[/yellow]\n"
+            f"Dates: {check_in_date} → {check_out_date}"
+            + (f"\nAmenities: {amenities_str}" if amenities_str else "")
+            + (f"\n{result.url}" if result.url else ""),
+            title="Hotel match",
+        )
+    )

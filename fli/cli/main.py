@@ -7,7 +7,7 @@ import typer
 
 from fli.cli.commands.dates import dates
 from fli.cli.commands.flights import flights
-from fli.cli.commands.hotels import hotels
+from fli.cli.commands.hotels import hotel_price, hotels
 
 app = typer.Typer(
     help="Search for flights using Google Flights data",
@@ -18,6 +18,7 @@ app = typer.Typer(
 app.command(name="flights")(flights)
 app.command(name="dates")(dates)
 app.command(name="hotels")(hotels)
+app.command(name="hotel-price")(hotel_price)
 
 
 @app.callback(invoke_without_command=True)
@@ -39,7 +40,7 @@ def cli():
         args.append("--help")
 
     # If the first argument isn't a command, treat as flights search
-    if args[0] not in ["flights", "dates", "hotels", "--help", "-h"]:
+    if args[0] not in ["flights", "dates", "hotels", "hotel-price", "--help", "-h"]:
         sys.argv.insert(1, "flights")
 
     app()

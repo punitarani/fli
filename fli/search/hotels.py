@@ -338,3 +338,94 @@ class SearchHotels:
             )
             for h in hotels
         ]
+
+    def find_hotel(
+        self,
+        hotel_name: str,
+        location: str,
+        check_in_date: str,
+        check_out_date: str,
+        adults: int = 2,
+        children: int = 0,
+        currency: str = "USD",
+    ) -> HotelResult | None:
+        """Look up the rate for a specific hotel on specific dates.
+
+        Tries the city-level search first and fuzzy-matches by name. If no good
+        match is found, retries with the hotel name itself as the Google Hotels
+        query — which typically returns the hotel's own entity page when the
+        name is specific enough.
+
+        Args:
+            hotel_name: Hotel name to match (e.g. "Hilton Copacabana").
+            location: City / area used for the initial search.
+            check_in_date: Check-in date (YYYY-MM-DD).
+            check_out_date: Check-out date (YYYY-MM-DD).
+            adults: Number of adult guests.
+            children: Number of child guests.
+            currency: Currency code.
+
+        Returns:
+            The best-matching HotelResult, or None if no credible match found.
+
+        """
+        # Pass 1: city-level search, fuzzy-match by name.
+        hits = (
+            self.search(
+                location=location,
+                check_in_date=check_in_date,
+                check_out_date=check_out_date,
+                adults=adults,
+                children=children,
+                currency=currency,
+                limit=40,
+            )
+            or []
+        )
+        match = _best_name_match(hotel_name, hits)
+        if match is not None:
+            return match
+
+        # Pass 2: use the hotel name itself as the location query — Google
+        # often resolves this to the hotel's entity page.
+        hits = (
+            self.search(
+                location=f"{hotel_name} {location}",
+                check_in_date=check_in_date,
+                check_out_date=check_out_date,
+                adults=adults,
+                children=children,
+                currency=currency,
+                limit=10,
+            )
+            or []
+        )
+        return _best_name_match(hotel_name, hits)
+
+
+def _best_name_match(query: str, results: list[HotelResult]) -> HotelResult | None:
+    """Pick the best hotel match for `query` from `results`.
+
+    Uses difflib ratio on lowercased tokens, with a minimum threshold so we
+    don't return unrelated hotels that happened to top the list.
+    """
+    if not results:
+        return None
+
+    import difflib
+
+    q = query.lower().strip()
+    scored: list[tuple[float, HotelResult]] = []
+    for r in results:
+        name = r.name.lower()
+        ratio = difflib.SequenceMatcher(None, q, name).ratio()
+        # Substring boost: "hilton copacabana" inside "Hilton Rio de Janeiro
+        # Copacabana" should score well even though ratio alone is lukewarm.
+        if all(tok in name for tok in q.split() if len(tok) > 2):
+            ratio = max(ratio, 0.75)
+        scored.append((ratio, r))
+    scored.sort(key=lambda s: s[0], reverse=True)
+    best_score, best = scored[0]
+    if best_score < 0.5:
+        return None
+    return best
