@@ -386,28 +386,69 @@ class SearchHotels:
         if match is not None:
             return match
 
-        # Pass 2: use the hotel name itself as the location query — Google
-        # often resolves this to the hotel's entity page.
-        hits = (
-            self.search(
-                location=f"{hotel_name} {location}",
-                check_in_date=check_in_date,
-                check_out_date=check_out_date,
-                adults=adults,
-                children=children,
-                currency=currency,
-                limit=10,
+        # Pass 2: try a series of query variants using the hotel name as
+        # the location. Appending the city often confuses Google's
+        # geo-resolver and it falls back to a generic city listing — so we
+        # try the bare name first, then progressively add context.
+        for query in (hotel_name, f"{hotel_name} {location}"):
+            hits = (
+                self.search(
+                    location=query,
+                    check_in_date=check_in_date,
+                    check_out_date=check_out_date,
+                    adults=adults,
+                    children=children,
+                    currency=currency,
+                    limit=15,
+                )
+                or []
             )
-            or []
-        )
-        return _best_name_match(hotel_name, hits)
+            match = _best_name_match(hotel_name, hits)
+            if match is not None:
+                return match
+        return None
+
+
+# Generic chain / descriptor tokens that don't disambiguate between properties.
+# A match needs to agree on at least one NON-generic token from the query.
+_GENERIC_HOTEL_TOKENS = frozenset(
+    {
+        "hotel",
+        "hotels",
+        "resort",
+        "resorts",
+        "inn",
+        "suites",
+        "suite",
+        "the",
+        "los",
+        "angeles",
+        "new",
+        "york",
+        "city",
+        "de",
+        "la",
+        "del",
+        "san",
+        "santa",
+        "são",
+        "sao",
+        "rio",
+        "janeiro",
+        "buenos",
+        "aires",
+    }
+)
 
 
 def _best_name_match(query: str, results: list[HotelResult]) -> HotelResult | None:
     """Pick the best hotel match for `query` from `results`.
 
-    Uses difflib ratio on lowercased tokens, with a minimum threshold so we
-    don't return unrelated hotels that happened to top the list.
+    A candidate is accepted only if its name contains every distinguishing
+    token from the query (words of length >= 4 that aren't common hotel /
+    city descriptors) OR the overall difflib ratio is very high. This keeps
+    "Hilton Los Angeles Universal City" from matching "Hilton Los Angeles
+    Airport" just because they share the `hilton los angeles` prefix.
     """
     if not results:
         return None
@@ -415,17 +456,31 @@ def _best_name_match(query: str, results: list[HotelResult]) -> HotelResult | No
     import difflib
 
     q = query.lower().strip()
-    scored: list[tuple[float, HotelResult]] = []
+    q_tokens = [t for t in re.split(r"\s+", q) if t]
+    distinguishing = [
+        t for t in q_tokens if len(t) >= 4 and t not in _GENERIC_HOTEL_TOKENS
+    ]
+
+    best_score = 0.0
+    best: HotelResult | None = None
     for r in results:
         name = r.name.lower()
         ratio = difflib.SequenceMatcher(None, q, name).ratio()
-        # Substring boost: "hilton copacabana" inside "Hilton Rio de Janeiro
-        # Copacabana" should score well even though ratio alone is lukewarm.
-        if all(tok in name for tok in q.split() if len(tok) > 2):
-            ratio = max(ratio, 0.75)
-        scored.append((ratio, r))
-    scored.sort(key=lambda s: s[0], reverse=True)
-    best_score, best = scored[0]
-    if best_score < 0.5:
+        all_tokens_present = all(tok in name for tok in q_tokens if len(tok) > 2)
+        distinguishing_present = (
+            not distinguishing or all(tok in name for tok in distinguishing)
+        )
+
+        if distinguishing_present and all_tokens_present:
+            ratio = max(ratio, 0.85)
+        elif not distinguishing_present and ratio < 0.9:
+            # Missing a distinguishing token — don't trust prefix-only matches.
+            continue
+
+        if ratio > best_score:
+            best_score = ratio
+            best = r
+
+    if best_score < 0.6:
         return None
     return best
