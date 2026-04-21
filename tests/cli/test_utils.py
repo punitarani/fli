@@ -46,9 +46,9 @@ def test_validate_date_valid(mock_context, mock_param):
 
 def test_validate_date_single_digit(mock_context, mock_param):
     """Test date validation normalizes single-digit month and day."""
-    assert validate_date(mock_context, mock_param, "2026-4-2") == "2026-04-02"
-    assert validate_date(mock_context, mock_param, "2026-12-5") == "2026-12-05"
-    assert validate_date(mock_context, mock_param, "2026-1-15") == "2026-01-15"
+    assert validate_date(mock_context, mock_param, "2027-4-2") == "2027-04-02"
+    assert validate_date(mock_context, mock_param, "2027-12-5") == "2027-12-05"
+    assert validate_date(mock_context, mock_param, "2027-1-15") == "2027-01-15"
 
 
 def test_validate_date_invalid(mock_context, mock_param):
@@ -429,3 +429,43 @@ def test_serialize_date_result_uses_returned_currency():
     payload = serialize_date_result(result, TripType.ONE_WAY)
 
     assert payload["currency"] == "SEK"
+
+
+def test_serialize_flight_result_fallback_currency_override():
+    """Fallback currency should use the provided default when Google returns None."""
+    flight = _make_flight_result(price=117.0, currency=None)
+
+    payload = serialize_flight_result(flight, default_currency="CAD")
+
+    assert payload["currency"] == "CAD"
+
+
+def test_serialize_flight_result_round_trip_fallback_currency_override():
+    """Round-trip fallback currency should use the provided default."""
+    outbound = _make_flight_result(price=250.0, currency=None, flight_number="AC100")
+    return_flight = _make_flight_result(price=250.0, currency=None, flight_number="AC200")
+
+    payload = serialize_flight_result((outbound, return_flight), default_currency="CAD")
+
+    assert payload["currency"] == "CAD"
+
+
+def test_serialize_date_result_fallback_currency_override():
+    """Date serialization fallback currency should use the provided default."""
+    result = DatePrice(
+        date=(datetime(2026, 5, 1),),
+        price=117.0,
+    )
+
+    payload = serialize_date_result(result, TripType.ONE_WAY, default_currency="CAD")
+
+    assert payload["currency"] == "CAD"
+
+
+def test_serialize_flight_result_extracted_currency_takes_precedence():
+    """Extracted currency from Google should take precedence over default_currency."""
+    flight = _make_flight_result(price=117.0, currency="GBP")
+
+    payload = serialize_flight_result(flight, default_currency="CAD")
+
+    assert payload["currency"] == "GBP"

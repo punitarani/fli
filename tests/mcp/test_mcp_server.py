@@ -5,8 +5,12 @@ from datetime import datetime, timedelta
 from fli.mcp.server import (
     DateSearchParams,
     FlightSearchParams,
-    search_dates,
-    search_flights,
+)
+from fli.mcp.server import (
+    _search_dates_from_params as search_dates_fn,
+)
+from fli.mcp.server import (
+    _search_flights_from_params as search_flights_fn,
 )
 
 
@@ -29,7 +33,7 @@ class TestMCPServer:
             sort_by="CHEAPEST",
         )
 
-        result = search_flights.fn(params)
+        result = search_flights_fn(params)
 
         assert isinstance(result, dict)
         assert "success" in result
@@ -55,7 +59,7 @@ class TestMCPServer:
             sort_by="DURATION",
         )
 
-        result = search_flights.fn(params)
+        result = search_flights_fn(params)
 
         assert isinstance(result, dict)
         assert "success" in result
@@ -83,7 +87,7 @@ class TestMCPServer:
             sort_by_price=True,
         )
 
-        result = search_dates.fn(params)
+        result = search_dates_fn(params)
 
         assert isinstance(result, dict)
         assert "success" in result
@@ -115,7 +119,7 @@ class TestMCPServer:
             sort_by_price=True,
         )
 
-        result = search_dates.fn(params)
+        result = search_dates_fn(params)
 
         assert isinstance(result, dict)
         assert "success" in result
@@ -135,7 +139,7 @@ class TestMCPServer:
             origin="INVALID", destination="LHR", departure_date=get_future_date(30)
         )
 
-        result = search_flights.fn(params)
+        result = search_flights_fn(params)
 
         assert isinstance(result, dict)
         assert result["success"] is False
@@ -152,7 +156,7 @@ class TestMCPServer:
             departure_window="invalid-time",
         )
 
-        result = search_flights.fn(params)
+        result = search_flights_fn(params)
 
         assert isinstance(result, dict)
         assert result["success"] is False
@@ -169,7 +173,7 @@ class TestMCPServer:
             cabin_class="INVALID_CLASS",
         )
 
-        result = search_flights.fn(params)
+        result = search_flights_fn(params)
 
         assert isinstance(result, dict)
         assert result["success"] is False
@@ -186,7 +190,7 @@ class TestMCPServer:
             max_stops="INVALID_STOPS",
         )
 
-        result = search_flights.fn(params)
+        result = search_flights_fn(params)
 
         assert isinstance(result, dict)
         assert result["success"] is False
@@ -203,7 +207,7 @@ class TestMCPServer:
             airlines=["INVALID_AIRLINE"],
         )
 
-        result = search_flights.fn(params)
+        result = search_flights_fn(params)
 
         assert isinstance(result, dict)
         assert result["success"] is False

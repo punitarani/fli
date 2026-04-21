@@ -1,6 +1,5 @@
 [build]
 builder = "NIXPACKS"
-nixpacksPlan = { "repo" = "punitarani/fli" }
 
 [deploy]
 numReplicas = 1
