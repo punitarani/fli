@@ -20,6 +20,8 @@ Our parser:
 
 from __future__ import annotations
 
+import contextlib
+import os
 import re
 from dataclasses import dataclass
 
@@ -60,18 +62,30 @@ def _parse_price(text: str) -> float | None:
 
 def _parse_hotel_card(card) -> dict | None:
     """Parse a single hotel card element. Returns None if it's not a real hotel."""
-    name_elem = card.css_first("h2.BgYkof")
+    # Google serves two distinct card layouts. Primary uses h2.BgYkof; the
+    # alt layout (seen more often with children > 0) uses h2.Cx32Ud. Fall back
+    # to any h2 inside the card as a last resort.
+    name_elem = card.css_first("h2.BgYkof") or card.css_first("h2.Cx32Ud") or card.css_first("h2")
     if not name_elem:
         return None
     name = name_elem.text(strip=True)
     if not name or len(name) < 3:
         return None
 
-    # Primary: dedicated price element
+    # Price selectors, in order of how clean / unambiguous they are. Each
+    # targets a dedicated price element; we avoid regex-over-full-card-text
+    # because that picks up promotional "$1" copy.
     price: float | None = None
-    price_elem = card.css_first("span.qQOQpe.prxS3d")
-    if price_elem:
-        price = _parse_price(price_elem.text(strip=True))
+    for selector in (
+        "span.qQOQpe.prxS3d",  # primary layout
+        "span.W9vOvb.nDkDDb",  # alt layout
+        "span.VfPpkd-vQzf8d",  # "view deal" button label
+    ):
+        elem = card.css_first(selector)
+        if elem:
+            price = _parse_price(elem.text(strip=True))
+            if price is not None:
+                break
 
     # Fallback: scan "$N nightly" / "$N total" blocks
     if price is None:
@@ -143,6 +157,37 @@ def _parse_hotels_html(html: str) -> list[dict]:
     return hotels
 
 
+# Browser fingerprints to try in order. Google Hotels sometimes returns an
+# empty SSR page for a given UA (especially when `children` > 0 triggers a
+# different layout variant), so we retry with alternates before giving up.
+# Ordered: a plain default first, then specific versions known-valid across
+# primp 1.2.x releases.
+_IMPERSONATE_CHAIN = ("chrome", "chrome_130", "chrome_128", "firefox_128", "safari_18")
+
+
+@contextlib.contextmanager
+def _silence_stderr():
+    """Temporarily redirect fd 2 to /dev/null.
+
+    Needed because primp writes its "Impersonate X does not exist" notice from
+    Rust directly to fd 2, bypassing `sys.stderr`. That noise pollutes the
+    `--format json` output when callers redirect 2>&1 before piping to `jq`.
+    """
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+    except OSError:
+        yield
+        return
+    saved = os.dup(2)
+    try:
+        os.dup2(devnull, 2)
+        yield
+    finally:
+        os.dup2(saved, 2)
+        os.close(saved)
+        os.close(devnull)
+
+
 def _fetch_hotels_html(
     location: str,
     check_in_date: str,
@@ -151,7 +196,11 @@ def _fetch_hotels_html(
     children: int,
     currency: str,
 ) -> str:
-    """Build the Google Hotels request and return the raw HTML."""
+    """Build the Google Hotels request and return the raw HTML.
+
+    Retries with alternate browser fingerprints if the response has no hotel
+    cards — Google sometimes serves an empty SSR page depending on the UA.
+    """
     from fast_hotels.filter import THSData
     from fast_hotels.hotels_impl import Guests as FastGuests
     from fast_hotels.hotels_impl import HotelData as FastHotelData
@@ -175,11 +224,27 @@ def _fetch_hotels_html(
     city = get_city_from_iata(location)
     location_url = city.strip().replace(" ", "+").lower()
     url = f"https://www.google.com/travel/hotels/{location_url}"
-    client = Client(impersonate="chrome_126", verify=False)
-    res = client.get(url, params=params)
-    if res.status_code != 200:
-        raise HotelSearchError(f"Google Hotels returned HTTP {res.status_code}")
-    return res.text
+
+    last_text = ""
+    for impersonate in _IMPERSONATE_CHAIN:
+        with _silence_stderr():
+            try:
+                client = Client(impersonate=impersonate, verify=False)
+                res = client.get(url, params=params)
+            except Exception:  # noqa: BLE001
+                continue
+        if res.status_code != 200:
+            last_text = res.text
+            continue
+        # Quick check: does this response actually contain hotel cards?
+        if "uaTTDe" in res.text:
+            return res.text
+        last_text = res.text
+
+    if last_text:
+        # Return the last response so the parser can still surface any stragglers.
+        return last_text
+    raise HotelSearchError("Google Hotels returned no usable response")
 
 
 class SearchHotels:

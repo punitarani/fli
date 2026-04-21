@@ -15,14 +15,20 @@ import pytest
 
 from fli.search.hotels import _parse_hotels_html, _parse_price
 
-FIXTURE = Path(__file__).parent.parent / "fixtures" / "google_hotels_salvador.html.gz"
+FIXTURES = Path(__file__).parent.parent / "fixtures"
+FIXTURE = FIXTURES / "google_hotels_salvador.html.gz"
+FIXTURE_ALT_LAYOUT = FIXTURES / "google_hotels_la_alt_layout.html.gz"
+
+
+def _load(path: Path) -> str:
+    if not path.exists():
+        pytest.skip(f"Fixture missing: {path}")
+    with gzip.open(path, "rt", encoding="utf-8") as fh:
+        return fh.read()
 
 
 def _load_fixture() -> str:
-    if not FIXTURE.exists():
-        pytest.skip(f"Fixture missing: {FIXTURE}")
-    with gzip.open(FIXTURE, "rt", encoding="utf-8") as fh:
-        return fh.read()
+    return _load(FIXTURE)
 
 
 def test_parse_price_handles_commas_and_decimals():
@@ -65,3 +71,17 @@ def test_parser_does_not_confuse_great_deal_strikethroughs():
     assert 5 <= hostel["price"] <= 100, (
         f"Captain Morgan Hostel price {hostel['price']} is implausible"
     )
+
+
+def test_parser_handles_alt_layout():
+    """Google serves a second card layout (h2.Cx32Ud + span.W9vOvb.nDkDDb).
+
+    Hit intermittently, especially for queries with children > 0. An earlier
+    version of the parser returned 0 hotels for these responses because it
+    only matched the primary layout's selectors.
+    """
+    hotels = _parse_hotels_html(_load(FIXTURE_ALT_LAYOUT))
+    assert len(hotels) >= 5, f"alt layout should yield hotels, got {len(hotels)}"
+    for h in hotels:
+        assert h["price"] >= 10.0
+        assert h["name"]
