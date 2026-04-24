@@ -533,8 +533,20 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
     },
 )
 def search_flights(
-    origin: Annotated[str, Field(description="Departure airport IATA code (e.g., 'JFK')")],
-    destination: Annotated[str, Field(description="Arrival airport IATA code (e.g., 'LHR')")],
+    origin: Annotated[
+        str,
+        Field(
+            description="Departure airport IATA code(s), comma-separated for multiple "
+            "(e.g., 'JFK' or 'JFK,LGA')"
+        ),
+    ],
+    destination: Annotated[
+        str,
+        Field(
+            description="Arrival airport IATA code(s), comma-separated for multiple "
+            "(e.g., 'LHR' or 'LHR,CDG')"
+        ),
+    ],
     departure_date: Annotated[str, Field(description="Travel date in YYYY-MM-DD format")],
     return_date: Annotated[
         str | None,
@@ -630,8 +642,20 @@ search_flights.fn = _search_flights_from_params  # type: ignore[attr-defined]
     },
 )
 def search_dates(
-    origin: Annotated[str, Field(description="Departure airport IATA code (e.g., 'JFK')")],
-    destination: Annotated[str, Field(description="Arrival airport IATA code (e.g., 'LHR')")],
+    origin: Annotated[
+        str,
+        Field(
+            description="Departure airport IATA code(s), comma-separated for multiple "
+            "(e.g., 'JFK' or 'JFK,LGA')"
+        ),
+    ],
+    destination: Annotated[
+        str,
+        Field(
+            description="Arrival airport IATA code(s), comma-separated for multiple "
+            "(e.g., 'LHR' or 'LHR,CDG')"
+        ),
+    ],
     start_date: Annotated[str, Field(description="Start of date range in YYYY-MM-DD format")],
     end_date: Annotated[str, Field(description="End of date range in YYYY-MM-DD format")],
     trip_duration: Annotated[
