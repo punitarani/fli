@@ -5,6 +5,7 @@ with Google Flights' API to find available flights and their details.
 """
 
 import json
+import logging
 from copy import deepcopy
 from datetime import datetime
 
@@ -80,7 +81,16 @@ class SearchFlights:
                 if isinstance(encoded_filters[i], list)
                 for item in encoded_filters[i][0]
             ]
-            flights = [self._parse_flights_data(flight) for flight in flights_data]
+            flights = []
+            for flight in flights_data:
+                try:
+                    flights.append(self._parse_flights_data(flight))
+                except (AttributeError, KeyError, ValueError) as e:
+                    logging.debug("Skipping flight with unparseable data: %s", e)
+                    continue
+
+            if not flights:
+                return None
 
             if filters.trip_type == TripType.ONE_WAY:
                 return flights
