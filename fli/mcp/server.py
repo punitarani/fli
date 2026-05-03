@@ -7,6 +7,7 @@ travel dates.
 
 import json
 import os
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
 
@@ -17,6 +18,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from fli.core import (
     build_date_search_segments,
     build_flight_segments,
+    build_multi_city_segments,
     build_time_restrictions,
     parse_airlines,
     parse_cabin_class,
@@ -91,6 +93,56 @@ class FlightSearchParams(BaseModel):
     departure_date: str = Field(description="Outbound travel date in YYYY-MM-DD format")
     return_date: str | None = Field(
         None, description="Return date in YYYY-MM-DD format (omit for one-way)"
+    )
+    departure_window: str | None = Field(
+        None, description="Preferred departure time window in 'HH-HH' 24h format (e.g., '6-20')"
+    )
+    airlines: list[str] | None = Field(
+        None, description="Filter by airline IATA codes (e.g., ['BA', 'AA'])"
+    )
+    cabin_class: str = Field(
+        CONFIG.default_cabin_class,
+        description="Cabin class: ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST",
+    )
+    max_stops: str = Field(
+        "ANY", description="Maximum stops: ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS"
+    )
+    sort_by: str = Field(
+        CONFIG.default_sort_by,
+        description="Sort results by: CHEAPEST, DURATION, DEPARTURE_TIME, or ARRIVAL_TIME",
+    )
+    passengers: int = Field(
+        CONFIG.default_passengers,
+        ge=1,
+        description="Number of adult passengers",
+    )
+    exclude_basic_economy: bool = Field(
+        False, description="Exclude basic economy fares from results"
+    )
+    emissions: str = Field("ALL", description="Filter by emissions level: ALL or LESS")
+    checked_bags: int = Field(
+        0, ge=0, le=2, description="Number of checked bags to include in price (0, 1, or 2)"
+    )
+    carry_on: bool = Field(False, description="Include carry-on bag fee in displayed price")
+    show_all_results: bool = Field(
+        True, description="Return all available results instead of curated ~30"
+    )
+
+
+class MultiCityLeg(BaseModel):
+    """A single leg of a multi-city itinerary."""
+
+    origin: str = Field(description="Departure airport IATA code (e.g., 'JFK')")
+    destination: str = Field(description="Arrival airport IATA code (e.g., 'LHR')")
+    date: str = Field(description="Travel date in YYYY-MM-DD format")
+
+
+class MultiCitySearchParams(BaseModel):
+    """Parameters for searching multi-city flights."""
+
+    legs: list[MultiCityLeg] = Field(
+        description="List of flight legs, each with origin, destination, and date",
+        min_length=2,
     )
     departure_window: str | None = Field(
         None, description="Preferred departure time window in 'HH-HH' 24h format (e.g., '6-20')"
@@ -376,6 +428,173 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
 
 
 # =============================================================================
+# Multi-City Search (stateful, one API call per step)
+# =============================================================================
+
+_search_sessions: dict[str, tuple[Any, list[Any]]] = {}
+
+
+def _session_key(legs: list[MultiCityLeg]) -> str:
+    return "|".join(
+        f"{leg.origin}-{leg.destination}-{leg.date}" for leg in legs
+    )
+
+
+def _execute_multi_city_step(
+    params: MultiCitySearchParams, selection: int | None,
+) -> dict[str, Any]:
+    """Execute one step of a multi-city search. Exactly one API call per invocation."""
+    key = _session_key(params.legs)
+
+    try:
+        cached = _search_sessions.get(key)
+
+        if cached is None or selection is None:
+            cabin_class = parse_cabin_class(params.cabin_class)
+            max_stops = parse_max_stops(params.max_stops)
+            sort_by = parse_sort_by(params.sort_by)
+            airlines = parse_airlines(params.airlines)
+
+            departure_window = (
+                params.departure_window or CONFIG.default_departure_window
+            )
+            time_restrictions = (
+                build_time_restrictions(departure_window)
+                if departure_window
+                else None
+            )
+
+            resolved_legs = [
+                (resolve_airport(leg.origin), resolve_airport(leg.destination), leg.date)
+                for leg in params.legs
+            ]
+
+            segments, trip_type = build_multi_city_segments(
+                legs=resolved_legs,
+                time_restrictions=time_restrictions,
+            )
+
+            emissions_filter = parse_emissions(params.emissions)
+            bags_filter = None
+            if params.checked_bags > 0 or params.carry_on:
+                bags_filter = BagsFilter(checked_bags=params.checked_bags, carry_on=params.carry_on)
+
+            filters = FlightSearchFilters(
+                trip_type=trip_type,
+                passenger_info=PassengerInfo(adults=params.passengers),
+                flight_segments=segments,
+                stops=max_stops,
+                seat_type=cabin_class,
+                airlines=airlines,
+                sort_by=sort_by,
+                exclude_basic_economy=params.exclude_basic_economy,
+                emissions=emissions_filter,
+                bags=bags_filter,
+                show_all_results=params.show_all_results,
+            )
+            current_step = 0
+        else:
+            filters, last_results = cached
+            current_step = sum(
+                1 for s in filters.flight_segments if s.selected_flight is not None
+            )
+
+            if selection >= len(last_results):
+                return {
+                    "success": False,
+                    "error": (
+                        f"Selection index {selection} out of range"
+                        f" ({len(last_results)} options)"
+                    ),
+                    "flights": [],
+                }
+
+            filters = deepcopy(filters)
+            filters.flight_segments[current_step].selected_flight = last_results[selection]
+            current_step += 1
+
+        search_client = SearchFlights()
+        result = search_client._do_single_search(filters, include_metadata=True)
+        if result is None:
+            raw, metadata = [], {}
+        else:
+            raw, metadata = result
+
+        num_legs = len(params.legs)
+        is_final = current_step >= num_legs - 1
+
+        if not raw:
+            _search_sessions.pop(key, None)
+            return {
+                "success": True,
+                "flights": [],
+                "count": 0,
+                "step": current_step + 1,
+                "total_legs": num_legs,
+                "is_final": is_final,
+            }
+
+        _search_sessions[key] = (filters, raw)
+
+        flight_results = [_serialize_flight_result(f, is_round_trip=False) for f in raw]
+
+        for fr in flight_results:
+            if fr.get("price") == 0:
+                fr["price"] = None
+
+        if CONFIG.max_results:
+            flight_results = flight_results[: CONFIG.max_results]
+
+        if is_final:
+            _search_sessions.pop(key, None)
+
+        resp: dict[str, Any] = {
+            "success": True,
+            "flights": flight_results,
+            "count": len(flight_results),
+            "step": current_step + 1,
+            "total_legs": num_legs,
+            "leg": (
+                f"{params.legs[current_step].origin}"
+                f" -> {params.legs[current_step].destination}"
+                f" ({params.legs[current_step].date})"
+            ),
+            "is_final": is_final,
+        }
+
+        price_range = metadata.get("price_range")
+        if price_range and len(price_range) >= 2:
+            resp["price_range"] = {"min": price_range[0], "max": price_range[1]}
+
+        if is_final:
+            resp["message"] = (
+                f"Showing options for leg {current_step + 1} of"
+                f" {num_legs}. These are the final results."
+                " price_range shows the total combined price"
+                " range for the entire trip."
+            )
+        else:
+            resp["message"] = (
+                f"Showing options for leg {current_step + 1} of"
+                f" {num_legs}. Pick a flight by index"
+                f" (0-{len(flight_results)-1}) and call again"
+                " with selection=<index>."
+            )
+
+        return resp
+
+    except ParseError as e:
+        _search_sessions.pop(key, None)
+        return {"success": False, "error": str(e), "flights": []}
+    except Exception as e:
+        _search_sessions.pop(key, None)
+        error_msg = str(e)
+        if "validation error" in error_msg.lower():
+            return {"success": False, "error": "Invalid parameter value", "flights": []}
+        return {"success": False, "error": f"Search failed: {error_msg}", "flights": []}
+
+
+# =============================================================================
 # MCP Tools
 # =============================================================================
 
@@ -545,6 +764,121 @@ def search_dates(
 def _search_dates_from_params(params: DateSearchParams) -> dict[str, Any]:
     """Entry point for tests that call the tool via a params object."""
     return _execute_date_search(params)
+
+
+@mcp.tool(
+    annotations={
+        "title": "Search Multi-City Flights",
+        "readOnlyHint": True,
+        "idempotentHint": True,
+    },
+)
+def search_multi_city(
+    legs: Annotated[
+        list[dict[str, str]],
+        Field(
+            description=(
+                "List of flight legs. Each leg is an object with 'origin' (IATA code), "
+                "'destination' (IATA code), and 'date' (YYYY-MM-DD). "
+                "Example: [{'origin': 'JFK', 'destination': 'LHR', 'date': '2026-06-01'}, "
+                "{'origin': 'LHR', 'destination': 'CDG', 'date': '2026-06-05'}]"
+            ),
+            min_length=2,
+        ),
+    ],
+    selection: Annotated[
+        int | str | None,
+        Field(
+            description=(
+                "Index of the flight to select for the CURRENT leg (0-based). "
+                "Omit for the first call to get leg 1 options. "
+                "After reviewing results, pass the index of your chosen flight "
+                "to advance to the next leg. The server remembers previous selections."
+            ),
+        ),
+    ] = None,
+    departure_window: Annotated[
+        str | None,
+        Field(description="Departure time window in 'HH-HH' 24h format (e.g., '6-20')"),
+    ] = None,
+    airlines: Annotated[
+        list[str] | None,
+        Field(description="Filter by airline IATA codes (e.g., ['BA', 'AA'])"),
+    ] = None,
+    cabin_class: Annotated[
+        str,
+        Field(description="Cabin class: ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST"),
+    ] = CONFIG.default_cabin_class,
+    max_stops: Annotated[
+        str,
+        Field(description="Maximum stops: ANY, NON_STOP, ONE_STOP, TWO_PLUS_STOPS"),
+    ] = "ANY",
+    sort_by: Annotated[
+        str,
+        Field(
+            description="Sort by: TOP_FLIGHTS, BEST, CHEAPEST,"
+            " DEPARTURE_TIME, ARRIVAL_TIME, DURATION, EMISSIONS"
+        ),
+    ] = CONFIG.default_sort_by,
+    passengers: Annotated[
+        int | None,
+        Field(description="Number of adult passengers", ge=1),
+    ] = None,
+    exclude_basic_economy: Annotated[
+        bool,
+        Field(description="Exclude basic economy fares from results"),
+    ] = False,
+    emissions: Annotated[
+        str,
+        Field(description="Filter by emissions level: ALL or LESS"),
+    ] = "ALL",
+    checked_bags: Annotated[
+        int,
+        Field(description="Number of checked bags to include in price (0, 1, or 2)", ge=0, le=2),
+    ] = 0,
+    carry_on: Annotated[
+        bool,
+        Field(description="Include carry-on bag fee in displayed price"),
+    ] = False,
+    show_all_results: Annotated[
+        bool,
+        Field(description="Return all available results instead of curated ~30"),
+    ] = True,
+) -> dict[str, Any]:
+    """Search for multi-city flights step by step, one leg at a time.
+
+    Works like Google Flights: first call returns options for leg 1.
+    Pick a flight by index, pass it as selection, and call again to
+    get options for leg 2 (with combined pricing), and so on.
+    The server remembers your previous selections between calls.
+
+    Response includes price_range (min/max for the total trip) when
+    available from Google Flights.
+
+    Example for a 3-leg trip:
+      1. Call with legs=[...] (no selection) -> leg 1 options
+      2. Call with legs=[...], selection=0 -> leg 2 options
+      3. Call with legs=[...], selection=2 -> leg 3 final results with total pricing
+
+    """
+    effective_departure_window = departure_window or CONFIG.default_departure_window
+    parsed_legs = [MultiCityLeg(**leg) for leg in legs]
+    params = MultiCitySearchParams(
+        legs=parsed_legs,
+        departure_window=effective_departure_window,
+        airlines=airlines,
+        cabin_class=cabin_class,
+        max_stops=max_stops,
+        sort_by=sort_by,
+        passengers=passengers or CONFIG.default_passengers,
+        exclude_basic_economy=exclude_basic_economy,
+        emissions=emissions,
+        checked_bags=checked_bags,
+        carry_on=carry_on,
+        show_all_results=show_all_results,
+    )
+    sel = int(selection) if selection is not None else None
+    return _execute_multi_city_step(params, sel)
 
 
 # =============================================================================

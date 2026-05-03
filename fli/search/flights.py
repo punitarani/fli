@@ -36,6 +36,52 @@ class SearchFlights:
         """Initialize the search client for flight searches."""
         self.client = get_client()
 
+    def _do_single_search(
+        self, filters: FlightSearchFilters, *, include_metadata: bool = False
+    ) -> list[FlightResult] | tuple[list[FlightResult], dict] | None:
+        """Execute a single API call and return flight options for the current unselected leg.
+
+        Args:
+            filters: Full flight search object including airports, dates, and preferences
+            include_metadata: If True, return (flights, metadata) with response-level
+                data such as price_range.
+
+        Returns:
+            List of FlightResult, or (flights, metadata) tuple, or None if no results
+
+        """
+        encoded_filters = filters.encode()
+        response = self.client.post(
+            url=self.BASE_URL,
+            data=f"f.req={encoded_filters}",
+            impersonate="chrome",
+            allow_redirects=True,
+        )
+        response.raise_for_status()
+        parsed = json.loads(response.text.lstrip(")]}'"))[0][2]
+        if not parsed:
+            return None
+        decoded = json.loads(parsed)
+        flights_data = [
+            item
+            for i in [2, 3]
+            if isinstance(decoded[i], list)
+            for item in decoded[i][0]
+        ]
+        flights = [self._parse_flights_data(flight) for flight in flights_data]
+
+        if not include_metadata:
+            return flights
+
+        metadata = {}
+        try:
+            if decoded[7] and len(decoded[7]) > 3 and isinstance(decoded[7][3], list):
+                metadata["price_range"] = decoded[7][3]
+        except (IndexError, TypeError):
+            pass
+
+        return flights, metadata
+
     def search(
         self, filters: FlightSearchFilters, top_n: int = 5
     ) -> list[FlightResult | tuple[FlightResult, ...]] | None:
