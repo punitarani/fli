@@ -3,14 +3,23 @@
 Covers:
   1. list_tools FastMCP 3.x registration and annotations
   2. Round-trip price doubling (Google Flights returns combined RT price on outbound leg)
+  3. Per-leg fallback when Google's multi-city curator drops options
 """
 
-from unittest.mock import MagicMock
+from datetime import datetime, timedelta
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP
 
-from fli.mcp.server import _serialize_flight_result, mcp
+from fli.mcp.server import (
+    MultiCityLeg,
+    MultiCitySearchParams,
+    _execute_multi_city_step,
+    _search_sessions,
+    _serialize_flight_result,
+    mcp,
+)
 
 # ---------------------------------------------------------------------------
 # Bug 1: list_tools — FastMCP 3.x compatibility
@@ -191,3 +200,169 @@ class TestSerializeFlightResult:
         result = _serialize_flight_result(flight, is_round_trip=False)
 
         assert result["currency"] == "EUR"
+
+
+# ---------------------------------------------------------------------------
+# Bug 3: 4-leg multi-city dropping bookable carriers
+# ---------------------------------------------------------------------------
+#
+# Reported case: a 4-leg LGW↔China itinerary returned either 0 flights
+# or only-unpriced Air China options, even though every leg priced fine
+# via the one-way ``search_flights`` path (CZ 690 LGW→CAN at £421
+# standalone).  The 3-leg variant of the same routing returned priced
+# CZ correctly.  Hypothesis: Google's multi-city curator restricts
+# candidates to single-carrier or alliance bundles for 4+-leg trips,
+# dropping carriers (CZ/SkyTeam) that don't have full European-partner
+# coverage of the routing.  The fix surfaces a per-leg one-way fallback
+# whenever the multi-city call returns empty/unpriced for a leg.
+
+
+def _future_date(days: int = 30) -> str:
+    return (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+
+
+def _flight_result(airline_code: str, flight_num: str, price: float):
+    """Build a FlightResult-shaped MagicMock with one leg, suitable for serialization."""
+    leg = MagicMock()
+    leg.departure_airport = "LGW"
+    leg.arrival_airport = "SHA"
+    leg.departure_datetime = datetime(2026, 5, 18, 11, 40)
+    leg.arrival_datetime = datetime(2026, 5, 19, 6, 20)
+    leg.duration = 600
+    airline = MagicMock()
+    airline.name = airline_code
+    leg.airline = airline
+    leg.flight_number = flight_num
+
+    flight = MagicMock()
+    flight.price = price
+    flight.currency = "GBP"
+    flight.legs = [leg]
+    return flight
+
+
+def _four_leg_params() -> MultiCitySearchParams:
+    legs = [
+        MultiCityLeg(origin="LGW", destination="SHA", date=_future_date(30)),
+        MultiCityLeg(origin="SHA", destination="CTU", date=_future_date(33)),
+        MultiCityLeg(origin="CTU", destination="CAN", date=_future_date(44)),
+        MultiCityLeg(origin="CAN", destination="LGW", date=_future_date(47)),
+    ]
+    return MultiCitySearchParams(legs=legs, sort_by="CHEAPEST")
+
+
+@pytest.fixture(autouse=True)
+def _clear_multi_city_sessions():
+    _search_sessions.clear()
+    yield
+    _search_sessions.clear()
+
+
+class TestMultiCityFallback:
+    """Per-leg fallback when Google's multi-city curator returns empty/unpriced."""
+
+    def test_empty_multi_city_falls_back_to_one_way(self):
+        with patch("fli.mcp.server.SearchFlights") as mock_cls:
+            instance = mock_cls.return_value
+            instance._do_single_search.side_effect = [
+                None,  # multi-city call: empty body
+                ([_flight_result("CZ", "690", 421.0)], {}),  # fallback: priced CZ
+            ]
+
+            result = _execute_multi_city_step(_four_leg_params(), selection=None)
+
+        assert result["success"] is True
+        assert result["count"] == 1
+        assert result["combined_pricing"] is False
+        assert result["flights"][0]["per_leg_price"] is True
+        assert result["flights"][0]["price"] == 421.0
+        assert "per-leg standalone prices" in result["message"]
+        assert instance._do_single_search.call_count == 2
+
+    def test_all_unpriced_multi_city_falls_back_to_one_way(self):
+        with patch("fli.mcp.server.SearchFlights") as mock_cls:
+            instance = mock_cls.return_value
+            instance._do_single_search.side_effect = [
+                # Mirrors Repro B: multi-city returns only unpriced Air China
+                (
+                    [_flight_result("CA", "100", 0.0), _flight_result("CA", "200", 0.0)],
+                    {},
+                ),
+                ([_flight_result("CZ", "690", 421.0)], {}),
+            ]
+
+            result = _execute_multi_city_step(_four_leg_params(), selection=None)
+
+        assert result["combined_pricing"] is False
+        assert result["count"] == 1
+        assert result["flights"][0]["per_leg_price"] is True
+        assert instance._do_single_search.call_count == 2
+
+    def test_priced_multi_city_does_not_invoke_fallback(self):
+        with patch("fli.mcp.server.SearchFlights") as mock_cls:
+            instance = mock_cls.return_value
+            instance._do_single_search.side_effect = [
+                (
+                    [_flight_result("CZ", "690", 820.0)],
+                    {"price_range": [820, 1200]},
+                ),
+            ]
+
+            result = _execute_multi_city_step(_four_leg_params(), selection=None)
+
+        assert result["combined_pricing"] is True
+        assert "per_leg_price" not in result["flights"][0]
+        assert result["price_range"] == {"min": 820, "max": 1200}
+        assert instance._do_single_search.call_count == 1
+
+    def test_fallback_also_unpriced_keeps_empty_response(self):
+        with patch("fli.mcp.server.SearchFlights") as mock_cls:
+            instance = mock_cls.return_value
+            instance._do_single_search.side_effect = [
+                None,
+                ([_flight_result("CA", "999", 0.0)], {}),  # also unpriced
+            ]
+
+            result = _execute_multi_city_step(_four_leg_params(), selection=None)
+
+        # Original empty response surfaces with retry hint; we don't show
+        # an unpriced-only list as a "real" result.
+        assert result["count"] == 0
+        assert "hint" in result
+        assert instance._do_single_search.call_count == 2
+
+    def test_fallback_returns_empty_keeps_empty_response(self):
+        with patch("fli.mcp.server.SearchFlights") as mock_cls:
+            instance = mock_cls.return_value
+            instance._do_single_search.side_effect = [None, None]
+
+            result = _execute_multi_city_step(_four_leg_params(), selection=None)
+
+        assert result["count"] == 0
+        assert "hint" in result
+        assert instance._do_single_search.call_count == 2
+
+    def test_fallback_filter_targets_current_leg(self):
+        """Use the current leg's airports/date for the fallback, not leg 0.
+
+        Without this guard a regression could re-fetch leg 0 every time
+        the multi-city call fails on a later leg.
+        """
+        with patch("fli.mcp.server.SearchFlights") as mock_cls:
+            instance = mock_cls.return_value
+            instance._do_single_search.side_effect = [
+                None,
+                ([_flight_result("CZ", "690", 421.0)], {}),
+            ]
+
+            _execute_multi_city_step(_four_leg_params(), selection=None)
+
+            assert instance._do_single_search.call_count == 2
+            mc_filters = instance._do_single_search.call_args_list[0].args[0]
+            ow_filters = instance._do_single_search.call_args_list[1].args[0]
+
+            assert len(mc_filters.flight_segments) == 4
+            assert len(ow_filters.flight_segments) == 1
+            # Leg 0 of _four_leg_params is LGW -> SHA
+            assert ow_filters.flight_segments[0].departure_airport[0][0].name == "LGW"
+            assert ow_filters.flight_segments[0].arrival_airport[0][0].name == "SHA"

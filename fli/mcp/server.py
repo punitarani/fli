@@ -522,6 +522,41 @@ def _session_key(legs: list[MultiCityLeg]) -> str:
     )
 
 
+def _build_per_leg_fallback_filters(
+    filters: FlightSearchFilters, current_step: int,
+) -> FlightSearchFilters:
+    """Build a one-way filter for a single leg of a multi-city itinerary.
+
+    Used when Google's multi-city curator returns empty or only-unpriced
+    options — common on 4+-leg itineraries where the curator appears to
+    restrict candidates to single-carrier or alliance bundles, dropping
+    carriers that price fine standalone (e.g., CZ on a routing where
+    Star Alliance carriers cover every city).  The fallback surfaces the
+    same options the one-way ``search_flights`` path returns, at the
+    cost of a combined trip price.
+    """
+    current_segment = deepcopy(filters.flight_segments[current_step])
+    current_segment.selected_flight = None
+    return FlightSearchFilters(
+        trip_type=TripType.ONE_WAY,
+        passenger_info=filters.passenger_info,
+        flight_segments=[current_segment],
+        stops=filters.stops,
+        seat_type=filters.seat_type,
+        airlines=filters.airlines,
+        sort_by=filters.sort_by,
+        exclude_basic_economy=filters.exclude_basic_economy,
+        emissions=filters.emissions,
+        bags=filters.bags,
+        show_all_results=filters.show_all_results,
+    )
+
+
+def _all_unpriced(raw: list[Any]) -> bool:
+    """Check whether every parsed FlightResult in *raw* lacks a usable price."""
+    return all((getattr(r, "price", 0) or 0) == 0 for r in raw)
+
+
 def _execute_multi_city_step(
     params: MultiCitySearchParams, selection: int | None,
 ) -> dict[str, Any]:
@@ -605,14 +640,39 @@ def _execute_multi_city_step(
         num_legs = len(params.legs)
         is_final = current_step >= num_legs - 1
 
+        # Per-leg fallback: when Google's multi-city curator returns empty
+        # or only-unpriced options for this leg (common on 4+-leg trips
+        # where the curator restricts to single-carrier/alliance bundles),
+        # re-run as a standalone one-way query for the current leg.  We
+        # lose the combined trip price but surface options the user can
+        # actually pick — see the bug report where CZ disappeared from a
+        # 4-leg LGW↔China itinerary even though every leg priced fine via
+        # ``search_flights``.
+        fallback_used = False
+        if not raw or _all_unpriced(raw):
+            fallback_filters = _build_per_leg_fallback_filters(filters, current_step)
+            fb_result = search_client._do_single_search(
+                fallback_filters, include_metadata=True,
+            )
+            if fb_result is not None:
+                fb_raw, _ = fb_result
+                # Only switch to the fallback if it actually surfaced priced
+                # options; an empty/all-unpriced fallback is no improvement
+                # over what we already have.
+                if fb_raw and not _all_unpriced(fb_raw):
+                    raw = fb_raw
+                    metadata = {}  # multi-city price_range no longer applies
+                    fallback_used = True
+
         if not raw:
             # Multi-city queries against ``GetShoppingResults`` regularly
             # return HTTP 200 + empty body on cold cache (~60 s server-side
             # timeout).  fli already retries empty multi-leg responses once
-            # at the API layer; if we still ended up empty the agent should
-            # know it's likely transient and retry the same MCP call rather
-            # than concluding the routing is impossible.  Keep the session
-            # so the retry resumes from the same step.
+            # at the API layer; if we still ended up empty (and the per-leg
+            # fallback also turned up nothing) the agent should know it's
+            # likely transient and retry the same MCP call rather than
+            # concluding the routing is impossible.  Keep the session so
+            # the retry resumes from the same step.
             return {
                 "success": True,
                 "flights": [],
@@ -636,6 +696,10 @@ def _execute_multi_city_step(
             flight_results, sort_by=filters.sort_by,
         )
 
+        if fallback_used:
+            for fr in flight_results:
+                fr["per_leg_price"] = True
+
         if CONFIG.max_results:
             flight_results = flight_results[: CONFIG.max_results]
 
@@ -654,13 +718,29 @@ def _execute_multi_city_step(
                 f" ({params.legs[current_step].date})"
             ),
             "is_final": is_final,
+            "combined_pricing": not fallback_used,
         }
 
         price_range = metadata.get("price_range")
         if price_range and len(price_range) >= 2:
             resp["price_range"] = {"min": price_range[0], "max": price_range[1]}
 
-        if is_final:
+        if fallback_used:
+            resp["message"] = (
+                f"Google's multi-city pricing was unavailable for leg"
+                f" {current_step + 1} of {num_legs} — common on 4+-leg"
+                " itineraries where the curator restricts to single-carrier"
+                " bundles. Showing per-leg standalone prices instead; the"
+                " combined trip total won't be available, so sum the"
+                " individual leg prices to estimate the trip cost."
+                + (
+                    f" Pick a flight by index (0-{len(flight_results)-1})"
+                    " and call again with selection=<index>."
+                    if not is_final
+                    else ""
+                )
+            )
+        elif is_final:
             resp["message"] = (
                 f"Showing options for leg {current_step + 1} of"
                 f" {num_legs}. These are the final results."
