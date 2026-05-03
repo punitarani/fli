@@ -127,9 +127,17 @@ def build_multi_city_segments(
         Tuple of (list of FlightSegment objects, TripType.MULTI_CITY)
 
     Note:
-        Multi-city searches with distinct city pairs may time out due to
-        limitations of the Google Flights API endpoint.  Round-trip-style
-        multi-city (same origin and final destination) works reliably.
+        - Legs are *not* required to be continuous (destination[N] does not
+          have to equal origin[N+1]).  Google Flights itself supports
+          discontinuous multi-city — e.g. arriving CTU and departing PVG with
+          a positioning gap — and prices the entire trip as one fare.
+        - However, multi-city searches with distinct city pairs hit an
+          intermittently slow Google Flights endpoint (the "continuation"
+          ``GetShoppingResults`` call after a leg is selected).  A timeout
+          is *not* the same as "no flights"; the MCP layer surfaces this as
+          ``error_kind: "timeout"`` so callers can retry rather than
+          concluding the routing is impossible.  Round-trip-style multi-city
+          (same origin and final destination) is the most reliable shape.
 
     """
     segments = [

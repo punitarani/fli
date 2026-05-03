@@ -263,6 +263,40 @@ def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[s
     }
 
 
+def _normalize_flight_prices(
+    flight_results: list[dict[str, Any]], sort_by: Any = None,
+) -> list[dict[str, Any]]:
+    """Tag price-unavailable entries and ensure they don't pollute CHEAPEST sort.
+
+    Google Flights occasionally returns options with no displayable price
+    (parsed as ``0.0`` upstream).  Previously these were rewritten to
+    ``price: null`` and left interleaved with priced results — meaning a
+    CHEAPEST sort surfaced a None-priced option as the "top" hit (which
+    mis-suggests "no usable options" when in fact priced alternatives exist
+    further down the list).  We now:
+
+    1. Set ``price`` to ``None`` and add an explicit ``price_unavailable:
+       True`` flag so callers can branch on it.
+    2. When ``sort_by`` is CHEAPEST, push price-unavailable entries to the
+       end so the first option the LLM sees is always actionable.
+    """
+    for fr in flight_results:
+        price = fr.get("price")
+        if price is None or price == 0:
+            fr["price"] = None
+            fr["price_unavailable"] = True
+        else:
+            fr["price_unavailable"] = False
+
+    sort_name = getattr(sort_by, "name", None)
+    if sort_name == "CHEAPEST":
+        # Stable sort: priced entries keep their server-side order; unpriced
+        # entries get pushed to the bottom in original order.
+        flight_results.sort(key=lambda fr: 1 if fr.get("price_unavailable") else 0)
+
+    return flight_results
+
+
 def _serialize_date_result(date_result: Any) -> dict[str, Any]:
     """Serialize a date price result to a dictionary."""
     return {
@@ -276,6 +310,52 @@ def _serialize_date_result(date_result: Any) -> dict[str, Any]:
 # =============================================================================
 # Search Execution
 # =============================================================================
+
+
+def _classify_search_error(exc: Exception) -> dict[str, Any]:
+    """Classify a search exception so callers can distinguish a true zero-result
+    response from a network/API failure.
+
+    Without this, a 30-60s timeout against Google Flights and a search that
+    legitimately returns zero options both surface to the LLM as
+    ``flights:[]``, which is easy to misread as "the requested itinerary is
+    impossible" when in fact a retry might succeed.  This is especially
+    important for multi-city searches: Google's continuation endpoint
+    (``GetShoppingResults`` with ``selected_flight`` set) is intermittently
+    slow, and a transient timeout should not be reported the same way as
+    "no airline files this routing".
+    """
+    msg = str(exc)
+    lower = msg.lower()
+    # curl-cffi surfaces a CURLE_OPERATION_TIMEDOUT (curl error 28) as a
+    # ``Timeout`` exception whose message contains "timed out".  Both the
+    # canonical phrase and the curl error number are checked because the
+    # exception is re-wrapped by ``Client.post`` into a generic ``Exception``.
+    is_timeout = "timed out" in lower or "curl: (28)" in lower
+    if is_timeout:
+        return {
+            "success": False,
+            "error_kind": "timeout",
+            "error": (
+                "Google Flights API timed out. Multi-city continuation calls"
+                " (when previous legs are selected) are intermittently slow."
+                " Retry the same request — this is not a 'no flights' result."
+            ),
+            "flights": [],
+        }
+    if "validation error" in lower:
+        return {
+            "success": False,
+            "error_kind": "validation",
+            "error": "Invalid parameter value",
+            "flights": [],
+        }
+    return {
+        "success": False,
+        "error_kind": "unknown",
+        "error": f"Search failed: {msg}",
+        "flights": [],
+    }
 
 
 def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
@@ -333,6 +413,7 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
         # Serialize results
         is_round_trip = trip_type == TripType.ROUND_TRIP
         flight_results = [_serialize_flight_result(f, is_round_trip) for f in flights]
+        flight_results = _normalize_flight_prices(flight_results, sort_by=sort_by)
 
         if CONFIG.max_results:
             flight_results = flight_results[: CONFIG.max_results]
@@ -345,12 +426,9 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
         }
 
     except ParseError as e:
-        return {"success": False, "error": str(e), "flights": []}
+        return {"success": False, "error_kind": "parse", "error": str(e), "flights": []}
     except Exception as e:
-        error_msg = str(e)
-        if "validation error" in error_msg.lower():
-            return {"success": False, "error": "Invalid parameter value", "flights": []}
-        return {"success": False, "error": f"Search failed: {error_msg}", "flights": []}
+        return _classify_search_error(e)
 
 
 def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
@@ -422,9 +500,13 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
         }
 
     except ParseError as e:
-        return {"success": False, "error": str(e), "dates": []}
+        return {"success": False, "error_kind": "parse", "error": str(e), "dates": []}
     except Exception as e:
-        return {"success": False, "error": f"Search failed: {str(e)}", "dates": []}
+        # Reuse the same classifier; swap the empty key from ``flights`` to
+        # ``dates`` so the response shape stays consistent for date searches.
+        resp = _classify_search_error(e)
+        resp["dates"] = resp.pop("flights", [])
+        return resp
 
 
 # =============================================================================
@@ -537,10 +619,9 @@ def _execute_multi_city_step(
         _search_sessions[key] = (filters, raw)
 
         flight_results = [_serialize_flight_result(f, is_round_trip=False) for f in raw]
-
-        for fr in flight_results:
-            if fr.get("price") == 0:
-                fr["price"] = None
+        flight_results = _normalize_flight_prices(
+            flight_results, sort_by=filters.sort_by,
+        )
 
         if CONFIG.max_results:
             flight_results = flight_results[: CONFIG.max_results]
@@ -585,13 +666,16 @@ def _execute_multi_city_step(
 
     except ParseError as e:
         _search_sessions.pop(key, None)
-        return {"success": False, "error": str(e), "flights": []}
+        return {"success": False, "error_kind": "parse", "error": str(e), "flights": []}
     except Exception as e:
-        _search_sessions.pop(key, None)
-        error_msg = str(e)
-        if "validation error" in error_msg.lower():
-            return {"success": False, "error": "Invalid parameter value", "flights": []}
-        return {"success": False, "error": f"Search failed: {error_msg}", "flights": []}
+        # Only discard the cached session on non-recoverable errors.  A
+        # transient timeout on, say, the leg-3 continuation call should
+        # *not* force the user to start over from leg 1 — keep the cached
+        # filters + last_results so the next ``selection`` resumes cleanly.
+        result = _classify_search_error(e)
+        if result.get("error_kind") != "timeout":
+            _search_sessions.pop(key, None)
+        return result
 
 
 # =============================================================================

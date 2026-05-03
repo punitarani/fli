@@ -23,6 +23,12 @@ class Client:
     DEFAULT_HEADERS = {
         "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
     }
+    # Multi-city continuation calls (where ``selected_flight`` is set on
+    # previous segments) routinely take longer than ``curl_cffi``'s default
+    # 30 seconds when Google Flights composites discontinuous itineraries.
+    # 60s leaves enough headroom without making genuinely dead requests
+    # block forever.
+    DEFAULT_TIMEOUT = 60
 
     def __init__(self):
         """Initialize a new client session with default headers."""
@@ -52,6 +58,7 @@ class Client:
 
         """
         try:
+            kwargs.setdefault("timeout", self.DEFAULT_TIMEOUT)
             response = self._client.get(url, **kwargs)
             response.raise_for_status()
             return response
@@ -76,6 +83,7 @@ class Client:
 
         """
         try:
+            kwargs.setdefault("timeout", self.DEFAULT_TIMEOUT)
             response = self._client.post(url, **kwargs)
             response.raise_for_status()
             return response

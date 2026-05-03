@@ -142,18 +142,46 @@ class SearchFlights:
             if selected_count >= num_segments - 1:
                 return flights
 
-            # Select each flight option and fetch the next leg
+            # Select each flight option and fetch the next leg.
+            #
+            # Multi-city continuation calls hit Google Flights'
+            # ``GetShoppingResults`` endpoint with ``selected_flight`` set,
+            # which is intermittently slow.  Without per-iteration timeout
+            # handling, a single slow continuation kills the entire outer
+            # search — meaning a 4-leg trip with one flaky branch returns
+            # zero combos instead of the 4 that actually completed.  Treat
+            # timeouts as "this branch is unavailable right now" and keep
+            # whatever combos succeeded.  Non-timeout errors still bubble
+            # up so real bugs aren't swallowed.
             flight_combos = []
+            timeout_skipped = 0
             for selected_flight in flights[:top_n]:
                 next_filters = deepcopy(filters)
                 next_filters.flight_segments[selected_count].selected_flight = selected_flight
-                next_results = self.search(next_filters, top_n=top_n)
+                try:
+                    next_results = self.search(next_filters, top_n=top_n)
+                except Exception as inner:
+                    msg = str(inner).lower()
+                    if "timed out" in msg or "curl: (28)" in msg:
+                        timeout_skipped += 1
+                        continue
+                    raise
                 if next_results is not None:
                     for next_result in next_results:
                         if isinstance(next_result, tuple):
                             flight_combos.append((selected_flight,) + next_result)
                         else:
                             flight_combos.append((selected_flight, next_result))
+
+            # If every continuation timed out and we have nothing to
+            # return, surface the timeout so callers (notably the MCP
+            # layer) can classify it correctly instead of reporting a
+            # misleading "no flights" outcome.
+            if timeout_skipped > 0 and not flight_combos:
+                raise Exception(
+                    f"All {timeout_skipped} multi-city continuation calls"
+                    " timed out on the Google Flights API. Retry the search."
+                )
 
             return flight_combos
 
