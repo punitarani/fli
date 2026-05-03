@@ -36,6 +36,14 @@ class SearchFlights:
         """Initialize the search client for flight searches."""
         self.client = get_client()
 
+    # For multi-leg queries Google's GetShoppingResults backend frequently
+    # returns an HTTP 200 with an empty body on cold queries (server-side
+    # ~60s timeout).  Retrying the same request often succeeds because the
+    # session warms up — see the variance characterisation in the commit
+    # that introduced this constant.  One extra attempt covers ~50% of
+    # cold-path failures without pushing wall time past ~2 minutes.
+    _EMPTY_RETRIES_MULTI_LEG = 1
+
     def _do_single_search(
         self, filters: FlightSearchFilters, *, include_metadata: bool = False
     ) -> list[FlightResult] | tuple[list[FlightResult], dict] | None:
@@ -50,18 +58,34 @@ class SearchFlights:
             List of FlightResult, or (flights, metadata) tuple, or None if no results
 
         """
+        # Multi-leg queries (round-trip and multi-city) hit a notably flakier
+        # path on Google's backend.  One-way queries are reliable enough that
+        # a retry just slows them down on legitimate "no flights" results.
+        is_multi_leg = filters.trip_type != TripType.ONE_WAY
+        max_attempts = 1 + (self._EMPTY_RETRIES_MULTI_LEG if is_multi_leg else 0)
+
         encoded_filters = filters.encode()
-        response = self.client.post(
-            url=self.BASE_URL,
-            data=f"f.req={encoded_filters}",
-            impersonate="chrome",
-            allow_redirects=True,
-        )
-        response.raise_for_status()
-        parsed = json.loads(response.text.lstrip(")]}'"))[0][2]
-        if not parsed:
+        decoded = None
+        for attempt in range(max_attempts):
+            response = self.client.post(
+                url=self.BASE_URL,
+                data=f"f.req={encoded_filters}",
+                impersonate="chrome",
+                allow_redirects=True,
+            )
+            response.raise_for_status()
+            parsed = json.loads(response.text.lstrip(")]}'"))[0][2]
+            if parsed:
+                decoded = json.loads(parsed)
+                break
+            # Empty body — Google's backend timed out.  For multi-leg
+            # requests we retry once; for one-way we accept the empty.
+            if attempt + 1 < max_attempts:
+                continue
+
+        if decoded is None:
             return None
-        decoded = json.loads(parsed)
+
         flights_data = [
             item
             for i in [2, 3]

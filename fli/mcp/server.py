@@ -606,7 +606,13 @@ def _execute_multi_city_step(
         is_final = current_step >= num_legs - 1
 
         if not raw:
-            _search_sessions.pop(key, None)
+            # Multi-city queries against ``GetShoppingResults`` regularly
+            # return HTTP 200 + empty body on cold cache (~60 s server-side
+            # timeout).  fli already retries empty multi-leg responses once
+            # at the API layer; if we still ended up empty the agent should
+            # know it's likely transient and retry the same MCP call rather
+            # than concluding the routing is impossible.  Keep the session
+            # so the retry resumes from the same step.
             return {
                 "success": True,
                 "flights": [],
@@ -614,6 +620,13 @@ def _execute_multi_city_step(
                 "step": current_step + 1,
                 "total_legs": num_legs,
                 "is_final": is_final,
+                "hint": (
+                    "Empty result on a multi-city leg often means Google's"
+                    " backend timed out warming a cold cache. Retry the"
+                    " same call (without changing parameters) once or twice"
+                    " — empirically a 4-leg query may need 2-4 attempts"
+                    " before the warm path returns flights."
+                ),
             }
 
         _search_sessions[key] = (filters, raw)
