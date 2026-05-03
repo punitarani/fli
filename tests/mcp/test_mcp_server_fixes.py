@@ -366,3 +366,122 @@ class TestMultiCityFallback:
             # Leg 0 of _four_leg_params is LGW -> SHA
             assert ow_filters.flight_segments[0].departure_airport[0][0].name == "LGW"
             assert ow_filters.flight_segments[0].arrival_airport[0][0].name == "SHA"
+
+
+# ---------------------------------------------------------------------------
+# Sticky degraded state across continuation steps
+# ---------------------------------------------------------------------------
+#
+# Once Google's multi-city curator drops options for one leg of a trip,
+# repeating the broken call for every subsequent leg would burn ~2 minutes
+# per leg with the same outcome.  After the first fallback the session is
+# marked ``degraded`` and continuation calls skip straight to the per-leg
+# one-way query — turning a 4-leg degraded trip from ~8 minutes of futile
+# retries into ~12 seconds of useful results.
+
+
+class TestStickyDegradedState:
+    """Once a trip is degraded, every step is degraded."""
+
+    def test_continuation_after_fallback_skips_multi_city_call(self):
+        """Step 2 of a degraded session must NOT call the multi-city endpoint.
+
+        Without this short-circuit the agent pays the full ~60-120 s
+        multi-city wall time on every continuation, even though we
+        already know it won't return useful results.
+        """
+        params = _four_leg_params()
+
+        with patch("fli.mcp.server.SearchFlights") as mock_cls:
+            instance = mock_cls.return_value
+            instance._do_single_search.side_effect = [
+                # Step 1: multi-city empty, fallback succeeds with priced CZ
+                None,
+                ([_flight_result("CZ", "690", 421.0)], {}),
+                # Step 2: ONLY one call expected (fallback only — multi-city
+                # is skipped because the session is degraded).
+                ([_flight_result("CZ", "3443", 75.0)], {}),
+            ]
+
+            step1 = _execute_multi_city_step(params, selection=None)
+            assert step1["combined_pricing"] is False
+            assert step1["count"] == 1
+
+            calls_after_step1 = instance._do_single_search.call_count
+            assert calls_after_step1 == 2  # multi-city + fallback
+
+            step2 = _execute_multi_city_step(params, selection=0)
+            assert step2["combined_pricing"] is False
+            assert step2["flights"][0]["per_leg_price"] is True
+
+            # Crucial: step 2 added exactly ONE API call (the fallback).
+            # If degraded was not sticky, we'd see 2 more (multi-city + fallback).
+            assert instance._do_single_search.call_count == calls_after_step1 + 1
+
+    def test_continuation_uses_message_for_carry_over_degradation(self):
+        """The message should distinguish 'this leg failed' vs 'trip already degraded'."""
+        params = _four_leg_params()
+
+        with patch("fli.mcp.server.SearchFlights") as mock_cls:
+            instance = mock_cls.return_value
+            instance._do_single_search.side_effect = [
+                None,
+                ([_flight_result("CZ", "690", 421.0)], {}),
+                ([_flight_result("CZ", "3443", 75.0)], {}),
+            ]
+
+            step1 = _execute_multi_city_step(params, selection=None)
+            step2 = _execute_multi_city_step(params, selection=0)
+
+            assert "unavailable for leg 1" in step1["message"]
+            assert "Continuing in per-leg pricing mode" in step2["message"]
+
+    def test_degraded_flag_persists_across_empty_intermediate_step(self):
+        """If a continuation step's fallback also turns up empty, the session
+        must keep the degraded flag so the *next* retry still skips the
+        multi-city call.
+        """
+        params = _four_leg_params()
+
+        with patch("fli.mcp.server.SearchFlights") as mock_cls:
+            instance = mock_cls.return_value
+            instance._do_single_search.side_effect = [
+                # Step 1: degraded, fallback succeeds
+                None,
+                ([_flight_result("CZ", "690", 421.0)], {}),
+                # Step 2: fallback also empty (transient)
+                None,
+                # Step 2 retry: fallback succeeds
+                ([_flight_result("CZ", "3443", 75.0)], {}),
+            ]
+
+            _execute_multi_city_step(params, selection=None)
+            empty_step2 = _execute_multi_city_step(params, selection=0)
+            assert empty_step2["count"] == 0
+            assert empty_step2["combined_pricing"] is False  # still degraded
+
+            # Retry step 2 with same selection — should still skip multi-city
+            calls_before_retry = instance._do_single_search.call_count
+            retry_step2 = _execute_multi_city_step(params, selection=0)
+            assert retry_step2["count"] == 1
+            assert retry_step2["combined_pricing"] is False
+            # Only one new call (the successful fallback), not multi-city + fallback
+            assert instance._do_single_search.call_count == calls_before_retry + 1
+
+    def test_fresh_session_starts_undegraded(self):
+        """Sanity: a brand new session (cached is None) starts with degraded=False."""
+        params = _four_leg_params()
+
+        with patch("fli.mcp.server.SearchFlights") as mock_cls:
+            instance = mock_cls.return_value
+            # Multi-city succeeds with a priced result on first try
+            instance._do_single_search.side_effect = [
+                ([_flight_result("CZ", "690", 820.0)], {"price_range": [820, 1200]}),
+            ]
+
+            result = _execute_multi_city_step(params, selection=None)
+
+            assert result["combined_pricing"] is True
+            assert "per_leg_price" not in result["flights"][0]
+            # Only the multi-city call ran — no fallback
+            assert instance._do_single_search.call_count == 1

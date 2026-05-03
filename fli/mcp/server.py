@@ -513,7 +513,14 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
 # Multi-City Search (stateful, one API call per step)
 # =============================================================================
 
-_search_sessions: dict[str, tuple[Any, list[Any]]] = {}
+# Session value: ``(filters, last_results, degraded)`` where ``degraded`` is
+# True iff a previous step in this session had to fall back to per-leg
+# pricing because Google's multi-city curator returned empty / unpriced.
+# Once a trip's curator is known broken, every subsequent leg skips the
+# multi-city call entirely and goes straight to the one-way fallback —
+# this turns a 4-leg degraded trip from ~8 minutes of futile retries into
+# ~12 seconds total.
+_search_sessions: dict[str, tuple[Any, list[Any], bool]] = {}
 
 
 def _session_key(legs: list[MultiCityLeg]) -> str:
@@ -610,8 +617,9 @@ def _execute_multi_city_step(
                 show_all_results=params.show_all_results,
             )
             current_step = 0
+            degraded = False
         else:
-            filters, last_results = cached
+            filters, last_results, degraded = cached
             current_step = sum(
                 1 for s in filters.flight_segments if s.selected_flight is not None
             )
@@ -630,12 +638,24 @@ def _execute_multi_city_step(
             filters.flight_segments[current_step].selected_flight = last_results[selection]
             current_step += 1
 
+        # Snapshot of the entry value: lets us differentiate "this step
+        # discovered the curator is broken" from "the session was already
+        # known broken" when crafting the user-facing message later.
+        already_degraded_on_entry = degraded
+
         search_client = SearchFlights()
-        result = search_client._do_single_search(filters, include_metadata=True)
-        if result is None:
+        # Skip the multi-city call entirely when the session is already
+        # known degraded — re-issuing it would just burn another ~2 minutes
+        # against a curator that's already proved unable to price the
+        # remaining legs.  Drop straight to the per-leg fallback below.
+        if degraded:
             raw, metadata = [], {}
         else:
-            raw, metadata = result
+            result = search_client._do_single_search(filters, include_metadata=True)
+            if result is None:
+                raw, metadata = [], {}
+            else:
+                raw, metadata = result
 
         num_legs = len(params.legs)
         is_final = current_step >= num_legs - 1
@@ -647,7 +667,9 @@ def _execute_multi_city_step(
         # lose the combined trip price but surface options the user can
         # actually pick — see the bug report where CZ disappeared from a
         # 4-leg LGW↔China itinerary even though every leg priced fine via
-        # ``search_flights``.
+        # ``search_flights``.  When ``degraded`` is True we always enter
+        # this branch (because raw is forced to []), so the same code path
+        # serves both the first-time-degraded and continued-degraded cases.
         fallback_used = False
         if not raw or _all_unpriced(raw):
             fallback_filters = _build_per_leg_fallback_filters(filters, current_step)
@@ -664,6 +686,11 @@ def _execute_multi_city_step(
                     metadata = {}  # multi-city price_range no longer applies
                     fallback_used = True
 
+        # Once any leg in this trip falls back, every subsequent leg should
+        # skip the (broken) multi-city call.  Persist the flag through the
+        # session so continuation steps inherit it.
+        degraded = degraded or fallback_used
+
         if not raw:
             # Multi-city queries against ``GetShoppingResults`` regularly
             # return HTTP 200 + empty body on cold cache (~60 s server-side
@@ -672,8 +699,9 @@ def _execute_multi_city_step(
             # fallback also turned up nothing) the agent should know it's
             # likely transient and retry the same MCP call rather than
             # concluding the routing is impossible.  Keep the session so
-            # the retry resumes from the same step.
-            return {
+            # the retry resumes from the same step (and so the degraded
+            # flag, if set on a prior step, persists for the retry).
+            empty_resp: dict[str, Any] = {
                 "success": True,
                 "flights": [],
                 "count": 0,
@@ -688,15 +716,25 @@ def _execute_multi_city_step(
                     " before the warm path returns flights."
                 ),
             }
+            if degraded:
+                empty_resp["combined_pricing"] = False
+            # Preserve the existing session (with its degraded flag, if
+            # any) so the next retry resumes from the same step.
+            return empty_resp
 
-        _search_sessions[key] = (filters, raw)
+        _search_sessions[key] = (filters, raw, degraded)
 
         flight_results = [_serialize_flight_result(f, is_round_trip=False) for f in raw]
         flight_results = _normalize_flight_prices(
             flight_results, sort_by=filters.sort_by,
         )
 
-        if fallback_used:
+        # ``degraded`` is sticky across the whole session: once any leg
+        # served per-leg pricing, every leg in this trip is per-leg too.
+        # Use it (not the per-step ``fallback_used``) for the response
+        # signals so the agent can't accidentally treat a later step's
+        # multi-city-shaped numbers as a combined trip price.
+        if degraded:
             for fr in flight_results:
                 fr["per_leg_price"] = True
 
@@ -718,21 +756,38 @@ def _execute_multi_city_step(
                 f" ({params.legs[current_step].date})"
             ),
             "is_final": is_final,
-            "combined_pricing": not fallback_used,
+            "combined_pricing": not degraded,
         }
 
         price_range = metadata.get("price_range")
         if price_range and len(price_range) >= 2:
             resp["price_range"] = {"min": price_range[0], "max": price_range[1]}
 
-        if fallback_used:
+        if degraded:
+            # Differentiate first-time-degraded from carry-over so the
+            # agent can tell whether *this* leg failed the curator or
+            # whether a prior leg already did.  ``fallback_used`` tells us
+            # whether we ran the fallback this step, but it's also True on
+            # carry-over steps (because we always run the fallback when
+            # degraded).  The clean distinction is ``already_degraded_on_entry``.
+            if not already_degraded_on_entry:
+                lead_in = (
+                    f"Google's multi-city pricing was unavailable for"
+                    f" leg {current_step + 1} of {num_legs} — common on"
+                    " 4+-leg itineraries where the curator restricts to"
+                    " single-carrier bundles. Showing per-leg standalone"
+                    " prices instead;"
+                )
+            else:
+                lead_in = (
+                    f"Continuing in per-leg pricing mode (the multi-city"
+                    f" curator failed earlier in this trip). Leg"
+                    f" {current_step + 1} of {num_legs} is shown at"
+                    " standalone prices;"
+                )
             resp["message"] = (
-                f"Google's multi-city pricing was unavailable for leg"
-                f" {current_step + 1} of {num_legs} — common on 4+-leg"
-                " itineraries where the curator restricts to single-carrier"
-                " bundles. Showing per-leg standalone prices instead; the"
-                " combined trip total won't be available, so sum the"
-                " individual leg prices to estimate the trip cost."
+                f"{lead_in} the combined trip total won't be available, so"
+                " sum the individual leg prices to estimate the trip cost."
                 + (
                     f" Pick a flight by index (0-{len(flight_results)-1})"
                     " and call again with selection=<index>."
