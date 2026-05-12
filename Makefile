@@ -17,6 +17,10 @@ install-all:
 mcp:
 	uv run fli-mcp
 
+# Run the MCP server over HTTP
+mcp-http:
+	uv run fli-mcp-http
+
 # Build the docs
 docs:
 	uv run --extra dev mkdocs build
@@ -83,4 +87,4 @@ help:
 	@echo "  make devcontainer - Build dev container image"
 	@echo "  make requirements - Generate the requirements.txt file"
 # Declare the targets as phony
-.PHONY: help install install-dev install-all mcp docs format lint lint-fix test test-mcp test-fuzz test-all ci ci-docker devcontainer requirements
+.PHONY: help install install-dev install-all mcp mcp-http docs format lint lint-fix test test-mcp test-fuzz test-all ci ci-docker devcontainer requirements
