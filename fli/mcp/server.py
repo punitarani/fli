@@ -24,6 +24,7 @@ from fli.core import (
     parse_max_stops,
     parse_sort_by,
     resolve_airport,
+    search_airports,
 )
 from fli.core.parsers import ParseError
 from fli.models import (
@@ -586,6 +587,40 @@ def search_dates(
 def _search_dates_from_params(params: DateSearchParams) -> dict[str, Any]:
     """Entry point for tests that call the tool via a params object."""
     return _execute_date_search(params)
+
+
+@mcp.tool(
+    annotations={
+        "title": "Search Airports",
+        "readOnlyHint": True,
+        "idempotentHint": True,
+    },
+)
+def find_airports(
+    query: Annotated[
+        str,
+        Field(
+            description=(
+                "City name, airport name, or IATA code (e.g., 'new york', 'heathrow', 'JFK')"
+            )
+        ),
+    ],
+    limit: Annotated[int, Field(description="Maximum results to return", ge=1, le=50)] = 10,
+) -> dict[str, Any]:
+    """Search for airports by city name, airport name, or IATA code.
+
+    Use this tool to find airport IATA codes before searching for flights.
+    Supports city names (e.g., "new york" returns JFK, LGA, EWR),
+    airport names (e.g., "heathrow" returns LHR), and IATA codes.
+    """
+    results = search_airports(query, limit=limit)
+
+    return {
+        "query": query,
+        "count": len(results),
+        "airports": [{"code": r.code, "name": r.name, "match_type": r.match_type} for r in results],
+    }
+
 
 
 # =============================================================================
