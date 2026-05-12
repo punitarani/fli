@@ -135,6 +135,41 @@ def test_dates_with_time(runner, mock_search_dates, mock_console):
     mock_search_dates.search.assert_called_once()
 
 
+def test_dates_with_family_passenger_counts(runner, mock_search_dates, mock_console):
+    """Test dates search passes family passenger counts into filters."""
+    mock_search_dates.search.return_value = [
+        DatePrice(
+            date=(datetime.now() + timedelta(days=1),),
+            price=299.99,
+        ),
+    ]
+
+    result = runner.invoke(
+        app,
+        [
+            "dates",
+            "JFK",
+            "LAX",
+            "--passengers",
+            "2",
+            "--children",
+            "2",
+            "--infants-in-seat",
+            "1",
+            "--infants-on-lap",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    mock_search_dates.search.assert_called_once()
+    args, _ = mock_search_dates.search.call_args
+    assert args[0].passenger_info.adults == 2
+    assert args[0].passenger_info.children == 2
+    assert args[0].passenger_info.infants_in_seat == 1
+    assert args[0].passenger_info.infants_on_lap == 1
+
+
 def test_dates_with_sort(runner, mock_search_dates, mock_console):
     """Test dates search with sort option."""
     mock_search_dates.search.return_value = [

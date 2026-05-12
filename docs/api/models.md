@@ -88,6 +88,13 @@ Type of trip for flight search.
 
 Configuration for passenger counts.
 
+Fields:
+
+- `adults`
+- `children`
+- `infants_in_seat`
+- `infants_on_lap`
+
 ::: fli.models.google_flights.PassengerInfo
 
 ### TimeRestrictions

@@ -120,6 +120,9 @@ class FlightSearchParams(BaseModel):
         ge=1,
         description="Number of adult passengers",
     )
+    children: int = Field(0, ge=0, description="Number of children")
+    infants_in_seat: int = Field(0, ge=0, description="Number of infants in seat")
+    infants_on_lap: int = Field(0, ge=0, description="Number of infants on lap")
     exclude_basic_economy: bool = Field(
         False, description="Exclude basic economy fares from results"
     )
@@ -167,6 +170,9 @@ class DateSearchParams(BaseModel):
         ge=1,
         description="Number of adult passengers",
     )
+    children: int = Field(0, ge=0, description="Number of children")
+    infants_in_seat: int = Field(0, ge=0, description="Number of infants in seat")
+    infants_on_lap: int = Field(0, ge=0, description="Number of infants on lap")
 
 
 # =============================================================================
@@ -277,7 +283,12 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
         # Create search filters
         filters = FlightSearchFilters(
             trip_type=trip_type,
-            passenger_info=PassengerInfo(adults=params.passengers),
+            passenger_info=PassengerInfo(
+                adults=params.passengers,
+                children=params.children,
+                infants_in_seat=params.infants_in_seat,
+                infants_on_lap=params.infants_on_lap,
+            ),
             flight_segments=segments,
             stops=max_stops,
             seat_type=cabin_class,
@@ -346,7 +357,12 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
         # Create search filters
         filters = DateSearchFilters(
             trip_type=trip_type,
-            passenger_info=PassengerInfo(adults=params.passengers),
+            passenger_info=PassengerInfo(
+                adults=params.passengers,
+                children=params.children,
+                infants_in_seat=params.infants_in_seat,
+                infants_on_lap=params.infants_on_lap,
+            ),
             flight_segments=segments,
             stops=max_stops,
             seat_type=cabin_class,
@@ -452,6 +468,18 @@ def search_flights(
         int | None,
         Field(description="Number of adult passengers", ge=1),
     ] = None,
+    children: Annotated[
+        int,
+        Field(description="Number of children", ge=0),
+    ] = 0,
+    infants_in_seat: Annotated[
+        int,
+        Field(description="Number of infants in seat", ge=0),
+    ] = 0,
+    infants_on_lap: Annotated[
+        int,
+        Field(description="Number of infants on lap", ge=0),
+    ] = 0,
     exclude_basic_economy: Annotated[
         bool,
         Field(description="Exclude basic economy fares from results"),
@@ -490,6 +518,9 @@ def search_flights(
         max_stops=max_stops,
         sort_by=sort_by,
         passengers=passengers or CONFIG.default_passengers,
+        children=children,
+        infants_in_seat=infants_in_seat,
+        infants_on_lap=infants_on_lap,
         exclude_basic_economy=exclude_basic_economy,
         emissions=emissions,
         checked_bags=checked_bags,
@@ -560,6 +591,18 @@ def search_dates(
         int | None,
         Field(description="Number of adult passengers", ge=1),
     ] = None,
+    children: Annotated[
+        int,
+        Field(description="Number of children", ge=0),
+    ] = 0,
+    infants_in_seat: Annotated[
+        int,
+        Field(description="Number of infants in seat", ge=0),
+    ] = 0,
+    infants_on_lap: Annotated[
+        int,
+        Field(description="Number of infants on lap", ge=0),
+    ] = 0,
 ) -> dict[str, Any]:
     """Find the cheapest travel dates between two airports within a date range.
 
@@ -580,6 +623,9 @@ def search_dates(
         departure_window=effective_departure_window,
         sort_by_price=sort_by_price,
         passengers=passengers or CONFIG.default_passengers,
+        children=children,
+        infants_in_seat=infants_in_seat,
+        infants_on_lap=infants_on_lap,
     )
     return _execute_date_search(params)
 
