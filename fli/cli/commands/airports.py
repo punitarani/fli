@@ -37,7 +37,9 @@ def airports(
     if json_output:
         import json
 
-        output = [{"code": r.code, "name": r.name, "match_type": r.match_type} for r in results]
+        output = [
+            {"code": r.code.name, "name": r.name, "match_type": r.match_type} for r in results
+        ]
         console.print(json.dumps(output, indent=2))
     else:
         table = Table(title=f"Airports matching '{query}'")
@@ -46,6 +48,6 @@ def airports(
         table.add_column("Match", style="dim")
 
         for result in results:
-            table.add_row(result.code, result.name, result.match_type)
+            table.add_row(result.code.name, result.name, result.match_type)
 
         console.print(table)
