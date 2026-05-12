@@ -51,9 +51,9 @@ jobs:
 
           assert railway["build"]["builder"] == "NIXPACKS"
           assert "nixpacksPlan" not in railway["build"]
-          assert railway["deploy"]["startCommand"] == "uv run fli-mcp-http"
+          assert railway["deploy"]["startCommand"] == "fli-mcp-http"
           assert nixpacks["variables"]["NIXPACKS_UV_VERSION"]
-          assert nixpacks["start"]["cmd"] == "uv run fli-mcp-http"
+          assert nixpacks["start"]["cmd"] == "fli-mcp-http"
           PY
 
       - name: Generate Nixpacks plan
