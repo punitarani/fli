@@ -41,7 +41,16 @@ def cli():
         args.append("--help")
 
     # If the first argument isn't a command, treat as flights search
-    if args[0] not in ["airports", "dates", "flights", "multi", "--help", "-h"]:
+    if args[0] not in [
+        "airports",
+        "dates",
+        "flights",
+        "multi",
+        "--help",
+        "-h",
+        "--show-completion",
+        "--install-completion",
+    ]:
         sys.argv.insert(1, "flights")
 
     app()
