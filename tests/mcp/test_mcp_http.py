@@ -14,7 +14,7 @@ from fastmcp import Client
 
 from fli.mcp.server import mcp
 
-EXPECTED_TOOLS = {"search_flights", "search_dates"}
+EXPECTED_TOOLS = {"search_flights", "search_dates", "find_airports"}
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +62,7 @@ class TestMCPInProcess:
 
     @pytest.mark.asyncio
     async def test_list_tools_returns_expected_names(self):
-        """list_tools() must return search_flights and search_dates."""
+        """list_tools() must return the expected MCP tools."""
         client = Client(mcp)
         async with client:
             tools = await client.list_tools()
