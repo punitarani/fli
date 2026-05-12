@@ -40,7 +40,10 @@ def airports(
         output = [
             {"code": r.code.name, "name": r.name, "match_type": r.match_type} for r in results
         ]
-        console.print(json.dumps(output, indent=2))
+        # Plain print() bypasses Rich's markup parsing — JSON's `[` would
+        # otherwise be interpreted as a style tag in non-TTY environments
+        # (e.g. CI, pipes), suppressing output.
+        print(json.dumps(output, indent=2))
     else:
         table = Table(title=f"Airports matching '{query}'")
         table.add_column("Code", style="bold cyan", width=6)
