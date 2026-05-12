@@ -863,7 +863,7 @@ class Airline(Enum):
     ZD = "Ewa Air"
     ZE = "Eastar Jet"
     ZF = "Azur Air"
-    ZG = "Groznyy Avia"
+    ZG = "Zipair"
     ZH = "Shenzhen Airlines"
     ZI = "Aigle Azur"
     ZJ = "Zambezi Airlines"
@@ -1108,3 +1108,8 @@ class Airline(Enum):
     _9W = "Jet Airways"
     _9X = "Southern Airways Express"
     _9Y = "National Airways"
+
+    # Airline alliances (used as filter values in Google Flights)
+    ONEWORLD = "Oneworld"
+    SKYTEAM = "SkyTeam"
+    STAR_ALLIANCE = "Star Alliance"

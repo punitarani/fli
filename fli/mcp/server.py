@@ -7,23 +7,10 @@ travel dates.
 
 import json
 import os
-from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
 
 from fastmcp import FastMCP
-from fastmcp.tools import Tool as FastMCPTool
-from mcp.types import (
-    GetPromptResult,
-    ListPromptsResult,
-    Prompt,
-    PromptArgument,
-    PromptMessage,
-    TextContent,
-    Tool,
-    ToolAnnotations,
-)
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -33,12 +20,14 @@ from fli.core import (
     build_time_restrictions,
     parse_airlines,
     parse_cabin_class,
+    parse_emissions,
     parse_max_stops,
     parse_sort_by,
     resolve_airport,
 )
 from fli.core.parsers import ParseError
 from fli.models import (
+    BagsFilter,
     DateSearchFilters,
     FlightSearchFilters,
     PassengerInfo,
@@ -86,122 +75,7 @@ CONFIG = FlightSearchConfig()
 CONFIG_SCHEMA = FlightSearchConfig.model_json_schema()
 
 
-@dataclass
-class PromptSpec:
-    """Container for prompt metadata and builder."""
-
-    description: str
-    build_messages: Callable[[dict[str, str]], list[PromptMessage]]
-    arguments: list[PromptArgument] | None = None
-
-
-class FliMCP(FastMCP):
-    """Extended FastMCP server with prompt and annotation support."""
-
-    def __init__(self, name: str | None = None, **settings: Any):
-        """Initialize the MCP server with metadata tracking for tools and prompts."""
-        self._tool_annotations: dict[str, ToolAnnotations] = {}
-        self._prompts: dict[str, PromptSpec] = {}
-        super().__init__(name=name, **settings)
-
-    def _setup_handlers(self) -> None:
-        """Register MCP protocol handlers including prompts."""
-        super()._setup_handlers()
-        self._mcp_server.list_tools()(self.list_tools)
-        self._mcp_server.list_prompts()(self.list_prompts)
-        self._mcp_server.get_prompt()(self.get_prompt)
-
-    def add_tool(
-        self,
-        func: Callable,
-        name: str | None = None,
-        description: str | None = None,
-        annotations: dict[str, Any] | ToolAnnotations | None = None,
-    ) -> None:
-        """Register a tool with optional annotations."""
-        tool = FastMCPTool.from_function(fn=func, name=name, description=description)
-        self._tool_manager.add_tool(tool)
-        tool_name = name or func.__name__
-        if annotations:
-            self._tool_annotations[tool_name] = (
-                annotations
-                if isinstance(annotations, ToolAnnotations)
-                else ToolAnnotations(**annotations)
-            )
-
-    def tool(
-        self,
-        name: str | None = None,
-        description: str | None = None,
-        annotations: dict[str, Any] | ToolAnnotations | None = None,
-    ) -> Callable:
-        """Register a tool with optional annotations."""
-        if callable(name):
-            raise TypeError(
-                "The @tool decorator was used incorrectly. "
-                "Did you forget to call it? Use @tool() instead of @tool"
-            )
-
-        def decorator(func: Callable) -> Callable:
-            self.add_tool(func, name=name, description=description, annotations=annotations)
-            return func
-
-        return decorator
-
-    async def list_tools(self) -> list[Tool]:
-        """List all available tools with annotations."""
-        tools = list((await self._tool_manager.get_tools()).values())
-        return [
-            Tool(
-                name=info.name,
-                description=info.description,
-                inputSchema=info.parameters,
-                annotations=self._tool_annotations.get(info.name),
-            )
-            for info in tools
-        ]
-
-    def add_prompt(
-        self,
-        name: str,
-        description: str,
-        *,
-        arguments: list[PromptArgument] | None = None,
-        build_messages: Callable[[dict[str, str]], list[PromptMessage]],
-    ) -> None:
-        """Register a prompt template that can be listed and fetched."""
-        self._prompts[name] = PromptSpec(
-            description=description,
-            arguments=arguments,
-            build_messages=build_messages,
-        )
-
-    async def list_prompts(self) -> ListPromptsResult:
-        """Return all registered prompts."""
-        prompts = [
-            Prompt(
-                name=name,
-                description=spec.description,
-                arguments=spec.arguments,
-            )
-            for name, spec in self._prompts.items()
-        ]
-        return ListPromptsResult(prompts=prompts)
-
-    async def get_prompt(
-        self,
-        name: str,
-        arguments: dict[str, str] | None = None,
-    ) -> GetPromptResult:
-        """Generate prompt content by name."""
-        spec = self._prompts.get(name)
-        if not spec:
-            raise ValueError(f"Unknown prompt: {name}")
-        messages = spec.build_messages(arguments or {})
-        return GetPromptResult(description=spec.description, messages=messages)
-
-
-mcp = FliMCP("Flight Search MCP Server")
+mcp = FastMCP("Flight Search MCP Server")
 
 
 # =============================================================================
@@ -242,6 +116,14 @@ class FlightSearchParams(BaseModel):
     )
     exclude_basic_economy: bool = Field(
         False, description="Exclude basic economy fares from results"
+    )
+    emissions: str = Field("ALL", description="Filter by emissions level: ALL or LESS")
+    checked_bags: int = Field(
+        0, ge=0, le=2, description="Number of checked bags to include in price (0, 1, or 2)"
+    )
+    carry_on: bool = Field(False, description="Include carry-on bag fee in displayed price")
+    show_all_results: bool = Field(
+        True, description="Return all available results instead of curated ~30"
     )
 
 
@@ -297,11 +179,20 @@ def _serialize_flight_leg(leg: Any) -> dict[str, Any]:
 
 
 def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[str, Any]:
-    """Serialize a flight result (or round-trip pair) to a dictionary."""
-    if is_round_trip and isinstance(flight, tuple):
-        outbound, return_flight = flight
+    """Serialize a flight result (or round-trip/multi-city tuple) to a dictionary."""
+    if not isinstance(flight, tuple):
         return {
-            # Google Flights returns the full round-trip price on the outbound leg
+            "price": flight.price,
+            "currency": flight.currency or CONFIG.default_currency,
+            "legs": [_serialize_flight_leg(leg) for leg in flight.legs],
+        }
+
+    segments = list(flight)
+
+    if len(segments) == 2 and is_round_trip:
+        # Google Flights returns the full round-trip price on the outbound leg
+        outbound, return_flight = segments
+        return {
             "price": outbound.price,
             "currency": outbound.currency or CONFIG.default_currency,
             "legs": [
@@ -309,12 +200,15 @@ def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[s
                 *[_serialize_flight_leg(leg) for leg in return_flight.legs],
             ],
         }
-    else:
-        return {
-            "price": flight.price,
-            "currency": flight.currency or CONFIG.default_currency,
-            "legs": [_serialize_flight_leg(leg) for leg in flight.legs],
-        }
+
+    # Multi-city (3+ legs) or 2-leg non-round-trip: combined price on the
+    # final leg (matches Google Flights pricing and the CLI display logic).
+    price_segment = segments[-1] if len(segments) > 2 else segments[0]
+    return {
+        "price": price_segment.price,
+        "currency": price_segment.currency or CONFIG.default_currency,
+        "legs": [_serialize_flight_leg(leg) for segment in segments for leg in segment.legs],
+    }
 
 
 def _serialize_date_result(date_result: Any) -> dict[str, Any]:
@@ -356,6 +250,12 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
             time_restrictions=time_restrictions,
         )
 
+        # Parse new filters
+        emissions_filter = parse_emissions(params.emissions)
+        bags_filter = None
+        if params.checked_bags > 0 or params.carry_on:
+            bags_filter = BagsFilter(checked_bags=params.checked_bags, carry_on=params.carry_on)
+
         # Create search filters
         filters = FlightSearchFilters(
             trip_type=trip_type,
@@ -366,6 +266,9 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
             airlines=airlines,
             sort_by=sort_by,
             exclude_basic_economy=params.exclude_basic_economy,
+            emissions=emissions_filter,
+            bags=bags_filter,
+            show_all_results=params.show_all_results,
         )
 
         # Perform search
@@ -510,7 +413,10 @@ def search_flights(
     ] = "ANY",
     sort_by: Annotated[
         str,
-        Field(description="Sort by: CHEAPEST, DURATION, DEPARTURE_TIME, ARRIVAL_TIME"),
+        Field(
+            description="Sort by: TOP_FLIGHTS, BEST, CHEAPEST,"
+            " DEPARTURE_TIME, ARRIVAL_TIME, DURATION, EMISSIONS"
+        ),
     ] = CONFIG.default_sort_by,
     passengers: Annotated[
         int | None,
@@ -520,6 +426,22 @@ def search_flights(
         bool,
         Field(description="Exclude basic economy fares from results"),
     ] = False,
+    emissions: Annotated[
+        str,
+        Field(description="Filter by emissions level: ALL or LESS"),
+    ] = "ALL",
+    checked_bags: Annotated[
+        int,
+        Field(description="Number of checked bags to include in price (0, 1, or 2)", ge=0, le=2),
+    ] = 0,
+    carry_on: Annotated[
+        bool,
+        Field(description="Include carry-on bag fee in displayed price"),
+    ] = False,
+    show_all_results: Annotated[
+        bool,
+        Field(description="Return all available results instead of curated ~30"),
+    ] = True,
 ) -> dict[str, Any]:
     """Search for flights between two airports on a specific date.
 
@@ -539,16 +461,17 @@ def search_flights(
         sort_by=sort_by,
         passengers=passengers or CONFIG.default_passengers,
         exclude_basic_economy=exclude_basic_economy,
+        emissions=emissions,
+        checked_bags=checked_bags,
+        carry_on=carry_on,
+        show_all_results=show_all_results,
     )
     return _execute_flight_search(params)
 
 
 def _search_flights_from_params(params: FlightSearchParams) -> dict[str, Any]:
-    """Compatibility wrapper for tests expecting the params-based signature."""
+    """Entry point for tests that call the tool via a params object."""
     return _execute_flight_search(params)
-
-
-search_flights.fn = _search_flights_from_params  # type: ignore[attr-defined]
 
 
 @mcp.tool(
@@ -620,11 +543,8 @@ def search_dates(
 
 
 def _search_dates_from_params(params: DateSearchParams) -> dict[str, Any]:
-    """Compatibility wrapper for tests expecting the params-based signature."""
+    """Entry point for tests that call the tool via a params object."""
     return _execute_date_search(params)
-
-
-search_dates.fn = _search_dates_from_params  # type: ignore[attr-defined]
 
 
 # =============================================================================
@@ -632,103 +552,49 @@ search_dates.fn = _search_dates_from_params  # type: ignore[attr-defined]
 # =============================================================================
 
 
-def _build_search_prompt(args: dict[str, str]) -> list[PromptMessage]:
-    """Create a helper prompt to guide flight searches."""
-    origin = args.get("origin", "JFK").upper()
-    destination = args.get("destination", "LHR").upper()
-    date = args.get("date") or datetime.now(timezone.utc).date().isoformat()
-    prefer_non_stop = args.get("prefer_non_stop", "true").lower()
-    max_stops_hint = "NON_STOP" if prefer_non_stop in {"true", "1", "yes"} else "ANY"
-    text = (
-        "Use the `search_flights` tool to look for flights from "
-        f"{origin} to {destination} departing on {date}. "
-        f"Set `max_stops` to '{max_stops_hint}' and highlight the three most affordable options."
-    )
-    return [
-        PromptMessage(role="user", content=TextContent(type="text", text=text)),
-    ]
-
-
-def _build_budget_prompt(args: dict[str, str]) -> list[PromptMessage]:
-    """Create a helper prompt to guide flexible date searches."""
-    origin = args.get("origin", "SFO").upper()
-    destination = args.get("destination", "NRT").upper()
-    today = datetime.now(timezone.utc).date()
-    start_date = args.get("start_date") or (today + timedelta(days=30)).isoformat()
-    end_date = args.get("end_date") or (today + timedelta(days=90)).isoformat()
-    duration = args.get("duration", "7")
-    text = (
-        "Use the `search_dates` tool to find the lowest fares between "
-        f"{origin} and {destination} for trips between {start_date} and {end_date}. "
-        f"Set trip_duration to {duration} days and sort the results by price."
-    )
-    return [
-        PromptMessage(role="user", content=TextContent(type="text", text=text)),
-    ]
-
-
-mcp.add_prompt(
+@mcp.prompt(
     name="search-direct-flight",
     description=(
         "Generate a tool call to find direct flights between two airports on a target date."
     ),
-    arguments=[
-        PromptArgument(
-            name="origin",
-            description="Departure airport IATA code",
-            required=True,
-        ),
-        PromptArgument(
-            name="destination",
-            description="Arrival airport IATA code",
-            required=True,
-        ),
-        PromptArgument(
-            name="date",
-            description="Departure date (YYYY-MM-DD)",
-            required=False,
-        ),
-        PromptArgument(
-            name="prefer_non_stop",
-            description="Set to true to prefer nonstop itineraries",
-            required=False,
-        ),
-    ],
-    build_messages=_build_search_prompt,
 )
+def search_direct_flight_prompt(
+    origin: str,
+    destination: str,
+    date: str | None = None,
+    prefer_non_stop: bool = True,
+) -> str:
+    """Create a helper prompt to guide flight searches."""
+    travel_date = date or datetime.now(timezone.utc).date().isoformat()
+    max_stops_hint = "NON_STOP" if prefer_non_stop else "ANY"
+    return (
+        "Use the `search_flights` tool to look for flights from "
+        f"{origin.upper()} to {destination.upper()} departing on {travel_date}. "
+        f"Set `max_stops` to '{max_stops_hint}' and highlight the three most affordable options."
+    )
 
-mcp.add_prompt(
+
+@mcp.prompt(
     name="find-budget-window",
-    description=("Suggest the cheapest travel dates for a route within a flexible window."),
-    arguments=[
-        PromptArgument(
-            name="origin",
-            description="Departure airport IATA code",
-            required=True,
-        ),
-        PromptArgument(
-            name="destination",
-            description="Arrival airport IATA code",
-            required=True,
-        ),
-        PromptArgument(
-            name="start_date",
-            description="Start of the travel window (YYYY-MM-DD)",
-            required=False,
-        ),
-        PromptArgument(
-            name="end_date",
-            description="End of the travel window (YYYY-MM-DD)",
-            required=False,
-        ),
-        PromptArgument(
-            name="duration",
-            description="Desired trip length in days",
-            required=False,
-        ),
-    ],
-    build_messages=_build_budget_prompt,
+    description="Suggest the cheapest travel dates for a route within a flexible window.",
 )
+def find_budget_window_prompt(
+    origin: str,
+    destination: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    duration: int = 7,
+) -> str:
+    """Create a helper prompt to guide flexible date searches."""
+    today = datetime.now(timezone.utc).date()
+    travel_start = start_date or (today + timedelta(days=30)).isoformat()
+    travel_end = end_date or (today + timedelta(days=90)).isoformat()
+    return (
+        "Use the `search_dates` tool to find the lowest fares between "
+        f"{origin.upper()} and {destination.upper()} for trips between "
+        f"{travel_start} and {travel_end}. "
+        f"Set trip_duration to {duration} days and sort the results by price."
+    )
 
 
 # =============================================================================

@@ -1,0 +1,10 @@
+[variables]
+NIXPACKS_PYTHON_VERSION = "3.12"
+NIXPACKS_PYTHON_PACKAGE_MANAGER = "uv"
+NIXPACKS_UV_VERSION = "0.11.3"
+
+[phases.install]
+cmds = ["python -m venv --copies /opt/venv && . /opt/venv/bin/activate && pip install uv==$NIXPACKS_UV_VERSION && uv sync --active --no-dev --frozen --extra mcp"]
+
+[start]
+cmd = "uv run fli-mcp-http"

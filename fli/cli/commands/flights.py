@@ -13,18 +13,22 @@ from fli.cli.utils import (
     normalize_cli_date,
     normalize_cli_time_range,
     serialize_flight_result,
+    validate_currency,
 )
 from fli.core import (
     build_flight_segments,
     parse_airlines,
     parse_cabin_class,
+    parse_emissions,
     parse_max_stops,
     parse_sort_by,
     resolve_airport,
 )
 from fli.core.parsers import ParseError
 from fli.models import (
+    BagsFilter,
     FlightSearchFilters,
+    LayoverRestrictions,
     PassengerInfo,
 )
 from fli.search import SearchFlights
@@ -41,7 +45,13 @@ def _search_flights_core(
     max_stops: str = "ANY",
     sort_by: str = "CHEAPEST",
     exclude_basic_economy: bool = False,
+    layover: list[str] | None = None,
+    emissions: str = "ALL",
+    checked_bags: int = 0,
+    carry_on: bool = False,
+    all_results: bool = True,
     output_format: OutputFormat = OutputFormat.TEXT,
+    currency: str = "USD",
 ) -> None:
     """Core flight search functionality."""
     query: dict[str, Any] = {
@@ -73,6 +83,7 @@ def _search_flights_core(
         stops = parse_max_stops(max_stops)
         parsed_airlines = parse_airlines(airlines)
         sort = parse_sort_by(sort_by)
+        emissions_filter = parse_emissions(emissions)
 
         # Build time restrictions from tuple
         time_restrictions = None
@@ -93,6 +104,17 @@ def _search_flights_core(
             time_restrictions=time_restrictions,
         )
 
+        # Parse layover airports
+        layover_restrictions = None
+        if layover:
+            layover_airports = [resolve_airport(code) for code in layover]
+            layover_restrictions = LayoverRestrictions(airports=layover_airports)
+
+        # Build bags filter
+        bags_filter = None
+        if checked_bags > 0 or carry_on:
+            bags_filter = BagsFilter(checked_bags=checked_bags, carry_on=carry_on)
+
         # Create search filters
         filters = FlightSearchFilters(
             trip_type=trip_type,
@@ -103,6 +125,10 @@ def _search_flights_core(
             airlines=parsed_airlines,
             sort_by=sort,
             exclude_basic_economy=exclude_basic_economy,
+            layover_restrictions=layover_restrictions,
+            emissions=emissions_filter,
+            bags=bags_filter,
+            show_all_results=all_results,
         )
 
         # Perform search
@@ -132,12 +158,15 @@ def _search_flights_core(
                     trip_type=trip_type,
                     query=query,
                     results_key="flights",
-                    results=[serialize_flight_result(result) for result in results],
+                    results=[
+                        serialize_flight_result(result, default_currency=currency)
+                        for result in results
+                    ],
                 )
             )
             return
 
-        display_flight_results(results)
+        display_flight_results(results, default_currency=currency)
 
     except ParseError as e:
         if output_format == OutputFormat.JSON:
@@ -217,7 +246,8 @@ def flights(
         typer.Option(
             "--sort",
             "-o",
-            help="Sort results by (CHEAPEST, DURATION, DEPARTURE_TIME, ARRIVAL_TIME)",
+            help="Sort by: TOP_FLIGHTS, BEST, CHEAPEST, DEPARTURE_TIME,"
+            " ARRIVAL_TIME, DURATION, EMISSIONS",
         ),
     ] = "CHEAPEST",
     exclude_basic_economy: Annotated[
@@ -228,6 +258,45 @@ def flights(
             help="Exclude basic economy fares",
         ),
     ] = False,
+    layover: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--layover",
+            "-l",
+            help="Restrict layover to these airports (e.g., -l ORD -l MDW)",
+        ),
+    ] = None,
+    emissions: Annotated[
+        str,
+        typer.Option(
+            "--emissions",
+            help="Filter by emissions level (ALL, LESS)",
+        ),
+    ] = "ALL",
+    checked_bags: Annotated[
+        int,
+        typer.Option(
+            "--bags",
+            "-b",
+            help="Number of checked bags to include in price (0, 1, or 2)",
+            min=0,
+            max=2,
+        ),
+    ] = 0,
+    carry_on: Annotated[
+        bool,
+        typer.Option(
+            "--carry-on",
+            help="Include carry-on bag fee in price",
+        ),
+    ] = False,
+    all_results: Annotated[
+        bool,
+        typer.Option(
+            "--all/--no-all",
+            help="Show all available results (default) or only ~30 curated results",
+        ),
+    ] = True,
     output_format: Annotated[
         OutputFormat,
         typer.Option(
@@ -236,6 +305,14 @@ def flights(
             case_sensitive=False,
         ),
     ] = OutputFormat.TEXT,
+    currency: Annotated[
+        str,
+        typer.Option(
+            "--currency",
+            callback=validate_currency,
+            help="Fallback currency code when not returned by Google (e.g., CAD, EUR).",
+        ),
+    ] = "USD",
 ):
     """Search for flights on a specific date.
 
@@ -243,6 +320,9 @@ def flights(
         fli flights JFK LHR 2025-10-25 --time 6-20 --airlines BA KL --stops NON_STOP
         fli flights JFK LHR 2025-10-25 --format json
         fli flights JFK LHR 2025-10-25 --exclude-basic
+        fli flights JFK LAX 2025-10-25 --bags 1 --carry-on
+        fli flights JFK LAX 2025-10-25 --emissions LESS
+        fli flights JFK LAX 2025-10-25 --all
 
     """
     _search_flights_core(
@@ -256,5 +336,11 @@ def flights(
         max_stops=max_stops,
         sort_by=sort_by,
         exclude_basic_economy=exclude_basic_economy,
+        layover=layover,
+        emissions=emissions,
+        checked_bags=checked_bags,
+        carry_on=carry_on,
+        all_results=all_results,
         output_format=output_format,
+        currency=currency,
     )
