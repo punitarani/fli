@@ -4,10 +4,13 @@ This module provides parsing functions used by both the CLI and MCP interfaces
 to convert user input into domain model objects.
 """
 
+import re
 from enum import Enum
 from typing import TypeVar
 
 from fli.models import Airline, Airport, EmissionsFilter, MaxStops, SeatType, SortBy
+
+_AIRLINE_SEPARATORS = re.compile(r"[,\s]+")
 
 T = TypeVar("T", bound=Enum)
 
@@ -63,24 +66,38 @@ def resolve_airport(code: str) -> Airport:
 def parse_airlines(codes: list[str] | None) -> list[Airline] | None:
     """Parse a list of airline codes into Airline enums.
 
+    Each item may itself contain multiple codes separated by commas or whitespace,
+    so callers can pass either ``["BA", "KL"]`` (one code per item) or
+    ``["BA,KL"]`` / ``["BA KL"]`` (combined). This lets the CLI accept the
+    documented ``--airlines BA,KL`` and ``--airlines "BA KL"`` forms in addition
+    to the repeated-flag form Typer collects natively.
+
     Args:
-        codes: List of IATA airline codes (e.g., ['BA', 'KL'])
+        codes: List of IATA airline codes; entries may be combined with commas or
+            whitespace (e.g., ['BA', 'KL'] or ['BA,KL'] or ['BA KL']).
 
     Returns:
-        List of Airline enums, or None if input is empty
+        List of Airline enums, or None if ``codes`` is None or an empty list.
 
     Raises:
-        ParseError: If any code is not a valid airline
+        ParseError: If any code is not a valid airline, or if ``codes`` was
+            non-empty but contained no parsable codes (e.g., [","]).
 
     """
     if not codes:
         return None
 
+    expanded = [
+        token.strip().upper()
+        for item in codes
+        for token in _AIRLINE_SEPARATORS.split(item)
+        if token.strip()
+    ]
+    if not expanded:
+        raise ParseError(f"No valid airline codes found in: {codes!r}")
+
     airlines = []
-    for code in codes:
-        code = code.strip().upper()
-        if not code:
-            continue
+    for code in expanded:
         # Airline codes starting with a digit need an underscore prefix
         # to match the Airline enum member names (e.g., "3F" -> "_3F")
         enum_key = f"_{code}" if code[0].isdigit() else code
@@ -90,7 +107,7 @@ def parse_airlines(codes: list[str] | None) -> list[Airline] | None:
         except AttributeError as e:
             raise ParseError(f"Invalid airline code: '{code}'") from e
 
-    return airlines if airlines else None
+    return airlines
 
 
 def parse_max_stops(stops: str) -> MaxStops:

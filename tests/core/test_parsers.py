@@ -49,6 +49,78 @@ class TestParseAirlinesWithAlliances:
         assert Airline.AA in result
 
 
+class TestParseAirlinesSplitting:
+    """Tests for parse_airlines accepting comma- and whitespace-separated codes per item.
+
+    Motivated by the documented `--airlines BA,KL` (single token) and
+    `--airlines "BA KL"` (quoted) CLI forms, plus the same tolerance now extended
+    to MCP callers passing combined strings.
+    """
+
+    def test_comma_separated_in_one_item(self):
+        result = parse_airlines(["BA,KL"])
+        assert result == [Airline.BA, Airline.KL]
+
+    def test_space_separated_in_one_item(self):
+        result = parse_airlines(["BA KL"])
+        assert result == [Airline.BA, Airline.KL]
+
+    def test_tab_separator(self):
+        result = parse_airlines(["BA\tKL"])
+        assert result == [Airline.BA, Airline.KL]
+
+    def test_collapses_consecutive_separators(self):
+        result = parse_airlines(["BA,,KL", "AA  UA"])
+        assert result == [Airline.BA, Airline.KL, Airline.AA, Airline.UA]
+
+    def test_strips_leading_and_trailing_separators(self):
+        result = parse_airlines([",BA,", " KL "])
+        assert result == [Airline.BA, Airline.KL]
+
+    def test_mixed_forms(self):
+        result = parse_airlines(["BA,KL", "LH"])
+        assert result == [Airline.BA, Airline.KL, Airline.LH]
+
+    def test_repeated_items_still_work(self):
+        # Backwards compat: `--airlines BA --airlines KL` arrives as ["BA", "KL"].
+        result = parse_airlines(["BA", "KL"])
+        assert result == [Airline.BA, Airline.KL]
+
+    def test_lowercase_in_split_is_uppercased(self):
+        result = parse_airlines(["ba,kl"])
+        assert result == [Airline.BA, Airline.KL]
+
+    def test_numeric_prefix_in_split(self):
+        result = parse_airlines(["BA,3F"])
+        assert result == [Airline.BA, Airline._3F]
+
+    def test_invalid_code_in_split_propagates(self):
+        with pytest.raises(ParseError, match="Invalid airline code: 'XXX'"):
+            parse_airlines(["BA,XXX"])
+
+    def test_raises_when_only_commas(self):
+        with pytest.raises(ParseError, match="No valid airline codes"):
+            parse_airlines([","])
+
+    def test_raises_when_only_whitespace(self):
+        with pytest.raises(ParseError, match="No valid airline codes"):
+            parse_airlines([" "])
+
+    def test_raises_when_only_empty_string(self):
+        with pytest.raises(ParseError, match="No valid airline codes"):
+            parse_airlines([""])
+
+    def test_raises_when_only_separators_across_items(self):
+        with pytest.raises(ParseError, match="No valid airline codes"):
+            parse_airlines(["", " ", ","])
+
+    def test_none_input_still_returns_none(self):
+        assert parse_airlines(None) is None
+
+    def test_empty_list_still_returns_none(self):
+        assert parse_airlines([]) is None
+
+
 class TestParseSortBy:
     """Tests for parse_sort_by with updated enum values."""
 

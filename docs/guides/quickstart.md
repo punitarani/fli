@@ -37,7 +37,7 @@ fli flights JFK LHR 2026-06-01 --return 2026-06-15
 ```bash
 fli flights JFK LHR 2026-06-01 \
     --time 6-20 \             # Departure window (6 AM - 8 PM)
-    --airlines BA KL \        # Airlines (British Airways, KLM)
+    --airlines BA,KL \        # Airlines (British Airways, KLM)
     --class BUSINESS \        # Cabin class
     --stops NON_STOP          # Non-stop flights only
 ```

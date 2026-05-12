@@ -1,6 +1,5 @@
 """Flight search CLI command."""
 
-import re
 from typing import Annotated, Any
 
 import typer
@@ -55,14 +54,6 @@ def _search_flights_core(
     currency: str = "USD",
 ) -> None:
     """Core flight search functionality."""
-    # Normalize airlines: split each element on commas/spaces to support "BA,KL" in a single flag
-    if airlines:
-        airlines = [
-            code.strip().upper()
-            for item in airlines
-            for code in re.split(r"[,\s]+", item)
-            if code.strip()
-        ]
     query: dict[str, Any] = {
         "origin": origin.upper(),
         "destination": destination.upper(),
@@ -326,12 +317,12 @@ def flights(
     """Search for flights on a specific date.
 
     Example:
-        fli flights JFK LHR 2025-10-25 --time 6-20 --airlines BA KL --stops NON_STOP
-        fli flights JFK LHR 2025-10-25 --format json
-        fli flights JFK LHR 2025-10-25 --exclude-basic
-        fli flights JFK LAX 2025-10-25 --bags 1 --carry-on
-        fli flights JFK LAX 2025-10-25 --emissions LESS
-        fli flights JFK LAX 2025-10-25 --all
+        fli flights JFK LHR 2026-10-25 --time 6-20 --airlines BA,KL --stops NON_STOP
+        fli flights JFK LHR 2026-10-25 --format json
+        fli flights JFK LHR 2026-10-25 --exclude-basic
+        fli flights JFK LAX 2026-10-25 --bags 1 --carry-on
+        fli flights JFK LAX 2026-10-25 --emissions LESS
+        fli flights JFK LAX 2026-10-25 --all
 
     """
     _search_flights_core(
