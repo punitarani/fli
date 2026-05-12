@@ -24,9 +24,11 @@ from fli.core import (
     parse_max_stops,
     parse_sort_by,
     resolve_airport,
+    search_airports,
 )
 from fli.core.parsers import ParseError
 from fli.models import (
+    Airport,
     BagsFilter,
     DateSearchFilters,
     FlightSearchFilters,
@@ -86,8 +88,12 @@ mcp = FastMCP("Flight Search MCP Server")
 class FlightSearchParams(BaseModel):
     """Parameters for searching flights on a specific date."""
 
-    origin: str = Field(description="Departure airport IATA code (e.g., 'JFK', 'LAX')")
-    destination: str = Field(description="Arrival airport IATA code (e.g., 'LHR', 'NRT')")
+    origin: str = Field(
+        description="Departure airport IATA code(s), comma-separated for multiple (e.g., 'JFK,LGA')"
+    )
+    destination: str = Field(
+        description="Arrival airport IATA code(s), comma-separated for multiple (e.g., 'LHR,CDG')"
+    )
     departure_date: str = Field(description="Outbound travel date in YYYY-MM-DD format")
     return_date: str | None = Field(
         None, description="Return date in YYYY-MM-DD format (omit for one-way)"
@@ -130,8 +136,12 @@ class FlightSearchParams(BaseModel):
 class DateSearchParams(BaseModel):
     """Parameters for finding the cheapest travel dates within a range."""
 
-    origin: str = Field(description="Departure airport IATA code (e.g., 'JFK', 'LAX')")
-    destination: str = Field(description="Arrival airport IATA code (e.g., 'LHR', 'NRT')")
+    origin: str = Field(
+        description="Departure airport IATA code(s), comma-separated for multiple (e.g., 'JFK,LGA')"
+    )
+    destination: str = Field(
+        description="Arrival airport IATA code(s), comma-separated for multiple (e.g., 'LHR,CDG')"
+    )
     start_date: str = Field(description="Start of date range in YYYY-MM-DD format")
     end_date: str = Field(description="End of date range in YYYY-MM-DD format")
     trip_duration: int = Field(
@@ -226,12 +236,20 @@ def _serialize_date_result(date_result: Any) -> dict[str, Any]:
 # =============================================================================
 
 
+def _resolve_airports(codes: str) -> list[Airport]:
+    """Resolve one or more comma-separated airport codes."""
+    airports = [resolve_airport(code.strip()) for code in codes.split(",") if code.strip()]
+    if not airports:
+        raise ParseError(f"No valid airport codes found in: '{codes}'")
+    return airports
+
+
 def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
     """Execute a flight search and return formatted results."""
     try:
-        # Parse inputs using shared utilities
-        origin = resolve_airport(params.origin)
-        destination = resolve_airport(params.destination)
+        # Parse inputs using shared utilities (supports comma-separated multi-airport)
+        origins = _resolve_airports(params.origin)
+        destinations = _resolve_airports(params.destination)
         cabin_class = parse_cabin_class(params.cabin_class)
         max_stops = parse_max_stops(params.max_stops)
         sort_by = parse_sort_by(params.sort_by)
@@ -241,10 +259,10 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
         departure_window = params.departure_window or CONFIG.default_departure_window
         time_restrictions = build_time_restrictions(departure_window) if departure_window else None
 
-        # Build flight segments
+        # Build flight segments (pass full lists for multi-airport support)
         segments, trip_type = build_flight_segments(
-            origin=origin,
-            destination=destination,
+            origin=origins,
+            destination=destinations,
             departure_date=params.departure_date,
             return_date=params.return_date,
             time_restrictions=time_restrictions,
@@ -304,9 +322,9 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
 def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
     """Execute a date search and return formatted results."""
     try:
-        # Parse inputs using shared utilities
-        origin = resolve_airport(params.origin)
-        destination = resolve_airport(params.destination)
+        # Parse inputs using shared utilities (supports comma-separated multi-airport)
+        origins = _resolve_airports(params.origin)
+        destinations = _resolve_airports(params.destination)
         cabin_class = parse_cabin_class(params.cabin_class)
         max_stops = parse_max_stops(params.max_stops)
         airlines = parse_airlines(params.airlines)
@@ -315,10 +333,10 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
         departure_window = params.departure_window or CONFIG.default_departure_window
         time_restrictions = build_time_restrictions(departure_window) if departure_window else None
 
-        # Build flight segments
+        # Build flight segments (pass full lists for multi-airport support)
         segments, trip_type = build_date_search_segments(
-            origin=origin,
-            destination=destination,
+            origin=origins,
+            destination=destinations,
             start_date=params.start_date,
             trip_duration=params.trip_duration,
             is_round_trip=params.is_round_trip,
@@ -388,8 +406,20 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
     },
 )
 def search_flights(
-    origin: Annotated[str, Field(description="Departure airport IATA code (e.g., 'JFK')")],
-    destination: Annotated[str, Field(description="Arrival airport IATA code (e.g., 'LHR')")],
+    origin: Annotated[
+        str,
+        Field(
+            description="Departure airport IATA code(s), comma-separated for multiple "
+            "(e.g., 'JFK' or 'JFK,LGA')"
+        ),
+    ],
+    destination: Annotated[
+        str,
+        Field(
+            description="Arrival airport IATA code(s), comma-separated for multiple "
+            "(e.g., 'LHR' or 'LHR,CDG')"
+        ),
+    ],
     departure_date: Annotated[str, Field(description="Travel date in YYYY-MM-DD format")],
     return_date: Annotated[
         str | None,
@@ -482,8 +512,20 @@ def _search_flights_from_params(params: FlightSearchParams) -> dict[str, Any]:
     },
 )
 def search_dates(
-    origin: Annotated[str, Field(description="Departure airport IATA code (e.g., 'JFK')")],
-    destination: Annotated[str, Field(description="Arrival airport IATA code (e.g., 'LHR')")],
+    origin: Annotated[
+        str,
+        Field(
+            description="Departure airport IATA code(s), comma-separated for multiple "
+            "(e.g., 'JFK' or 'JFK,LGA')"
+        ),
+    ],
+    destination: Annotated[
+        str,
+        Field(
+            description="Arrival airport IATA code(s), comma-separated for multiple "
+            "(e.g., 'LHR' or 'LHR,CDG')"
+        ),
+    ],
     start_date: Annotated[str, Field(description="Start of date range in YYYY-MM-DD format")],
     end_date: Annotated[str, Field(description="End of date range in YYYY-MM-DD format")],
     trip_duration: Annotated[
@@ -545,6 +587,39 @@ def search_dates(
 def _search_dates_from_params(params: DateSearchParams) -> dict[str, Any]:
     """Entry point for tests that call the tool via a params object."""
     return _execute_date_search(params)
+
+
+@mcp.tool(
+    annotations={
+        "title": "Search Airports",
+        "readOnlyHint": True,
+        "idempotentHint": True,
+    },
+)
+def find_airports(
+    query: Annotated[
+        str,
+        Field(
+            description=(
+                "City name, airport name, or IATA code (e.g., 'new york', 'heathrow', 'JFK')"
+            )
+        ),
+    ],
+    limit: Annotated[int, Field(description="Maximum results to return", ge=1, le=50)] = 10,
+) -> dict[str, Any]:
+    """Search for airports by city name, airport name, or IATA code.
+
+    Use this tool to find airport IATA codes before searching for flights.
+    Supports city names (e.g., "new york" returns JFK, LGA, EWR),
+    airport names (e.g., "heathrow" returns LHR), and IATA codes.
+    """
+    results = search_airports(query, limit=limit)
+
+    return {
+        "query": query,
+        "count": len(results),
+        "airports": [{"code": r.code, "name": r.name, "match_type": r.match_type} for r in results],
+    }
 
 
 # =============================================================================

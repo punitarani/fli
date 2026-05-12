@@ -5,6 +5,7 @@ import sys
 
 import typer
 
+from fli.cli.commands.airports import airports
 from fli.cli.commands.dates import dates
 from fli.cli.commands.flights import flights
 from fli.cli.commands.multi import multi
@@ -15,8 +16,9 @@ app = typer.Typer(
 )
 
 # Register commands
-app.command(name="flights")(flights)
+app.command(name="airports")(airports)
 app.command(name="dates")(dates)
+app.command(name="flights")(flights)
 app.command(name="multi")(multi)
 
 
@@ -39,7 +41,7 @@ def cli():
         args.append("--help")
 
     # If the first argument isn't a command, treat as flights search
-    if args[0] not in ["flights", "dates", "multi", "--help", "-h"]:
+    if args[0] not in ["airports", "dates", "flights", "multi", "--help", "-h"]:
         sys.argv.insert(1, "flights")
 
     app()
