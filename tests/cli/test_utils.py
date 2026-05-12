@@ -15,6 +15,7 @@ from fli.cli.utils import (
     filter_flights_by_time,
     parse_airlines,
     parse_stops,
+    serialize_airline,
     serialize_date_result,
     serialize_flight_result,
     validate_date,
@@ -113,6 +114,13 @@ def test_parse_airlines_numeric_prefix():
     """Test that airline codes starting with a digit are resolved correctly."""
     result = parse_airlines(["3F"])
     assert result == [Airline._3F]
+
+
+def test_serialize_airline_numeric_prefix():
+    """Test that serialized airline code strips underscore prefix."""
+    result = serialize_airline(Airline._3F)
+    assert result["code"] == "3F"
+    assert result["name"] == "FlyOne Armenia"
 
 
 def test_parse_airlines_invalid():
