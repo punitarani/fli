@@ -5,6 +5,7 @@ with Google Flights' API to find available flights and their details.
 """
 
 import json
+import logging
 from copy import deepcopy
 from datetime import datetime
 
@@ -80,7 +81,16 @@ class SearchFlights:
                 if isinstance(encoded_filters[i], list)
                 for item in encoded_filters[i][0]
             ]
-            flights = [self._parse_flights_data(flight) for flight in flights_data]
+            flights = []
+            for flight in flights_data:
+                try:
+                    flights.append(self._parse_flights_data(flight))
+                except (AttributeError, KeyError, ValueError) as e:
+                    logging.debug("Skipping flight with unparseable data: %s", e)
+                    continue
+
+            if not flights:
+                return None
 
             if filters.trip_type == TripType.ONE_WAY:
                 return flights
@@ -145,25 +155,6 @@ class SearchFlights:
             ],
         )
         return flight
-
-    @staticmethod
-    def _parse_price(data: list) -> float:
-        """Extract the numeric price from raw flight data.
-
-        Args:
-            data: Raw flight data from the API response
-
-        Returns:
-            Flight price, or 0.0 if price data is unavailable
-
-        """
-        try:
-            price_block = SearchFlights._get_price_block(data)
-            if price_block and price_block[0]:
-                return float(price_block[0][-1])
-        except (IndexError, TypeError):
-            pass
-        return 0.0
 
     @staticmethod
     def _parse_price_info(data: list) -> tuple[float, str | None]:

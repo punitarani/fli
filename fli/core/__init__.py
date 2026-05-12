@@ -4,11 +4,13 @@ This module provides shared parsing and building utilities used by both
 the CLI and MCP interfaces.
 """
 
+from .airports import search_airports
 from .builders import (
     build_date_search_segments,
     build_flight_segments,
     build_multi_city_segments,
     build_time_restrictions,
+    normalize_date,
 )
 from .currency import extract_currency_from_price_token, format_price, format_price_axis_label
 from .parsers import (
@@ -37,6 +39,8 @@ __all__ = [
     "build_flight_segments",
     "build_multi_city_segments",
     "build_time_restrictions",
+    "normalize_date",
+    "search_airports",
     # Currency
     "extract_currency_from_price_token",
     "format_price",

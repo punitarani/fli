@@ -15,13 +15,13 @@ from fli.cli.utils import (
     filter_flights_by_time,
     parse_airlines,
     parse_stops,
+    serialize_airline,
     serialize_date_result,
     serialize_flight_result,
     validate_date,
     validate_time_range,
 )
-from fli.models import Airline, Airport, FlightLeg, FlightResult, MaxStops
-from fli.models.google_flights.base import TripType
+from fli.models import Airline, Airport, FlightLeg, FlightResult, MaxStops, TripType
 from fli.search.dates import DatePrice
 
 
@@ -113,6 +113,13 @@ def test_parse_airlines_numeric_prefix():
     """Test that airline codes starting with a digit are resolved correctly."""
     result = parse_airlines(["3F"])
     assert result == [Airline._3F]
+
+
+def test_serialize_airline_numeric_prefix():
+    """Test that serialized airline code strips underscore prefix."""
+    result = serialize_airline(Airline._3F)
+    assert result["code"] == "3F"
+    assert result["name"] == "FlyOne Armenia"
 
 
 def test_parse_airlines_invalid():
@@ -236,12 +243,12 @@ def _make_flight_result(
     )
 
 
-def _capture_display(flights: list) -> str:
+def _capture_display(flights: list, trip_type: TripType = TripType.ONE_WAY) -> str:
     """Run display_flight_results and capture the rendered text."""
     buf = StringIO()
     test_console = Console(file=buf, width=120, force_terminal=True)
     with patch("fli.cli.utils.console", test_console):
-        display_flight_results(flights)
+        display_flight_results(flights, trip_type=trip_type)
     return buf.getvalue()
 
 
@@ -277,7 +284,7 @@ def test_display_multi_city_three_legs():
     leg2 = _make_flight_result(price=0.0, flight_number="DL200")
     leg3 = _make_flight_result(price=800.0, flight_number="UA300")
 
-    output = _capture_display([(leg1, leg2, leg3)])
+    output = _capture_display([(leg1, leg2, leg3)], trip_type=TripType.MULTI_CITY)
 
     assert "$800.00" in output
     assert "Multi-city Flight" in output
@@ -429,3 +436,43 @@ def test_serialize_date_result_uses_returned_currency():
     payload = serialize_date_result(result, TripType.ONE_WAY)
 
     assert payload["currency"] == "SEK"
+
+
+def test_serialize_flight_result_fallback_currency_override():
+    """Fallback currency should use the provided default when Google returns None."""
+    flight = _make_flight_result(price=117.0, currency=None)
+
+    payload = serialize_flight_result(flight, default_currency="CAD")
+
+    assert payload["currency"] == "CAD"
+
+
+def test_serialize_flight_result_round_trip_fallback_currency_override():
+    """Round-trip fallback currency should use the provided default."""
+    outbound = _make_flight_result(price=250.0, currency=None, flight_number="AC100")
+    return_flight = _make_flight_result(price=250.0, currency=None, flight_number="AC200")
+
+    payload = serialize_flight_result((outbound, return_flight), default_currency="CAD")
+
+    assert payload["currency"] == "CAD"
+
+
+def test_serialize_date_result_fallback_currency_override():
+    """Date serialization fallback currency should use the provided default."""
+    result = DatePrice(
+        date=(datetime(2026, 5, 1),),
+        price=117.0,
+    )
+
+    payload = serialize_date_result(result, TripType.ONE_WAY, default_currency="CAD")
+
+    assert payload["currency"] == "CAD"
+
+
+def test_serialize_flight_result_extracted_currency_takes_precedence():
+    """Extracted currency from Google should take precedence over default_currency."""
+    flight = _make_flight_result(price=117.0, currency="GBP")
+
+    payload = serialize_flight_result(flight, default_currency="CAD")
+
+    assert payload["currency"] == "GBP"

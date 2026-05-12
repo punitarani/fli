@@ -1,6 +1,7 @@
 """CLI utility functions for display and validation."""
 
 import json
+import re
 from typing import Any
 
 import plotext as plt
@@ -21,7 +22,15 @@ from fli.core.parsers import parse_airlines as core_parse_airlines
 from fli.core.parsers import parse_max_stops as core_parse_max_stops
 from fli.models import Airline, Airport, MaxStops, TripType
 
-DEFAULT_CURRENCY = "USD"
+
+def validate_currency(ctx: Context, param: Parameter, value: str | None) -> str | None:
+    """Validate currency code format for typer callbacks."""
+    if value is None:
+        return None
+    normalized = value.upper()
+    if not re.fullmatch(r"[A-Z]{3}", normalized):
+        raise typer.BadParameter(f"'{value}' is not a valid 3-letter currency code")
+    return normalized
 
 
 def validate_date(ctx: Context, param: Parameter, value: str) -> str | None:
@@ -171,7 +180,7 @@ def serialize_airport(airport: Airport) -> dict[str, str]:
 
 def serialize_airline(airline: Airline) -> dict[str, str]:
     """Serialize an airline for machine-readable output."""
-    return {"code": airline.name.lstrip("_"), "name": airline.value}
+    return {"code": airline.name.removeprefix("_"), "name": airline.value}
 
 
 def serialize_flight_leg(leg: Any) -> dict[str, Any]:
@@ -187,7 +196,12 @@ def serialize_flight_leg(leg: Any) -> dict[str, Any]:
     }
 
 
-def _serialize_flight_segment_result(flight: Any, *, include_price: bool = False) -> dict[str, Any]:
+def _serialize_flight_segment_result(
+    flight: Any,
+    *,
+    include_price: bool = False,
+    default_currency: str = "USD",
+) -> dict[str, Any]:
     """Serialize a one-direction flight result."""
     payload = {
         "duration": flight.duration,
@@ -196,14 +210,19 @@ def _serialize_flight_segment_result(flight: Any, *, include_price: bool = False
     }
     if include_price:
         payload["price"] = flight.price
-        payload["currency"] = flight.currency or DEFAULT_CURRENCY
+        payload["currency"] = flight.currency or default_currency
     return payload
 
 
-def serialize_flight_result(flight_data: Any) -> dict[str, Any]:
+def serialize_flight_result(
+    flight_data: Any,
+    default_currency: str = "USD",
+) -> dict[str, Any]:
     """Serialize a flight result or round-trip/multi-city tuple for JSON output."""
     if not isinstance(flight_data, tuple):
-        return _serialize_flight_segment_result(flight_data, include_price=True)
+        return _serialize_flight_segment_result(
+            flight_data, include_price=True, default_currency=default_currency
+        )
 
     segments = list(flight_data)
 
@@ -212,7 +231,7 @@ def serialize_flight_result(flight_data: Any) -> dict[str, Any]:
         outbound, return_flight = segments
         return {
             "price": outbound.price,
-            "currency": outbound.currency or DEFAULT_CURRENCY,
+            "currency": outbound.currency or default_currency,
             "duration": outbound.duration + return_flight.duration,
             "stops": outbound.stops + return_flight.stops,
             "outbound": _serialize_flight_segment_result(outbound),
@@ -223,20 +242,24 @@ def serialize_flight_result(flight_data: Any) -> dict[str, Any]:
     price_segment = segments[-1]
     return {
         "price": price_segment.price,
-        "currency": price_segment.currency or DEFAULT_CURRENCY,
+        "currency": price_segment.currency or default_currency,
         "duration": sum(s.duration for s in segments),
         "stops": sum(s.stops for s in segments),
         "segments": [_serialize_flight_segment_result(s) for s in segments],
     }
 
 
-def serialize_date_result(date_result: Any, trip_type: TripType) -> dict[str, Any]:
+def serialize_date_result(
+    date_result: Any,
+    trip_type: TripType,
+    default_currency: str = "USD",
+) -> dict[str, Any]:
     """Serialize a date search result for JSON output."""
     payload = {
         "departure_date": date_result.date[0].date().isoformat(),
         "return_date": None,
         "price": date_result.price,
-        "currency": date_result.currency or DEFAULT_CURRENCY,
+        "currency": date_result.currency or default_currency,
     }
     if trip_type == TripType.ROUND_TRIP and len(date_result.date) > 1:
         payload["return_date"] = date_result.date[1].date().isoformat()
@@ -290,17 +313,23 @@ def emit_json(payload: dict[str, Any]) -> None:
     typer.echo(json.dumps(payload, indent=2))
 
 
-def display_flight_results(flights: list):
+def display_flight_results(
+    flights: list, trip_type: TripType = TripType.ONE_WAY, default_currency: str = "USD"
+):
     """Display flight results in a beautiful format.
 
     Args:
         flights: List of either FlightResult objects (one-way)
-        or tuples of (outbound, return) FlightResults (round-trip)
+            or tuples of FlightResults (round-trip or multi-city)
+        trip_type: The trip type to correctly interpret pricing.
+        default_currency: Fallback currency code when Google does not return one.
 
     """
     if not flights:
         console.print(Panel("No flights found matching your criteria", style="red"))
         return
+
+    is_multi_city = trip_type == TripType.MULTI_CITY
 
     for i, flight_data in enumerate(flights, 1):
         is_multi_leg = isinstance(flight_data, tuple)
@@ -314,9 +343,11 @@ def display_flight_results(flights: list):
 
         # Google Flights returns the full trip price on the outbound leg for round-trips,
         # and on the final leg for multi-city trips.
-        price_segment = flight_segments[-1] if num_legs > 2 else flight_segments[0]
+        price_segment = flight_segments[-1] if is_multi_city else flight_segments[0]
         total_price = price_segment.price
-        table.add_row("Total Price", format_price(total_price, price_segment.currency))
+        table.add_row(
+            "Total Price", format_price(total_price, price_segment.currency or default_currency)
+        )
 
         total_duration = sum(flight.duration for flight in flight_segments)
         table.add_row("Total Duration", format_duration(total_duration))
@@ -328,10 +359,10 @@ def display_flight_results(flights: list):
         for idx, flight in enumerate(flight_segments):
             if num_legs == 1:
                 direction = ""
-            elif num_legs == 2:
-                direction = "Outbound" if idx == 0 else "Return"
-            else:
+            elif is_multi_city:
                 direction = f"Leg {idx + 1}"
+            else:
+                direction = "Outbound" if idx == 0 else "Return"
             segments = Table(
                 title=(f"{direction} Flight Segments" if direction else "Flight Segments"),
                 box=box.ROUNDED,
@@ -354,7 +385,7 @@ def display_flight_results(flights: list):
             all_segments.extend([segments, Text("")])
 
         # Display in a panel
-        if num_legs > 2:
+        if is_multi_city:
             title = "Multi-city Flight"
         elif num_legs == 2:
             title = "Round-trip Flight"
@@ -377,7 +408,7 @@ def display_flight_results(flights: list):
         console.print()
 
 
-def display_date_results(dates: list, trip_type: TripType):
+def display_date_results(dates: list, trip_type: TripType, default_currency: str = "USD"):
     """Display date search results with sparkline chart and table."""
     if not dates:
         console.print(Panel("No flights found for these dates", style="red"))
@@ -395,7 +426,7 @@ def display_date_results(dates: list, trip_type: TripType):
     plt.plot(prices, marker="braille")
     plt.title("Price Trend")
     plt.xlabel("Date")
-    plt.ylabel(format_price_axis_label(date.currency for date in sorted_dates))
+    plt.ylabel(format_price_axis_label(date.currency or default_currency for date in sorted_dates))
 
     # Set x-axis labels (show subset if too many dates)
     if len(date_labels) <= 10:
@@ -426,7 +457,7 @@ def display_date_results(dates: list, trip_type: TripType):
             table.add_row(
                 date_price.date[0].strftime("%Y-%m-%d"),
                 date_price.date[0].strftime("%A"),
-                format_price(date_price.price, date_price.currency),
+                format_price(date_price.price, date_price.currency or default_currency),
             )
         else:
             table.add_row(
@@ -434,7 +465,7 @@ def display_date_results(dates: list, trip_type: TripType):
                 date_price.date[0].strftime("%A"),
                 date_price.date[1].strftime("%Y-%m-%d"),
                 date_price.date[1].strftime("%A"),
-                format_price(date_price.price, date_price.currency),
+                format_price(date_price.price, date_price.currency or default_currency),
             )
 
     console.print(table)

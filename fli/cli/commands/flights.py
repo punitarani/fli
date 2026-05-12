@@ -1,5 +1,6 @@
 """Flight search CLI command."""
 
+import re
 from typing import Annotated, Any
 
 import typer
@@ -13,6 +14,7 @@ from fli.cli.utils import (
     normalize_cli_date,
     normalize_cli_time_range,
     serialize_flight_result,
+    validate_currency,
 )
 from fli.core import (
     build_flight_segments,
@@ -50,8 +52,17 @@ def _search_flights_core(
     carry_on: bool = False,
     all_results: bool = True,
     output_format: OutputFormat = OutputFormat.TEXT,
+    currency: str = "USD",
 ) -> None:
     """Core flight search functionality."""
+    # Normalize airlines: split each element on commas/spaces to support "BA,KL" in a single flag
+    if airlines:
+        airlines = [
+            code.strip().upper()
+            for item in airlines
+            for code in re.split(r"[,\s]+", item)
+            if code.strip()
+        ]
     query: dict[str, Any] = {
         "origin": origin.upper(),
         "destination": destination.upper(),
@@ -156,12 +167,15 @@ def _search_flights_core(
                     trip_type=trip_type,
                     query=query,
                     results_key="flights",
-                    results=[serialize_flight_result(result) for result in results],
+                    results=[
+                        serialize_flight_result(result, default_currency=currency)
+                        for result in results
+                    ],
                 )
             )
             return
 
-        display_flight_results(results)
+        display_flight_results(results, trip_type=trip_type, default_currency=currency)
 
     except ParseError as e:
         if output_format == OutputFormat.JSON:
@@ -217,7 +231,7 @@ def flights(
         typer.Option(
             "--airlines",
             "-a",
-            help="List of airline IATA codes (e.g., BA KL)",
+            help="Airline IATA codes (e.g., BA,KL or repeated --airlines BA --airlines KL)",
         ),
     ] = None,
     cabin_class: Annotated[
@@ -300,6 +314,14 @@ def flights(
             case_sensitive=False,
         ),
     ] = OutputFormat.TEXT,
+    currency: Annotated[
+        str,
+        typer.Option(
+            "--currency",
+            callback=validate_currency,
+            help="Fallback currency code when not returned by Google (e.g., CAD, EUR).",
+        ),
+    ] = "USD",
 ):
     """Search for flights on a specific date.
 
@@ -329,4 +351,5 @@ def flights(
         carry_on=carry_on,
         all_results=all_results,
         output_format=output_format,
+        currency=currency,
     )
