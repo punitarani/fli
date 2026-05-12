@@ -589,6 +589,27 @@ def _search_dates_from_params(params: DateSearchParams) -> dict[str, Any]:
     return _execute_date_search(params)
 
 
+def _find_airports_impl(query: str, limit: int = 10) -> dict[str, Any]:
+    """Run search_airports and shape the result into the MCP response dict."""
+    try:
+        results = search_airports(query, limit=limit)
+    except Exception as exc:
+        return {
+            "success": False,
+            "error": str(exc),
+            "query": query,
+        }
+
+    return {
+        "success": True,
+        "query": query,
+        "count": len(results),
+        "airports": [
+            {"code": r.code.name, "name": r.name, "match_type": r.match_type} for r in results
+        ],
+    }
+
+
 @mcp.tool(
     annotations={
         "title": "Search Airports",
@@ -613,13 +634,7 @@ def find_airports(
     Supports city names (e.g., "new york" returns JFK, LGA, EWR),
     airport names (e.g., "heathrow" returns LHR), and IATA codes.
     """
-    results = search_airports(query, limit=limit)
-
-    return {
-        "query": query,
-        "count": len(results),
-        "airports": [{"code": r.code, "name": r.name, "match_type": r.match_type} for r in results],
-    }
+    return _find_airports_impl(query, limit=limit)
 
 
 # =============================================================================

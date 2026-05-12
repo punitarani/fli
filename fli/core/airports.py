@@ -1,9 +1,15 @@
 """Airport search utilities for looking up airports by city or name."""
 
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
 from fli.models import Airport
 
-# Mapping of city names to IATA codes for airports where the city name
-# is NOT in the airport name (e.g., JFK doesn't contain "New York")
+# Curated mapping of city names and common abbreviations to IATA codes.
+# Provides multi-airport groupings (e.g., "new york" -> JFK, LGA, EWR) and
+# short aliases (e.g., "sf", "la", "nyc") that pure airport-name substring
+# search would miss. Validated against the Airport enum at import time.
 CITY_AIRPORTS: dict[str, list[str]] = {
     "new york": ["JFK", "LGA", "EWR"],
     "nyc": ["JFK", "LGA", "EWR"],
@@ -58,30 +64,43 @@ CITY_AIRPORTS: dict[str, list[str]] = {
     "honolulu": ["HNL"],
 }
 
+for _city, _codes in CITY_AIRPORTS.items():
+    for _code in _codes:
+        if _code not in Airport.__members__:
+            raise RuntimeError(f"CITY_AIRPORTS[{_city!r}] references unknown IATA code {_code!r}")
 
-class AirportMatch:
+MatchType = Literal["iata_exact", "iata_prefix", "city", "name"]
+
+
+class AirportMatch(BaseModel):
     """A matched airport from a search query."""
 
-    def __init__(self, code: str, name: str, match_type: str, score: float):
-        """Initialize a matched airport result."""
-        self.code = code
-        self.name = name
-        self.match_type = match_type  # "code", "city", "name"
-        self.score = score
+    model_config = ConfigDict(frozen=True)
 
-    def __repr__(self) -> str:
-        """Return a debug representation for the match."""
-        return (
-            f"AirportMatch(code={self.code!r}, name={self.name!r}, match_type={self.match_type!r})"
-        )
+    code: Airport
+    name: str
+    match_type: MatchType
+    score: float = Field(ge=0.0, le=100.0)
 
 
 def search_airports(query: str, limit: int = 10) -> list[AirportMatch]:
     """Search airports by city name, airport name, or IATA code.
 
+    Results are ranked by a 5-priority cascade, scored 0-100 (higher = better):
+
+      1. iata_exact  (score 100) - query is an exact IATA code (e.g. "JFK")
+      2. city        (score 90)  - query is an exact city/alias in CITY_AIRPORTS
+      3. city        (score 80)  - query is a prefix of a city in CITY_AIRPORTS
+      4. name        (score <=70) - query is a substring of an airport's name;
+                                   earlier match position scores higher
+      5. iata_prefix (score 60)  - query (<=3 chars) is a prefix of an IATA code
+
+    Within a single result list, each IATA code appears at most once: the
+    highest-priority match wins.
+
     Args:
-        query: Search string (e.g., "new york", "san fran", "JFK", "heathrow")
-        limit: Maximum results to return (must be >= 1).
+        query: Search string (e.g., "new york", "san fran", "JFK", "heathrow").
+        limit: Maximum results to return. Values < 1 yield an empty list.
 
     Returns:
         List of matching airports sorted by relevance (best match first).
@@ -96,23 +115,22 @@ def search_airports(query: str, limit: int = 10) -> list[AirportMatch]:
 
     # Priority 1: Exact IATA code match
     query_upper = query.strip().upper()
-    try:
+    if query_upper in Airport.__members__:
         airport = Airport[query_upper]
-        results.append(AirportMatch(query_upper, airport.value, "code", 100.0))
+        results.append(
+            AirportMatch(code=airport, name=airport.value, match_type="iata_exact", score=100.0)
+        )
         seen_codes.add(query_upper)
-    except KeyError:
-        pass
 
-    # Priority 2: City name lookup (handles "new york" -> JFK, LGA, EWR)
+    # Priority 2: Exact city name lookup (handles "new york" -> JFK, LGA, EWR)
     if query_lower in CITY_AIRPORTS:
         for code in CITY_AIRPORTS[query_lower]:
             if code not in seen_codes:
-                try:
-                    airport = Airport[code]
-                    results.append(AirportMatch(code, airport.value, "city", 90.0))
-                    seen_codes.add(code)
-                except KeyError:
-                    pass
+                airport = Airport[code]
+                results.append(
+                    AirportMatch(code=airport, name=airport.value, match_type="city", score=90.0)
+                )
+                seen_codes.add(code)
 
     # Priority 3: Partial city name match (handles "new yo" matching "new york")
     if query_lower not in CITY_AIRPORTS:
@@ -120,12 +138,13 @@ def search_airports(query: str, limit: int = 10) -> list[AirportMatch]:
             if city.startswith(query_lower):
                 for code in codes:
                     if code not in seen_codes:
-                        try:
-                            airport = Airport[code]
-                            results.append(AirportMatch(code, airport.value, "city", 80.0))
-                            seen_codes.add(code)
-                        except KeyError:
-                            pass
+                        airport = Airport[code]
+                        results.append(
+                            AirportMatch(
+                                code=airport, name=airport.value, match_type="city", score=80.0
+                            )
+                        )
+                        seen_codes.add(code)
 
     # Priority 4: Airport name substring match
     for airport in Airport:
@@ -133,10 +152,13 @@ def search_airports(query: str, limit: int = 10) -> list[AirportMatch]:
             continue
         airport_name_lower = airport.value.lower()
         if query_lower in airport_name_lower:
-            # Score based on how early the match occurs.
+            # 0.1-per-position weight keeps name matches (max ~70) below
+            # city matches (80) regardless of where the substring lands.
             pos = airport_name_lower.find(query_lower)
-            score = 70.0 - (pos * 0.1)  # Earlier matches score higher.
-            results.append(AirportMatch(airport.name, airport.value, "name", score))
+            score = 70.0 - (pos * 0.1)
+            results.append(
+                AirportMatch(code=airport, name=airport.value, match_type="name", score=score)
+            )
             seen_codes.add(airport.name)
 
     # Priority 5: IATA code prefix match (handles "SF" matching "SFO")
@@ -145,9 +167,13 @@ def search_airports(query: str, limit: int = 10) -> list[AirportMatch]:
             if airport.name in seen_codes:
                 continue
             if airport.name.startswith(query_upper):
-                results.append(AirportMatch(airport.name, airport.value, "code", 60.0))
+                results.append(
+                    AirportMatch(
+                        code=airport, name=airport.value, match_type="iata_prefix", score=60.0
+                    )
+                )
                 seen_codes.add(airport.name)
 
-    # Sort by score descending, then by code alphabetically
-    results.sort(key=lambda m: (-m.score, m.code))
+    # Sort by score descending, then by IATA code alphabetically.
+    results.sort(key=lambda m: (-m.score, m.code.name))
     return results[:limit]

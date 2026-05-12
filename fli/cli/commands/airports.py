@@ -37,8 +37,13 @@ def airports(
     if json_output:
         import json
 
-        output = [{"code": r.code, "name": r.name, "match_type": r.match_type} for r in results]
-        console.print(json.dumps(output, indent=2))
+        output = [
+            {"code": r.code.name, "name": r.name, "match_type": r.match_type} for r in results
+        ]
+        # Plain print() bypasses Rich's markup parsing — JSON's `[` would
+        # otherwise be interpreted as a style tag in non-TTY environments
+        # (e.g. CI, pipes), suppressing output.
+        print(json.dumps(output, indent=2))
     else:
         table = Table(title=f"Airports matching '{query}'")
         table.add_column("Code", style="bold cyan", width=6)
@@ -46,6 +51,6 @@ def airports(
         table.add_column("Match", style="dim")
 
         for result in results:
-            table.add_row(result.code, result.name, result.match_type)
+            table.add_row(result.code.name, result.name, result.match_type)
 
         console.print(table)
