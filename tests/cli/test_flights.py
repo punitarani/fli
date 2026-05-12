@@ -79,6 +79,26 @@ def test_flights_with_comma_separated_airlines(runner, mock_search_flights, mock
     assert args[0].airlines == [Airline.DL, Airline.UA]
 
 
+def test_flights_json_query_echoes_split_airlines(runner, mock_search_flights, mock_console):
+    """JSON query echo reflects the parsed, split airline list — not the raw input."""
+    result = runner.invoke(
+        app,
+        [
+            "flights",
+            "JFK",
+            "LAX",
+            datetime.now().strftime("%Y-%m-%d"),
+            "-a",
+            "DL,UA",
+            "--format",
+            "json",
+        ],
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["query"]["airlines"] == ["DL", "UA"]
+
+
 def test_flights_with_cabin_class(runner, mock_search_flights, mock_console):
     """Test flights search with cabin class."""
     result = runner.invoke(

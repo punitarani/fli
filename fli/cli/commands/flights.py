@@ -60,7 +60,7 @@ def _search_flights_core(
         "departure_date": departure_date,
         "return_date": return_date,
         "departure_window": None,
-        "airlines": [airline.upper() for airline in airlines] if airlines else None,
+        "airlines": None,
         "cabin_class": cabin_class.upper(),
         "max_stops": max_stops.upper(),
         "sort_by": sort_by.upper(),
@@ -82,6 +82,9 @@ def _search_flights_core(
         seat_type = parse_cabin_class(cabin_class)
         stops = parse_max_stops(max_stops)
         parsed_airlines = parse_airlines(airlines)
+        query["airlines"] = (
+            [airline.name.lstrip("_") for airline in parsed_airlines] if parsed_airlines else None
+        )
         sort = parse_sort_by(sort_by)
         emissions_filter = parse_emissions(emissions)
 
