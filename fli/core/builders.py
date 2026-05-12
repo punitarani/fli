@@ -135,6 +135,7 @@ def build_multi_city_segments(
         limitations of the Google Flights API endpoint.  Round-trip-style
         multi-city (same origin and final destination) works reliably.
 
+
     """
     segments = [
         FlightSegment(

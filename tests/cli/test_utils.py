@@ -21,8 +21,7 @@ from fli.cli.utils import (
     validate_date,
     validate_time_range,
 )
-from fli.models import Airline, Airport, FlightLeg, FlightResult, MaxStops
-from fli.models.google_flights.base import TripType
+from fli.models import Airline, Airport, FlightLeg, FlightResult, MaxStops, TripType
 from fli.search.dates import DatePrice
 
 
@@ -244,12 +243,12 @@ def _make_flight_result(
     )
 
 
-def _capture_display(flights: list) -> str:
+def _capture_display(flights: list, trip_type: TripType = TripType.ONE_WAY) -> str:
     """Run display_flight_results and capture the rendered text."""
     buf = StringIO()
     test_console = Console(file=buf, width=120, force_terminal=True)
     with patch("fli.cli.utils.console", test_console):
-        display_flight_results(flights)
+        display_flight_results(flights, trip_type=trip_type)
     return buf.getvalue()
 
 
@@ -285,7 +284,7 @@ def test_display_multi_city_three_legs():
     leg2 = _make_flight_result(price=0.0, flight_number="DL200")
     leg3 = _make_flight_result(price=800.0, flight_number="UA300")
 
-    output = _capture_display([(leg1, leg2, leg3)])
+    output = _capture_display([(leg1, leg2, leg3)], trip_type=TripType.MULTI_CITY)
 
     assert "$800.00" in output
     assert "Multi-city Flight" in output
