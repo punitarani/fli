@@ -5,7 +5,6 @@ Covers:
   2. HTTP transport test — starts the server on a free port and connects over HTTP.
 """
 
-import socket
 import threading
 import time
 
@@ -19,15 +18,38 @@ EXPECTED_TOOLS = {"search_flights", "search_dates"}
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Fixtures
 # ---------------------------------------------------------------------------
 
 
-def _free_port() -> int:
-    """Return an available TCP port on localhost."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+@pytest.fixture
+def http_mcp_url():
+    """Boot the MCP server in a background thread and yield its base URL.
+
+    Uses uvicorn port=0 so the OS assigns a free port at bind time, then reads
+    the actual port back from the bound socket. This avoids the TOCTOU race of
+    pre-allocating a port and hoping nothing else claims it before uvicorn binds.
+    """
+    app = mcp.http_app()
+    config = uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning")
+    server = uvicorn.Server(config)
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+
+    deadline = time.monotonic() + 10
+    while not server.started:
+        if time.monotonic() > deadline:
+            server.should_exit = True
+            thread.join(timeout=5)
+            pytest.fail("MCP HTTP server did not start in time")
+        time.sleep(0.05)
+
+    port = server.servers[0].sockets[0].getsockname()[1]
+    try:
+        yield f"http://127.0.0.1:{port}/mcp/"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
 
 
 # ---------------------------------------------------------------------------
@@ -67,65 +89,20 @@ class TestMCPHTTP:
     """Start the MCP server over HTTP and verify tools via a real connection."""
 
     @pytest.mark.asyncio
-    async def test_http_list_tools(self):
+    async def test_http_list_tools(self, http_mcp_url):
         """Boot the HTTP server, connect, and verify tool names."""
-        port = _free_port()
-
-        app = mcp.http_app()
-        config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
-        server = uvicorn.Server(config)
-
-        thread = threading.Thread(target=server.run, daemon=True)
-        thread.start()
-
-        # Wait for the server to accept connections.
-        for _ in range(40):
-            try:
-                with socket.create_connection(("127.0.0.1", port), timeout=0.25):
-                    break
-            except OSError:
-                time.sleep(0.25)
-        else:
-            pytest.fail("MCP HTTP server did not start in time")
-
-        try:
-            client = Client(f"http://127.0.0.1:{port}/mcp/")
-            async with client:
-                tools = await client.list_tools()
-            names = {t.name for t in tools}
-            assert names == EXPECTED_TOOLS
-        finally:
-            server.should_exit = True
-            thread.join(timeout=5)
+        client = Client(http_mcp_url)
+        async with client:
+            tools = await client.list_tools()
+        names = {t.name for t in tools}
+        assert names == EXPECTED_TOOLS
 
     @pytest.mark.asyncio
-    async def test_http_tools_have_description_and_schema(self):
+    async def test_http_tools_have_description_and_schema(self, http_mcp_url):
         """Boot the HTTP server and verify each tool has description + schema."""
-        port = _free_port()
-
-        app = mcp.http_app()
-        config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
-        server = uvicorn.Server(config)
-
-        thread = threading.Thread(target=server.run, daemon=True)
-        thread.start()
-
-        for _ in range(40):
-            try:
-                with socket.create_connection(("127.0.0.1", port), timeout=0.25):
-                    break
-            except OSError:
-                time.sleep(0.25)
-        else:
-            pytest.fail("MCP HTTP server did not start in time")
-
-        try:
-            client = Client(f"http://127.0.0.1:{port}/mcp/")
-            async with client:
-                tools = await client.list_tools()
-            for tool in tools:
-                assert tool.description, f"{tool.name} is missing a description"
-                assert tool.inputSchema, f"{tool.name} is missing inputSchema"
-        finally:
-            server.should_exit = True
-            thread.join(timeout=5)
+        client = Client(http_mcp_url)
+        async with client:
+            tools = await client.list_tools()
+        for tool in tools:
+            assert tool.description, f"{tool.name} is missing a description"
+            assert tool.inputSchema, f"{tool.name} is missing inputSchema"

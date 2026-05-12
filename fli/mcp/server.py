@@ -830,7 +830,13 @@ def run():
 
 
 def run_http(host: str = "0.0.0.0", port: int = 8000) -> None:
-    """Run the MCP server over HTTP (streamable)."""
+    """Run the MCP server over HTTP (streamable).
+
+    The default host is ``0.0.0.0`` so the server is reachable from outside the
+    container when deployed (e.g. Railway, Docker). When running locally this
+    exposes the server on every network interface — set ``HOST=127.0.0.1`` to
+    restrict it to loopback.
+    """
     env_host = os.getenv("HOST")
     env_port = os.getenv("PORT")
 
