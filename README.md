@@ -139,7 +139,7 @@ fli flights JFK LHR 2026-10-25
 # Advanced search with filters
 fli flights JFK LHR 2026-10-25 \
     --time 6-20 \             # Departure time window (6 AM - 8 PM)
-    --airlines BA KL \        # Airlines (British Airways, KLM)
+    --airlines BA,KL \        # Airlines (British Airways, KLM)
     --class BUSINESS \        # Cabin class
     --stops NON_STOP \        # Non-stop flights only
     --sort DURATION           # Sort by duration
@@ -197,7 +197,7 @@ fli multi \
 |------------------|-----------------------|------------------------|
 | `--return, -r`   | Return date           | `2026-10-30`           |
 | `--time, -t`     | Departure time window | `6-20`                 |
-| `--airlines, -a` | Airline IATA codes    | `BA KL`                |
+| `--airlines, -a` | Airline IATA codes    | `BA,KL`                |
 | `--class, -c`    | Cabin class           | `ECONOMY`, `BUSINESS`  |
 | `--stops, -s`    | Maximum stops         | `NON_STOP`, `ONE_STOP` |
 | `--sort, -o`     | Sort results by       | `CHEAPEST`, `DURATION` |
@@ -211,7 +211,7 @@ fli multi \
 | `--to`             | End date               | `2026-02-01`           |
 | `--duration, -d`   | Trip duration in days  | `3`                    |
 | `--round, -R`      | Round-trip search      | (flag)                 |
-| `--airlines, -a`   | Airline IATA codes     | `BA KL`                |
+| `--airlines, -a`   | Airline IATA codes     | `BA,KL`                |
 | `--class, -c`      | Cabin class            | `ECONOMY`, `BUSINESS`  |
 | `--stops, -s`      | Maximum stops          | `NON_STOP`, `ONE_STOP` |
 | `--time`           | Departure time window  | `6-20`                 |

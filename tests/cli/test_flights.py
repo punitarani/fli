@@ -42,7 +42,7 @@ def test_flights_with_time_filter(runner, mock_search_flights, mock_console):
 
 
 def test_flights_with_airlines(runner, mock_search_flights, mock_console):
-    """Test flights search with airline filter."""
+    """Repeated -a flags resolve to the matching Airline enums on the filter."""
     result = runner.invoke(
         app,
         [
@@ -57,7 +57,46 @@ def test_flights_with_airlines(runner, mock_search_flights, mock_console):
         ],
     )
     assert result.exit_code == 0
-    mock_search_flights.search.assert_called_once()
+    args, _ = mock_search_flights.search.call_args
+    assert args[0].airlines == [Airline.DL, Airline.UA]
+
+
+def test_flights_with_comma_separated_airlines(runner, mock_search_flights, mock_console):
+    """Single -a flag with comma-joined codes splits into multiple airlines."""
+    result = runner.invoke(
+        app,
+        [
+            "flights",
+            "JFK",
+            "LAX",
+            datetime.now().strftime("%Y-%m-%d"),
+            "-a",
+            "DL,UA",
+        ],
+    )
+    assert result.exit_code == 0
+    args, _ = mock_search_flights.search.call_args
+    assert args[0].airlines == [Airline.DL, Airline.UA]
+
+
+def test_flights_json_query_echoes_split_airlines(runner, mock_search_flights, mock_console):
+    """JSON query echo reflects the parsed, split airline list — not the raw input."""
+    result = runner.invoke(
+        app,
+        [
+            "flights",
+            "JFK",
+            "LAX",
+            datetime.now().strftime("%Y-%m-%d"),
+            "-a",
+            "DL,UA",
+            "--format",
+            "json",
+        ],
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["query"]["airlines"] == ["DL", "UA"]
 
 
 def test_flights_with_cabin_class(runner, mock_search_flights, mock_console):

@@ -123,7 +123,7 @@ Use filters like these when the user asks for them:
 ```bash
 fli flights JFK LHR 2026-10-25 \
   --time 6-20 \
-  --airlines BA KL \
+  --airlines BA,KL \
   --class BUSINESS \
   --stops NON_STOP \
   --sort DURATION

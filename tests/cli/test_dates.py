@@ -7,6 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 from fli.cli.main import app
+from fli.models import Airline
 from fli.models.google_flights.base import TripType
 from fli.search import DatePrice
 
@@ -72,7 +73,7 @@ def test_dates_with_days(runner, mock_search_dates, mock_console):
 
 
 def test_dates_with_airlines(runner, mock_search_dates, mock_console):
-    """Test dates search with airline filter."""
+    """Repeated -a flags resolve to the matching Airline enums on the filter."""
     mock_search_dates.search.return_value = [
         DatePrice(
             date=(datetime.now() + timedelta(days=1),),
@@ -84,7 +85,25 @@ def test_dates_with_airlines(runner, mock_search_dates, mock_console):
         ["dates", "JFK", "LAX", "-a", "DL", "-a", "UA"],
     )
     assert result.exit_code == 0
-    mock_search_dates.search.assert_called_once()
+    args, _ = mock_search_dates.search.call_args
+    assert args[0].airlines == [Airline.DL, Airline.UA]
+
+
+def test_dates_with_comma_separated_airlines(runner, mock_search_dates, mock_console):
+    """Single -a flag with comma-joined codes splits into multiple airlines."""
+    mock_search_dates.search.return_value = [
+        DatePrice(
+            date=(datetime.now() + timedelta(days=1),),
+            price=299.99,
+        ),
+    ]
+    result = runner.invoke(
+        app,
+        ["dates", "JFK", "LAX", "-a", "DL,UA"],
+    )
+    assert result.exit_code == 0
+    args, _ = mock_search_dates.search.call_args
+    assert args[0].airlines == [Airline.DL, Airline.UA]
 
 
 def test_dates_with_cabin_class(runner, mock_search_dates, mock_console):
