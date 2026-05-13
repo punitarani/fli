@@ -82,12 +82,22 @@ class SearchFlights:
                 for item in encoded_filters[i][0]
             ]
             flights = []
+            skipped = 0
             for flight in flights_data:
                 try:
                     flights.append(self._parse_flights_data(flight))
                 except (AttributeError, KeyError, ValueError) as e:
+                    skipped += 1
                     logging.debug("Skipping flight with unparseable data: %s", e)
                     continue
+
+            if skipped:
+                logging.info(
+                    "Skipped %d of %d flight result(s) with unrecognized airport/airline "
+                    "codes (e.g., rail station codes Google Flights mixes into itineraries).",
+                    skipped,
+                    len(flights_data),
+                )
 
             if not flights:
                 return None
@@ -225,6 +235,12 @@ class SearchFlights:
         Returns:
             Corresponding Airline enum value
 
+        Raises:
+            AttributeError: If ``airline_code`` is not present in the Airline
+                enum. Google Flights can return non-airline carriers (e.g., rail
+                operators) for mixed air/rail itineraries; callers should treat
+                such flights as unparseable and skip them.
+
         """
         if airline_code[0].isdigit():
             airline_code = f"_{airline_code}"
@@ -239,6 +255,12 @@ class SearchFlights:
 
         Returns:
             Corresponding Airport enum value
+
+        Raises:
+            AttributeError: If ``airport_code`` is not present in the Airport
+                enum. Google Flights returns rail station codes (e.g., 'QKL'
+                for Cologne Hauptbahnhof) for mixed air/rail itineraries;
+                callers should treat such flights as unparseable and skip them.
 
         """
         return getattr(Airport, airport_code)

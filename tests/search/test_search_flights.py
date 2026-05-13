@@ -6,6 +6,7 @@ import pytest
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from fli.models import (
+    Airline,
     Airport,
     FlightSearchFilters,
     FlightSegment,
@@ -256,3 +257,199 @@ class TestParsePriceInfo:
             ],
         ]
         assert SearchFlights._parse_price_info(data) == (118.0, "USD")
+
+
+def _make_leg(
+    dep_airport: str,
+    arr_airport: str,
+    airline: str = "DL",
+    flight_num: str = "100",
+) -> list:
+    """Build a minimal raw-API leg list with only the indices the parser reads."""
+    leg = [None] * 23
+    leg[3] = dep_airport
+    leg[6] = arr_airport
+    leg[8] = [10, 0]  # departure time
+    leg[10] = [12, 0]  # arrival time
+    leg[11] = 120  # leg duration (min)
+    leg[20] = [2027, 2, 28]  # departure date
+    leg[21] = [2027, 2, 28]  # arrival date
+    leg[22] = [airline, flight_num]
+    return leg
+
+
+def _make_flight(legs: list[list], duration: int = 120, price: float = 299.99) -> list:
+    """Build a minimal raw-API flight list around the given legs."""
+    container = [None] * 10
+    container[2] = legs
+    container[9] = duration
+    return [container, [[None, price]]]
+
+
+class TestParseAirportAirline:
+    """Tests for _parse_airport / _parse_airline handling of unknown codes (issue #146)."""
+
+    def test_parse_airport_valid_code(self):
+        """A known IATA airport code resolves to the matching enum member."""
+        assert SearchFlights._parse_airport("JFK") == Airport.JFK
+
+    def test_parse_airport_rail_station_code_raises_attribute_error(self):
+        """Rail station codes (e.g., QKL for Cologne Hbf) must raise AttributeError.
+
+        Regression for issue #146: Google Flights returns these codes for mixed
+        air/rail itineraries; the parser must surface this so callers can skip
+        the flight rather than crash the whole search.
+        """
+        with pytest.raises(AttributeError, match="QKL"):
+            SearchFlights._parse_airport("QKL")
+
+    def test_parse_airport_unknown_code_raises_attribute_error(self):
+        """Any code not in the Airport enum raises AttributeError."""
+        with pytest.raises(AttributeError):
+            SearchFlights._parse_airport("ZZZ")
+
+    def test_parse_airline_valid_code(self):
+        """A known IATA airline code resolves to the matching enum member."""
+        assert SearchFlights._parse_airline("DL") == Airline.DL
+
+    def test_parse_airline_unknown_code_raises_attribute_error(self):
+        """An unknown airline code raises AttributeError (e.g., rail operator)."""
+        with pytest.raises(AttributeError):
+            SearchFlights._parse_airline("XYZ")
+
+
+class TestParseFlightsDataWithUnknownCodes:
+    """End-to-end tests for _parse_flights_data with mixed valid/unknown codes."""
+
+    def test_parse_succeeds_for_normal_flight(self):
+        """A flight whose legs use only known airport codes parses successfully."""
+        flight_data = _make_flight([_make_leg("LGW", "KRK", airline="LO", flight_num="280")])
+        result = SearchFlights._parse_flights_data(flight_data)
+        assert result.legs[0].departure_airport == Airport.LGW
+        assert result.legs[0].arrival_airport == Airport.KRK
+        assert result.legs[0].airline == Airline.LO
+
+    def test_parse_raises_attribute_error_for_rail_station_leg(self):
+        """A leg with a rail station code (QKL) raises AttributeError carrying the code.
+
+        Regression for issue #146: this is the exact path that previously
+        crashed the entire search. The surrounding loop in ``search`` catches
+        this and skips the flight; the parser itself still surfaces the
+        unknown code so callers can log/diagnose it.
+        """
+        flight_data = _make_flight([_make_leg("LGW", "QKL")])
+        with pytest.raises(AttributeError, match="QKL"):
+            SearchFlights._parse_flights_data(flight_data)
+
+    def test_parse_raises_attribute_error_for_unknown_airline(self):
+        """A leg with an unknown airline (e.g., a rail operator) raises AttributeError."""
+        flight_data = _make_flight([_make_leg("LGW", "KRK", airline="XYZ")])
+        with pytest.raises(AttributeError, match="XYZ"):
+            SearchFlights._parse_flights_data(flight_data)
+
+
+class TestSearchSkipsUnparseableFlights:
+    """End-to-end test that ``search`` skips rail-mixed flights instead of crashing.
+
+    Regression for issue #146 (and the general fix in #143).
+    """
+
+    @staticmethod
+    def _build_api_response(flight_rows: list[list]) -> str:
+        """Wrap synthetic flight rows in the layered JSON envelope the search expects."""
+        import json
+
+        # encoded_filters[2][0] is the primary results list the search reads.
+        inner = json.dumps([None, None, [flight_rows], None])
+        outer = json.dumps([[None, None, inner]])
+        return ")]}'" + outer
+
+    def test_search_returns_valid_flights_and_skips_rail_mixed(self, monkeypatch):
+        """A response mixing valid flights with rail-station flights must not crash.
+
+        Asserts that the valid flights are returned, and that the rail-station
+        flight (with QKL = Cologne Hbf) is silently skipped.
+        """
+        valid_flight = _make_flight([_make_leg("LGW", "KRK", airline="LO", flight_num="280")])
+        rail_flight = _make_flight([_make_leg("LGW", "QKL", airline="LO", flight_num="999")])
+
+        class FakeResponse:
+            def __init__(self, text: str) -> None:
+                self.text = text
+
+            def raise_for_status(self) -> None:
+                return None
+
+        class FakeClient:
+            def __init__(self, payload: str) -> None:
+                self._payload = payload
+
+            def post(self, **_kwargs) -> FakeResponse:
+                return FakeResponse(self._payload)
+
+        payload = self._build_api_response([valid_flight, rail_flight])
+
+        search = SearchFlights()
+        search.client = FakeClient(payload)
+
+        filters = FlightSearchFilters(
+            passenger_info=PassengerInfo(adults=1),
+            flight_segments=[
+                FlightSegment(
+                    departure_airport=[[Airport.LGW, 0]],
+                    arrival_airport=[[Airport.KRK, 0]],
+                    travel_date=(datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
+                )
+            ],
+            stops=MaxStops.ANY,
+            seat_type=SeatType.ECONOMY,
+            sort_by=SortBy.CHEAPEST,
+            show_all_results=False,
+        )
+
+        results = search.search(filters)
+        assert results is not None
+        assert len(results) == 1
+        assert results[0].legs[0].departure_airport == Airport.LGW
+        assert results[0].legs[0].arrival_airport == Airport.KRK
+
+    def test_search_returns_none_when_all_results_are_rail_mixed(self, monkeypatch):
+        """If every flight has a rail station, ``search`` returns None rather than crashing."""
+        rail_flight = _make_flight([_make_leg("LGW", "QKL")])
+
+        class FakeResponse:
+            def __init__(self, text: str) -> None:
+                self.text = text
+
+            def raise_for_status(self) -> None:
+                return None
+
+        class FakeClient:
+            def __init__(self, payload: str) -> None:
+                self._payload = payload
+
+            def post(self, **_kwargs) -> FakeResponse:
+                return FakeResponse(self._payload)
+
+        payload = self._build_api_response([rail_flight])
+
+        search = SearchFlights()
+        search.client = FakeClient(payload)
+
+        filters = FlightSearchFilters(
+            passenger_info=PassengerInfo(adults=1),
+            flight_segments=[
+                FlightSegment(
+                    departure_airport=[[Airport.LGW, 0]],
+                    arrival_airport=[[Airport.KRK, 0]],
+                    travel_date=(datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
+                )
+            ],
+            stops=MaxStops.ANY,
+            seat_type=SeatType.ECONOMY,
+            sort_by=SortBy.CHEAPEST,
+            show_all_results=False,
+        )
+
+        # Must NOT raise the AttributeError described in issue #146.
+        assert search.search(filters) is None
