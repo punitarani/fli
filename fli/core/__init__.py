@@ -12,7 +12,12 @@ from .builders import (
     build_time_restrictions,
     normalize_date,
 )
-from .currency import extract_currency_from_price_token, format_price, format_price_axis_label
+from .currency import (
+    extract_currency_from_price_token,
+    extract_price_from_price_token,
+    format_price,
+    format_price_axis_label,
+)
 from .parsers import (
     parse_airlines,
     parse_cabin_class,
@@ -43,6 +48,7 @@ __all__ = [
     "search_airports",
     # Currency
     "extract_currency_from_price_token",
+    "extract_price_from_price_token",
     "format_price",
     "format_price_axis_label",
 ]

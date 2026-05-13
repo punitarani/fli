@@ -256,3 +256,55 @@ class TestParsePriceInfo:
             ],
         ]
         assert SearchFlights._parse_price_info(data) == (118.0, "USD")
+
+    def test_parse_price_info_falls_back_to_protobuf_when_direct_missing(self):
+        """Use the protobuf-encoded price when the direct integer is absent.
+
+        Regression test for issue #144: certain LCC carriers (Eastar Jet, Aero K,
+        Wizz Air, etc.) have an empty/None inner price array but a valid price
+        token. The parser used to return 0.0; it should now extract the price
+        from the protobuf token instead.
+        """
+        # Inner list has only None (no direct integer), but the protobuf token
+        # carries the price (11740 cents = $117.40 USD).
+        token = (
+            "CjRIQktCNmV1UjNqNjhBR043X0FCRy0tLS0tLS0tLS12dGpkN0FBQUFBR25JcWZNS2pGTTBBEgZV"
+            "QTIyMDkaCgjcWxACGgNVU0Q4HHDcWw=="
+        )
+        data = [None, [[None], token]]
+        price, currency = SearchFlights._parse_price_info(data)
+        assert price == 117.40
+        assert currency == "USD"
+
+    def test_parse_price_info_falls_back_to_protobuf_when_direct_zero(self):
+        """Use the protobuf price even when direct extraction yields 0.0."""
+        token = (
+            "CjRIQktCNmV1UjNqNjhBR043X0FCRy0tLS0tLS0tLS12dGpkN0FBQUFBR25JcWZNS2pGTTBBEgZV"
+            "QTIyMDkaCgjcWxACGgNVU0Q4HHDcWw=="
+        )
+        data = [None, [[None, 0], token]]
+        price, currency = SearchFlights._parse_price_info(data)
+        assert price == 117.40
+        assert currency == "USD"
+
+    def test_parse_price_info_keeps_direct_price_over_protobuf(self):
+        """Direct integer price wins when present and positive.
+
+        Per Google Flights, the display integer at ``data[1][0][-1]`` is the
+        source of truth (the protobuf is consistently ~$1 less than displayed).
+        """
+        token = (
+            "CjRIQktCNmV1UjNqNjhBR043X0FCRy0tLS0tLS0tLS12dGpkN0FBQUFBR25JcWZNS2pGTTBBEgZV"
+            "QTIyMDkaCgjcWxACGgNVU0Q4HHDcWw=="
+        )
+        data = [None, [[None, 118], token]]
+        price, currency = SearchFlights._parse_price_info(data)
+        assert price == 118.0
+        assert currency == "USD"
+
+    def test_parse_price_info_no_token_stays_zero(self):
+        """With no token to fall back on, the parser still returns 0.0."""
+        data = [None, [[None]]]
+        price, currency = SearchFlights._parse_price_info(data)
+        assert price == 0.0
+        assert currency is None

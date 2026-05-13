@@ -9,7 +9,7 @@ import logging
 from copy import deepcopy
 from datetime import datetime
 
-from fli.core import extract_currency_from_price_token
+from fli.core import extract_currency_from_price_token, extract_price_from_price_token
 from fli.models import (
     Airline,
     Airport,
@@ -158,7 +158,15 @@ class SearchFlights:
 
     @staticmethod
     def _parse_price_info(data: list) -> tuple[float, str | None]:
-        """Extract the numeric price and returned currency from raw flight data."""
+        """Extract the numeric price and returned currency from raw flight data.
+
+        Google Flights stores the display price at ``data[1][0][-1]`` for
+        flights it sells through booking partners. For some carriers (often
+        LCCs like Eastar Jet, Aero K, Wizz Air) the direct price is absent
+        even though the route is shown — in that case we fall back to the
+        protobuf-encoded price embedded in the same price token used for
+        currency extraction.
+        """
         price_block = SearchFlights._get_price_block(data)
         price = 0.0
         currency = None
@@ -172,6 +180,13 @@ class SearchFlights:
                 currency = extract_currency_from_price_token(price_block[1])
         except (IndexError, TypeError):
             pass
+        if price <= 0 and price_block and len(price_block) > 1:
+            try:
+                token_price = extract_price_from_price_token(price_block[1])
+            except (IndexError, TypeError):
+                token_price = None
+            if token_price is not None and token_price > 0:
+                price = float(token_price)
         return price, currency
 
     @staticmethod
