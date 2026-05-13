@@ -5,13 +5,19 @@ from datetime import datetime, timedelta
 import pytest
 
 from fli.models import (
+    Airline,
     Airport,
+    BagsFilter,
     DateSearchFilters,
+    EmissionsFilter,
     FlightSegment,
+    LayoverRestrictions,
     MaxStops,
     PassengerInfo,
+    PriceLimit,
     SeatType,
     SortBy,
+    TimeRestrictions,
 )
 from fli.models.google_flights.base import TripType
 from fli.search import SearchDates
@@ -145,6 +151,103 @@ def complex_round_trip_params():
         from_date=(outbound_date - timedelta(days=30)).strftime("%Y-%m-%d"),
         to_date=(outbound_date + timedelta(days=30)).strftime("%Y-%m-%d"),
     )
+
+
+def test_chunked_search_does_not_mutate_caller_filters(monkeypatch):
+    """Chunked searches should not modify the caller's filter object."""
+    from_date = datetime.now() + timedelta(days=30)
+    to_date = from_date + timedelta(days=120)
+    filters = DateSearchFilters(
+        passenger_info=PassengerInfo(adults=1),
+        flight_segments=[
+            FlightSegment(
+                departure_airport=[[Airport.PHX, 0]],
+                arrival_airport=[[Airport.SFO, 0]],
+                travel_date=from_date.strftime("%Y-%m-%d"),
+            )
+        ],
+        from_date=from_date.strftime("%Y-%m-%d"),
+        to_date=to_date.strftime("%Y-%m-%d"),
+    )
+    original_segment_dates = [segment.travel_date for segment in filters.flight_segments]
+    captured_chunks = []
+
+    def fake_search_chunk(self, chunk_filters):
+        captured_chunks.append(chunk_filters)
+        return []
+
+    monkeypatch.setattr(SearchDates, "_search_chunk", fake_search_chunk)
+
+    search = SearchDates.__new__(SearchDates)
+    assert search.search(filters) is None
+
+    assert [segment.travel_date for segment in filters.flight_segments] == original_segment_dates
+    assert [chunk.flight_segments[0].travel_date for chunk in captured_chunks] == [
+        from_date.strftime("%Y-%m-%d"),
+        (from_date + timedelta(days=SearchDates.MAX_DAYS_PER_SEARCH)).strftime("%Y-%m-%d"),
+    ]
+
+
+def test_chunked_search_preserves_optional_filters(monkeypatch):
+    """Chunk filters should retain optional constraints from the caller's filters."""
+    from_date = datetime.now() + timedelta(days=30)
+    to_date = from_date + timedelta(days=130)
+    filters = DateSearchFilters(
+        passenger_info=PassengerInfo(adults=2, children=1),
+        flight_segments=[
+            FlightSegment(
+                departure_airport=[[Airport.PHX, 0]],
+                arrival_airport=[[Airport.SFO, 0]],
+                travel_date=from_date.strftime("%Y-%m-%d"),
+                time_restrictions=TimeRestrictions(
+                    earliest_departure=7,
+                    latest_departure=18,
+                    earliest_arrival=9,
+                    latest_arrival=22,
+                ),
+            )
+        ],
+        stops=MaxStops.ONE_STOP_OR_FEWER,
+        seat_type=SeatType.PREMIUM_ECONOMY,
+        price_limit=PriceLimit(max_price=500),
+        airlines=[Airline.AA, Airline.UA],
+        max_duration=480,
+        layover_restrictions=LayoverRestrictions(
+            airports=[Airport.LAX],
+            max_duration=180,
+        ),
+        emissions=EmissionsFilter.LESS,
+        bags=BagsFilter(checked_bags=1, carry_on=True),
+        from_date=from_date.strftime("%Y-%m-%d"),
+        to_date=to_date.strftime("%Y-%m-%d"),
+    )
+    captured_chunks = []
+
+    def fake_search_chunk(self, chunk_filters):
+        captured_chunks.append(chunk_filters)
+        return []
+
+    monkeypatch.setattr(SearchDates, "_search_chunk", fake_search_chunk)
+
+    search = SearchDates.__new__(SearchDates)
+    search.search(filters)
+
+    assert len(captured_chunks) == 3
+    for chunk in captured_chunks:
+        assert chunk is not filters
+        assert chunk.flight_segments[0] is not filters.flight_segments[0]
+        assert (
+            chunk.flight_segments[0].time_restrictions
+            == filters.flight_segments[0].time_restrictions
+        )
+        assert chunk.stops == filters.stops
+        assert chunk.seat_type == filters.seat_type
+        assert chunk.price_limit == filters.price_limit
+        assert chunk.airlines == filters.airlines
+        assert chunk.max_duration == filters.max_duration
+        assert chunk.layover_restrictions == filters.layover_restrictions
+        assert chunk.emissions == filters.emissions
+        assert chunk.bags == filters.bags
 
 
 @pytest.mark.parametrize(

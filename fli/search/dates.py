@@ -87,21 +87,18 @@ class SearchDates:
                     }
                 )
                 for seg, original_date in zip(
-                    filters.flight_segments, original_travel_dates
+                    filters.flight_segments, original_travel_dates, strict=True
                 )
             ]
 
-            # Create new filters for this chunk
-            chunk_filters = DateSearchFilters(
-                trip_type=filters.trip_type,
-                passenger_info=filters.passenger_info,
-                flight_segments=chunk_segments,
-                stops=filters.stops,
-                seat_type=filters.seat_type,
-                airlines=filters.airlines,
-                from_date=current_from.strftime("%Y-%m-%d"),
-                to_date=current_to.strftime("%Y-%m-%d"),
-                duration=filters.duration,
+            # Copy the original filters so optional constraints are preserved
+            # for each chunk, while updating only the fields that vary.
+            chunk_filters = filters.model_copy(
+                update={
+                    "flight_segments": chunk_segments,
+                    "from_date": current_from.strftime("%Y-%m-%d"),
+                    "to_date": current_to.strftime("%Y-%m-%d"),
+                }
             )
 
             chunk_results = self._search_chunk(chunk_filters)
