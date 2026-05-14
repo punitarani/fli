@@ -21,12 +21,23 @@ callers cooperate cleanly under Google's 10 req/sec ceiling.
 from __future__ import annotations
 
 import threading
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from curl_cffi import requests
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from fli.search._concurrency import TokenBucketRateLimiter
+
+# ``curl_cffi`` adds ~100ms to import time on first load — we only need
+# it once an HTTP request actually fires, so import lazily on first use.
+# ``TYPE_CHECKING`` makes the annotation visible to static checkers
+# without paying the import cost at runtime.
+if TYPE_CHECKING:
+    from curl_cffi import requests as _curl_requests
+    Response = _curl_requests.Response
+    Session = _curl_requests.Session
+else:
+    Response = "Any"
+    Session = "Any"
 
 # Module-level singleton client (back-compat for ``get_client()``).
 client: Client | None = None
@@ -57,11 +68,16 @@ class Client:
         self._sessions = threading.local()
         self._rate_limiter = TokenBucketRateLimiter(calls=calls_per_second, period=1.0)
 
-    def _session(self) -> requests.Session:
+    def _session(self) -> Session:
         """Return this thread's ``Session``, creating it on first use."""
         session = getattr(self._sessions, "session", None)
         if session is None:
-            session = requests.Session()
+            # Deferred import: ``curl_cffi`` is heavy (~100ms cold) and
+            # not needed for CLI flows that never hit the network, so
+            # only pull it in on the first real request.
+            from curl_cffi import requests as _requests
+
+            session = _requests.Session()
             session.headers.update(self.DEFAULT_HEADERS)
             self._sessions.session = session
         return session
@@ -80,7 +96,7 @@ class Client:
     # ------------------------------------------------------------------
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(), reraise=True)
-    def get(self, url: str, **kwargs: Any) -> requests.Response:
+    def get(self, url: str, **kwargs: Any) -> Response:
         """Make a rate-limited GET request with automatic retries."""
         self._rate_limiter.acquire()
         try:
@@ -91,7 +107,7 @@ class Client:
             raise Exception(f"GET request failed: {str(e)}") from e
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(), reraise=True)
-    def post(self, url: str, **kwargs: Any) -> requests.Response:
+    def post(self, url: str, **kwargs: Any) -> Response:
         """Make a rate-limited POST request with automatic retries."""
         self._rate_limiter.acquire()
         try:
