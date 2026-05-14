@@ -13,12 +13,19 @@ def _single_chunk(payload):
 
 
 def _multi_chunk(*payloads):
-    """Build a multi-chunk response with explicit length prefixes."""
+    """Build a multi-chunk response with explicit length prefixes.
+
+    Mirrors Google's actual format: each length header counts both the
+    leading newline that follows the header AND the trailing newline that
+    separates this chunk from the next (i.e. ``len(outer_json) + 1``).
+    """
     parts = [")]}'\n\n"]
     for p in payloads:
         inner_json = json.dumps(p, separators=(",", ":"))
         outer_json = json.dumps([["wrb.fr", None, inner_json]], separators=(",", ":"))
-        parts.append(f"{len(outer_json)}\n{outer_json}\n")
+        # +2 accounts for both newlines the count covers (the header
+        # terminator and the trailing separator).
+        parts.append(f"{len(outer_json) + 2}\n{outer_json}\n")
     return "".join(parts)
 
 
