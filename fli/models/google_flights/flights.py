@@ -75,9 +75,17 @@ class FlightSearchFilters(BaseModel):
                 return serialize(obj.dict(exclude_none=True))
             return obj
 
-        # Format flight segments
+        # Format flight segments. Google's UI classifies segments with a
+        # trailing int at position 14:
+        #   - 3 = outbound (first leg, or only leg of a one-way / multi-city)
+        #   - 1 = return (second leg of a round-trip)
+        # Empirically Google's `GetShoppingResults` accepts a uniform `3`
+        # for both segments without errors, but `GetBookingResults`
+        # rejects the request with INVALID_ARGUMENT unless the classifier
+        # matches the UI's pattern (verified May 2026 by diffing the
+        # browser's POST body against our own).
         formatted_segments = []
-        for segment in self.flight_segments:
+        for seg_idx, segment in enumerate(self.flight_segments):
             # Format airport codes with correct nesting
             segment_filters = [
                 [
@@ -168,6 +176,12 @@ class FlightSearchFilters(BaseModel):
                 [self.emissions.value] if self.emissions != EmissionsFilter.ALL else None
             )
 
+            # Segment classifier: 3 for outbound (or only leg), 1 for return.
+            is_return = (
+                self.trip_type == TripType.ROUND_TRIP and seg_idx > 0
+            )
+            classifier = 1 if is_return else 3
+
             segment_formatted = [
                 segment_filters[0],  # 0: departure airport
                 segment_filters[1],  # 1: arrival airport
@@ -183,7 +197,7 @@ class FlightSearchFilters(BaseModel):
                 layover_min_duration,  # 11: min layover duration (mins)
                 layover_max_duration,  # 12: max layover duration (mins)
                 emissions_filter,  # 13: emissions filter [1]=less emissions
-                3,  # 14: classifier hardcoded; UI sends 3 outbound / 1 return
+                classifier,  # 14: classifier (3=outbound, 1=return)
             ]
             formatted_segments.append(segment_formatted)
 

@@ -288,9 +288,19 @@ class SearchFlights:
 
     @staticmethod
     def _encode_booking_payload(token: str, filters: FlightSearchFilters) -> str:
-        """URL-encode the ``f.req`` body for GetBookingResults."""
+        """URL-encode the ``f.req`` body for GetBookingResults.
+
+        Strips the main-filter struct down to the prefix Google's UI sends
+        (ends at position 17 — the trailing constant). Google's
+        GetBookingResults validates the struct shape and rejects requests
+        with the longer 29-element main that GetShoppingResults accepts.
+        """
         formatted = filters.format()
         main = formatted[1] if len(formatted) > 1 else None
+        # The browser sends only main[0..17]; the longer struct used for
+        # GetShoppingResults is rejected here. Trim the tail.
+        if isinstance(main, list) and len(main) > 18:
+            main = main[:18]
         payload = [
             [None, token],
             main,

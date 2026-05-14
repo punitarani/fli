@@ -1,15 +1,26 @@
-"""Tests for the GetBookingResults protobuf token builder.
+"""Tests for the GetBookingResults protobuf token builder + tfu URL parser.
 
 The builder reproduces a byte-perfect copy of the captured token from a
 live booking-page URL. The captured fixture is the authoritative
 reference — any change to the builder must keep this byte-equal.
+
+The tfu parser extracts the same booking token from a ``tfu=`` URL
+parameter — the value Google's UI puts in the booking-page URL after a
+user clicks "Select flight".
 """
 
 from __future__ import annotations
 
 import base64
 
-from fli.search._proto import build_booking_token, decode_booking_token
+import pytest
+
+from fli.search._proto import (
+    build_booking_token,
+    decode_booking_token,
+    extract_booking_token_from_tfu,
+    extract_session_id_from_tfu,
+)
 
 # Captured live from a real booking page (2026-05-14):
 #   JFK -> LAX outbound AA171, LAX -> JFK return AA28, RT $346.80 USD
@@ -103,3 +114,51 @@ class TestVarintEncoding:
         token = build_booking_token("ABC", "AA", "1", 1, 100, "USD")
         decoded = decode_booking_token(token)
         assert decoded["field_1"] == "ABC"
+
+
+# Live `tfu` URL parameter captured 2026-05-14 from a JFK→LAX RT booking page.
+LIVE_TFU = (
+    "CmxDalJJVVZwUk1FOUJjRVZyZEVWQlEzaFRkVkZDUnkwdExTMHRMUzB0TFhCcVltWjZOMEZCUVVGQlIyOUd"
+    "PVlpGU0U5SVVXRkJFZ1pCUVRJNEl6RWFDd2o0amdJUUFob0RWVk5FT0J4dytJNEMSAggAIgA"
+)
+LIVE_BOOKING_URL = (
+    "https://www.google.com/travel/flights/booking"
+    "?tfs=CBwQAho_EgoyMDI2LTA3LTE1Ih8KA0pGSxIKMjAyNi0wNy0xNRoDTEFYKgJBQTIDMTcxagcIAR"
+    "IDSkZLcgcIARIDTEFYGj4SCjIwMjYtMDctMTkiHgoDTEFYEgoyMDI2LTA3LTE5GgNKRksqAkFBMgIy"
+    "OGoHCAESA0xBWHIHCAESA0pGS0ABSAFwAYIBCwj___________8BmAEB"
+    f"&tfu={LIVE_TFU}&hl=en&gl=US&curr=USD"
+)
+
+
+class TestExtractBookingTokenFromTfu:
+    def test_extract_from_bare_tfu_value(self):
+        token = extract_booking_token_from_tfu(LIVE_TFU)
+        # The extracted bytes must decode back to a recognisable booking token.
+        decoded = decode_booking_token(token)
+        assert decoded["field_2"] == "AA28#1"
+        assert decoded["field_3"]["field_3"] == "USD"
+
+    def test_extract_from_full_booking_url(self):
+        token_url = extract_booking_token_from_tfu(LIVE_BOOKING_URL)
+        token_bare = extract_booking_token_from_tfu(LIVE_TFU)
+        assert token_url == token_bare
+
+    def test_extract_session_id_round_trip(self):
+        session = extract_session_id_from_tfu(LIVE_TFU)
+        # 50-ish base64-alphabet bytes, starts with H, has "--" separator
+        assert isinstance(session, str)
+        assert len(session) > 30
+        assert session.startswith("H")
+        assert "-" in session
+
+    def test_url_without_tfu_param_rejected(self):
+        with pytest.raises(ValueError):
+            extract_booking_token_from_tfu(
+                "https://www.google.com/travel/flights/booking?tfs=ABC&hl=en"
+            )
+
+    def test_invalid_base64_rejected(self):
+        # Garbage input should raise ValueError (specific message varies
+        # by which validation step rejects first).
+        with pytest.raises(ValueError):
+            extract_booking_token_from_tfu("!!!!not-valid-base64!!!!")

@@ -166,3 +166,97 @@ def _read_varint(buf: bytes, off: int) -> tuple[int, int]:
         if not (byte & 0x80):
             return value, off
         shift += 7
+
+
+def extract_booking_token_from_tfu(tfu: str) -> str:
+    """Extract the booking token from a booking-page ``tfu`` URL parameter.
+
+    Google Flights' booking page URL has the shape::
+
+        /booking?tfs=<tfs>&tfu=<tfu>...
+
+    where ``tfu`` is a base64-encoded protobuf wrapping the booking token::
+
+        tfu = base64( protobuf {
+          field 1 (str): base64( <booking token bytes> )
+          field 2 (nested): { ... }
+          field 4 (str): "" or other padding
+        } )
+
+    This helper accepts either a bare ``tfu`` value or a full URL and
+    returns the inner booking token in the same base64 form
+    :class:`SearchFlights.get_booking_options` accepts via its
+    ``booking_token`` kwarg.
+
+    Args:
+        tfu: A ``tfu`` URL parameter value, or a full URL containing one.
+
+    Returns:
+        The base64-encoded booking token suitable for
+        :meth:`SearchFlights.get_booking_options`.
+
+    Raises:
+        ValueError: If the input does not contain a parseable tfu blob.
+
+    """
+    # Accept full URL
+    if "tfu=" in tfu:
+        from urllib.parse import parse_qs, urlparse
+
+        parts = urlparse(tfu)
+        qs = parse_qs(parts.query)
+        if "tfu" not in qs:
+            raise ValueError("URL has no `tfu` query parameter")
+        tfu = qs["tfu"][0]
+
+    # Decode the outer protobuf
+    padding = "=" * ((4 - len(tfu) % 4) % 4)
+    try:
+        raw = base64.urlsafe_b64decode(tfu + padding)
+    except (ValueError, base64.binascii.Error) as e:
+        raise ValueError(f"tfu is not valid base64: {e}") from e
+
+    # Walk protobuf fields looking for field 1 (length-delim string)
+    off = 0
+    while off < len(raw):
+        tag, off = _read_varint(raw, off)
+        field = tag >> 3
+        wire = tag & 0x7
+        if wire == 0:
+            _, off = _read_varint(raw, off)
+        elif wire == 2:
+            length, off = _read_varint(raw, off)
+            data = raw[off : off + length]
+            off += length
+            if field == 1:
+                try:
+                    token_b64 = data.decode("ascii")
+                except UnicodeDecodeError as e:
+                    raise ValueError("tfu field 1 is not ASCII") from e
+                # Strip trailing whitespace/padding-like chars and
+                # re-normalise to the standard base64 alphabet so the
+                # downstream parser accepts it.
+                token_b64 = token_b64.strip().rstrip("=")
+                return token_b64
+        elif wire == 5:
+            off += 4
+        elif wire == 1:
+            off += 8
+        else:
+            raise ValueError(f"unsupported wire type {wire} at offset {off}")
+
+    raise ValueError("tfu protobuf has no field 1 (booking token)")
+
+
+def extract_session_id_from_tfu(tfu: str) -> str:
+    """Extract the booking session id from a ``tfu`` URL parameter.
+
+    Convenience wrapper that calls :func:`extract_booking_token_from_tfu`
+    then decodes the inner token's ``field 1`` (the session id).
+    """
+    inner_token = extract_booking_token_from_tfu(tfu)
+    decoded = decode_booking_token(inner_token)
+    session = decoded.get("field_1")
+    if not isinstance(session, str):
+        raise ValueError("inner booking token has no field 1 (session id)")
+    return session

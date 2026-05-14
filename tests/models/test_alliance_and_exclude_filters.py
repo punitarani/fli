@@ -206,6 +206,43 @@ class TestDateSearchFiltersMirrors:
         assert seg[12] == 600
 
 
+class TestSegmentClassifier:
+    """Verify the segment[14] classifier matches Google's UI convention.
+
+    Empirically (May 2026): GetShoppingResults accepts a uniform `3` on
+    all segments, but GetBookingResults rejects the request unless the
+    classifier is `3` for outbound and `1` for return.
+    """
+
+    def test_one_way_outbound_is_3(self):
+        filters = _basic_filters()  # one-way default
+        seg = _segment_from_filters(filters)
+        assert seg[14] == 3
+
+    def test_round_trip_outbound_is_3_return_is_1(self):
+        out_date = _future_date(30)
+        ret_date = _future_date(37)
+        filters = FlightSearchFilters(
+            trip_type=__import__("fli.models", fromlist=["TripType"]).TripType.ROUND_TRIP,
+            passenger_info=PassengerInfo(adults=1),
+            flight_segments=[
+                FlightSegment(
+                    departure_airport=[[Airport.JFK, 0]],
+                    arrival_airport=[[Airport.LAX, 0]],
+                    travel_date=out_date,
+                ),
+                FlightSegment(
+                    departure_airport=[[Airport.LAX, 0]],
+                    arrival_airport=[[Airport.JFK, 0]],
+                    travel_date=ret_date,
+                ),
+            ],
+        )
+        segments = filters.format()[1][13]
+        assert segments[0][14] == 3, "Outbound classifier must be 3"
+        assert segments[1][14] == 1, "Return classifier must be 1"
+
+
 class TestEncodingIsValidJSON:
     """The encoded payload must round-trip through JSON without crashing."""
 
