@@ -2,7 +2,6 @@
 
 from fli.search.flights import _with_locale_params
 
-
 BASE = "https://www.google.com/_/FlightsFrontendUi/data/x/y"
 
 

@@ -6,6 +6,7 @@ with Google Flights' API to find available flights and their details.
 
 import json
 import logging
+import urllib.parse
 from copy import deepcopy
 from datetime import datetime
 from typing import Any
@@ -15,12 +16,14 @@ from fli.models import (
     Airline,
     Airport,
     Amenities,
+    BookingOption,
     FlightLeg,
     FlightResult,
     FlightSearchFilters,
     Layover,
 )
 from fli.models.google_flights.base import TripType
+from fli.search._wire import iter_wrb_chunks
 from fli.search.client import get_client
 
 logger = logging.getLogger(__name__)
@@ -34,6 +37,7 @@ class SearchFlights:
     """
 
     BASE_URL = "https://www.google.com/_/FlightsFrontendUi/data/travel.frontend.flights.FlightsFrontendService/GetShoppingResults"
+    BOOKING_URL = "https://www.google.com/_/FlightsFrontendUi/data/travel.frontend.flights.FlightsFrontendService/GetBookingResults"
     DEFAULT_HEADERS = {
         "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
     }
@@ -147,6 +151,104 @@ class SearchFlights:
 
         except Exception as e:
             raise Exception(f"Search failed: {str(e)}") from e
+
+    # ------------------------------------------------------------------
+    # Booking options (vendor list)
+    # ------------------------------------------------------------------
+
+    def get_booking_options(
+        self,
+        flight: FlightResult,
+        filters: FlightSearchFilters,
+        currency: str | None = None,
+        language: str | None = None,
+        country: str | None = None,
+    ) -> list[BookingOption]:
+        """Fetch bookable fare options for an already-selected itinerary.
+
+        After :meth:`search` returns a list of :class:`FlightResult` objects,
+        each result carries a `booking_token` (mirrors Google's ``f0[8]``).
+        This method calls the GetBookingResults endpoint with that token plus
+        the filter object (with `selected_flight` populated on each segment)
+        to retrieve the vendor list — including airline-direct fares, OTAs,
+        per-fare prices, and Google's click-through redirect URLs.
+
+        Args:
+            flight: The :class:`FlightResult` returned by ``search``. Its
+                ``booking_token`` field must be set (it is populated by the
+                parser for live API responses).
+            filters: The same :class:`FlightSearchFilters` used in the
+                preceding ``search`` call. ``selected_flight`` should be
+                populated on every segment.
+            currency: Optional ISO 4217 currency code (``curr`` URL param).
+            language: Optional BCP-47 language code (``hl`` URL param).
+            country: Optional ISO 3166-1 alpha-2 country code (``gl`` URL param).
+
+        Returns:
+            A list of :class:`BookingOption` objects. Empty list when no
+            vendors are available.
+
+        Raises:
+            ValueError: If ``flight.booking_token`` is missing.
+            Exception: If the HTTP request fails.
+
+        """
+        token = getattr(flight, "booking_token", None)
+        if not token:
+            raise ValueError(
+                "flight.booking_token is required to fetch booking options; "
+                "did you call SearchFlights.search first?"
+            )
+
+        encoded_body = self._encode_booking_payload(token, filters)
+        url = _with_locale_params(self.BOOKING_URL, currency, language, country)
+
+        try:
+            response = self.client.post(
+                url=url,
+                data=f"f.req={encoded_body}",
+                impersonate="chrome",
+                allow_redirects=True,
+            )
+            response.raise_for_status()
+        except Exception as e:
+            raise Exception(f"Booking options request failed: {str(e)}") from e
+
+        options: list[BookingOption] = []
+        for chunk in iter_wrb_chunks(response.text):
+            options.extend(self._parse_booking_chunk(chunk))
+        return options
+
+    @staticmethod
+    def _encode_booking_payload(token: str, filters: FlightSearchFilters) -> str:
+        """Build the URL-encoded ``f.req`` body for GetBookingResults."""
+        formatted = filters.format()
+        # The booking endpoint takes the same main-filter struct from
+        # `format()[1]` (with selected_flight populated), plus the token at
+        # outer[0] and a couple of trailing nulls. The other outer fields
+        # (sort, show_all, ...) are ignored.
+        main = formatted[1] if len(formatted) > 1 else None
+        payload = [
+            [None, token],
+            main,
+            None,
+            0,
+        ]
+        wrapped = [None, json.dumps(payload, separators=(",", ":"))]
+        return urllib.parse.quote(json.dumps(wrapped, separators=(",", ":")))
+
+    @staticmethod
+    def _parse_booking_chunk(chunk: Any) -> list[BookingOption]:
+        """Extract booking-option rows from a single decoded wrb chunk."""
+        if not isinstance(chunk, list):
+            return []
+        # Heuristic: the booking-options chunk has a top-level shape where
+        # one of the elements is a list of `[idx, [[vendor]], None, [flights],
+        # bool, [url_block], ...]` entries. We walk the chunk and harvest any
+        # such rows.
+        out: list[BookingOption] = []
+        _walk_for_booking_rows(chunk, out)
+        return out
 
     # ------------------------------------------------------------------
     # Response parsing
@@ -435,6 +537,129 @@ def _as_bool(v: Any) -> bool | None:
 
 def _as_str(v: Any) -> str | None:
     return v if isinstance(v, str) and v else None
+
+
+def _walk_for_booking_rows(node: Any, out: list[BookingOption]) -> None:
+    """Recursively look for booking-option entries inside a decoded chunk.
+
+    A booking entry has the shape::
+
+        [int_index, [[code, name, ?, is_direct], ...], None|list,
+         [[al, fn], ...], bool, [url_block, ...], ...]
+
+    plus optional trailing fields that include the per-fare price and the fare
+    name when Google provides them. We're defensive about field positions
+    because Google reshuffles them across A/B tests.
+    """
+    if isinstance(node, list):
+        # Try to interpret this list as a booking row.
+        opt = _try_parse_booking_row(node)
+        if opt is not None:
+            out.append(opt)
+            return
+        # Otherwise recurse into children.
+        for child in node:
+            _walk_for_booking_rows(child, out)
+
+
+def _try_parse_booking_row(row: list) -> BookingOption | None:
+    if len(row) < 5:
+        return None
+    if not isinstance(row[0], int):
+        return None
+    vendor_block = row[1] if len(row) > 1 else None
+    if not (isinstance(vendor_block, list) and vendor_block):
+        return None
+    first_vendor = vendor_block[0]
+    if not (isinstance(first_vendor, list) and len(first_vendor) >= 2):
+        return None
+    if not isinstance(first_vendor[0], str) or not isinstance(first_vendor[1], str):
+        return None
+
+    flights_block = row[3] if len(row) > 3 else None
+    if flights_block is not None and not isinstance(flights_block, list):
+        return None
+    flights: list[tuple[str, str]] | None = None
+    if isinstance(flights_block, list):
+        gathered: list[tuple[str, str]] = []
+        for entry in flights_block:
+            if isinstance(entry, list) and len(entry) >= 2:
+                al, fn = entry[0], entry[1]
+                if isinstance(al, str) and isinstance(fn, str):
+                    gathered.append((al, fn))
+        flights = gathered or None
+
+    url_block = row[5] if len(row) > 5 else None
+    booking_url, google_click_url = _extract_booking_urls(url_block)
+
+    price, currency, fare_name = _extract_booking_pricing(row)
+
+    is_direct = False
+    if len(first_vendor) >= 4 and isinstance(first_vendor[3], bool):
+        is_direct = first_vendor[3]
+
+    return BookingOption(
+        vendor_code=first_vendor[0],
+        vendor_name=first_vendor[1],
+        is_airline_direct=is_direct,
+        price=price,
+        currency=currency,
+        fare_name=fare_name,
+        booking_url=booking_url,
+        google_click_url=google_click_url,
+        flights=flights,
+    )
+
+
+def _extract_booking_urls(block: Any) -> tuple[str | None, str | None]:
+    """Return (vendor_url_pattern, google_click_url) from a row[5]-shaped block."""
+    if not isinstance(block, list):
+        return None, None
+    vendor_url = block[0] if block and isinstance(block[0], str) else None
+    google_click_url = None
+    # Recursively search for a string that starts with "https://www.google.com/travel/clk".
+    def walk(node: Any) -> None:
+        nonlocal google_click_url
+        if google_click_url is not None:
+            return
+        if isinstance(node, list):
+            for child in node:
+                walk(child)
+        elif isinstance(node, str) and "/travel/clk" in node:
+            google_click_url = node
+    walk(block)
+    return vendor_url, google_click_url
+
+
+def _extract_booking_pricing(row: list) -> tuple[float | None, str | None, str | None]:
+    """Best-effort extraction of price/currency/fare_name from a booking row."""
+    # Google places per-fare details deeper in the row, but at varying indices.
+    # We scan all string values for an ISO currency code and the closest float.
+    currency: str | None = None
+    price: float | None = None
+    fare_name: str | None = None
+
+    def walk(node: Any, depth: int = 0) -> None:
+        nonlocal currency, price, fare_name
+        if isinstance(node, list):
+            for child in node:
+                walk(child, depth + 1)
+        elif isinstance(node, str):
+            if currency is None and len(node) == 3 and node.isupper() and node.isalpha():
+                currency = node
+            elif fare_name is None and node and " " not in node and len(node) > 1:
+                # Skip; fare names usually have spaces ("Basic Economy", "Main Cabin").
+                pass
+            elif fare_name is None and node and len(node) <= 30 and " " in node:
+                # Heuristic: short, contains a space, isn't a URL.
+                if "http" not in node and "/" not in node:
+                    fare_name = node
+        elif isinstance(node, int | float) and not isinstance(node, bool):
+            if price is None and 10 <= node <= 100000:
+                price = float(node)
+
+    walk(row)
+    return price, currency, fare_name
 
 
 def _with_locale_params(

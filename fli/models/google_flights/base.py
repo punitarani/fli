@@ -246,6 +246,25 @@ class FlightLeg(BaseModel):
     co2_emissions_g: NonNegativeInt | None = None
 
 
+class BookingOption(BaseModel):
+    """A single bookable fare exposed by GetBookingResults.
+
+    Google Flights' booking page surfaces a list of vendors (airline direct and
+    OTAs) with per-fare prices and click-through URLs. This model captures one
+    such row.
+    """
+
+    vendor_code: str | None = None
+    vendor_name: str | None = None
+    is_airline_direct: bool = False
+    price: NonNegativeFloat | None = None
+    currency: str | None = None
+    fare_name: str | None = None
+    booking_url: str | None = None
+    google_click_url: str | None = None
+    flights: list[tuple[str, str]] | None = None  # [(airline_code, flight_number), ...]
+
+
 class FlightResult(BaseModel):
     """Complete flight search result with pricing and timing."""
 

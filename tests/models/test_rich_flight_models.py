@@ -15,15 +15,15 @@ from fli.models import (
 
 
 def _make_leg(**overrides):
-    base = dict(
-        airline=Airline.DL,
-        flight_number="100",
-        departure_airport=Airport.JFK,
-        arrival_airport=Airport.LAX,
-        departure_datetime=datetime(2026, 7, 15, 20, 25),
-        arrival_datetime=datetime(2026, 7, 15, 23, 43),
-        duration=378,
-    )
+    base = {
+        "airline": Airline.DL,
+        "flight_number": "100",
+        "departure_airport": Airport.JFK,
+        "arrival_airport": Airport.LAX,
+        "departure_datetime": datetime(2026, 7, 15, 20, 25),
+        "arrival_datetime": datetime(2026, 7, 15, 23, 43),
+        "duration": 378,
+    }
     base.update(overrides)
     return FlightLeg(**base)
 
