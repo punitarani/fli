@@ -10,8 +10,8 @@ empirically discovering that:
   shape.
 """
 
-from datetime import datetime, timedelta
 import json
+from datetime import datetime, timedelta
 
 from fli.models import (
     Airline,
@@ -22,7 +22,6 @@ from fli.models import (
     FlightSegment,
     LayoverRestrictions,
     PassengerInfo,
-    TripType,
 )
 
 
