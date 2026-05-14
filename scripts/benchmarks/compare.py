@@ -1,13 +1,17 @@
-"""Before/after comparison driver.
+"""Sequential-vs-parallel comparison driver across every scenario in ``bench.py``.
 
-Runs the same scenarios under two implementations: the *parallel* (current
-HEAD) implementation, and a *sequential* shim that forces every parallel
-path back onto a single thread. This gives apples-to-apples numbers
-without needing a separate git checkout.
+Runs each scenario twice — once with the shared executor forced down to a
+single worker (so ``parallel_map`` falls back to its synchronous loop),
+once with the default capacity — and prints a side-by-side table with
+speedup factors.
+
+Scenarios where parallelism makes no difference (pure CPU parsing,
+single-chunk wire reads) still appear so we can confirm that the
+parallel mode never *regresses* the fast path.
 
 Usage:
 
-    uv run python scripts/benchmarks/compare.py --iterations 5 --latency-ms 120
+    uv run python scripts/benchmarks/compare.py [--iterations N]
 """
 
 from __future__ import annotations
@@ -19,134 +23,105 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-# We toggle "parallel mode" by reaching into the concurrency module and
-# forcing the executor to a single worker. ``parallel_map`` falls back to
-# a synchronous loop when ``max_workers == 1`` so this perfectly emulates
-# the pre-parallelisation behaviour without touching the search code.
+# Force-toggle the shared executor before importing any scenario builders
+# so they all see the configured worker cap.
 import fli.search._concurrency as _conc  # noqa: E402
-from scripts.benchmarks._harness import BenchResult, print_table, speedup  # noqa: E402
-from scripts.benchmarks._mocks import load_fixture  # noqa: E402
+from scripts.benchmarks._harness import BenchResult, speedup  # noqa: E402
 from scripts.benchmarks.bench import (  # noqa: E402
-    _extract_rows,
-    _synthetic_date_fixture,
-    bench_date_range,
-    bench_one_way,
-    bench_parse_row,
-    bench_round_trip,
+    bench_concurrency_section,
+    bench_dates_section,
+    bench_parsing_section,
+    bench_search_section,
+    bench_wire_section,
 )
 
 
 def _set_parallel(enabled: bool) -> None:
-    """Toggle between parallel and single-threaded execution."""
     _conc.shutdown_executor()
     _conc.configure_concurrency(10 if enabled else 1)
 
 
-def _scenario(
-    label: str,
-    iterations: int,
-    latency_ms: float,
-    rows,
-    fixture,
-    date_fixture,
-    date_days,
-):
-    """Build one named bench-result group for either ``seq`` or ``par`` runs."""
-    parse = bench_parse_row(rows, iterations=max(iterations * 20, 50))
-    one_way = bench_one_way(fixture, iterations, latency_ms)
-    round_trip = bench_round_trip(fixture, iterations, latency_ms)
-    dates = bench_date_range(date_fixture, iterations, latency_ms, days=date_days)
-    parse.name = f"{label}: parse_flight_row (loop)"
-    one_way.name = f"{label}: one-way"
-    round_trip.name = f"{label}: round-trip top_n=5"
-    dates.name = f"{label}: dates {date_days}d"
-    return parse, one_way, round_trip, dates
+def _collect(iters: int) -> dict[str, list[BenchResult]]:
+    return {
+        "Parsing (CPU)": bench_parsing_section(iters),
+        "Wire format": bench_wire_section(iters),
+        "End-to-end search": bench_search_section(iters),
+        "Date-range chunking": bench_dates_section(iters),
+        "Concurrency primitives": bench_concurrency_section(iters),
+    }
 
 
-def _summarise(
-    title: str,
-    seq: tuple[BenchResult, ...],
-    par: tuple[BenchResult, ...],
-) -> None:
+def _print_section(title: str, seq: list[BenchResult], par: list[BenchResult]) -> None:
     print(f"\n{title}")
     print("-" * len(title))
-    header = ("scenario", "sequential (ms)", "parallel (ms)", "speedup", "saved (ms)")
+    header = ("scenario", "seq ms", "par ms", "speedup", "saved ms")
     rows: list[tuple[str, ...]] = []
-    short_names = (
-        "parse_flight_row",
-        "search one-way",
-        "search round-trip",
-        "search dates",
-    )
-    for s, p, name in zip(seq, par, short_names, strict=False):
+    for s, p in zip(seq, par, strict=False):
         sup = speedup(s, p)
         saved = s.wall_mean - p.wall_mean
         rows.append(
             (
-                name,
+                s.name,
                 f"{s.wall_mean:8.2f}",
                 f"{p.wall_mean:8.2f}",
                 f"{sup:5.2f}x",
-                f"{saved:+7.2f}",
+                f"{saved:+8.2f}",
             )
         )
-    widths = [max(len(header[i]), *(len(row[i]) for row in rows)) for i in range(len(header))]
+    widths = [max(len(header[i]), *(len(r[i]) for r in rows)) for i in range(len(header))]
     print("  ".join(h.ljust(widths[i]) for i, h in enumerate(header)))
     print("  ".join("-" * w for w in widths))
     for row in rows:
         print("  ".join(c.ljust(widths[i]) for i, c in enumerate(row)))
 
 
+def _print_top_speedups(all_seq: list[BenchResult], all_par: list[BenchResult]) -> None:
+    pairs = [(s, p, speedup(s, p)) for s, p in zip(all_seq, all_par, strict=False)]
+    pairs.sort(key=lambda x: x[2], reverse=True)
+    print("\nTop speedups overall:")
+    print("-" * 22)
+    for s, p, sup in pairs[:8]:
+        print(
+            f"  {s.name:45s} {s.wall_mean:7.2f}ms → {p.wall_mean:7.2f}ms  "
+            f"({sup:5.2f}x, saved {s.wall_mean - p.wall_mean:+7.2f}ms)"
+        )
+
+
 def main() -> int:
-    """Run the comparison: forced-sequential first, then parallel."""
+    """Run every scenario in sequential mode, then parallel, then diff."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--iterations", type=int, default=5)
-    parser.add_argument("--latency-ms", type=float, default=120.0)
-    parser.add_argument("--date-range-days", type=int, default=180)
+    parser.add_argument("--iterations", type=int, default=3)
     args = parser.parse_args()
 
-    fixture = load_fixture("flight_search_jfk_lax_oneway_usd.bin")
-    date_fixture = _synthetic_date_fixture(days=61)
-    rows = _extract_rows(fixture)
+    iters = args.iterations
+    print(f"Comparison run: {iters} iterations per scenario, parallel toggled via executor cap.\n")
 
-    print(
-        f"Comparing sequential vs parallel: latency={args.latency_ms:.0f}ms, "
-        f"iters={args.iterations}, rows={len(rows)}, date_range={args.date_range_days}d"
-    )
-
-    # Run sequential first so the JIT/cache warms identically for both.
     _set_parallel(False)
-    seq = _scenario(
-        "seq",
-        args.iterations,
-        args.latency_ms,
-        rows,
-        fixture,
-        date_fixture,
-        args.date_range_days,
-    )
+    print("[1/2] Running SEQUENTIAL (max_workers=1)...")
+    seq_sections = _collect(iters)
 
     _set_parallel(True)
-    par = _scenario(
-        "par",
-        args.iterations,
-        args.latency_ms,
-        rows,
-        fixture,
-        date_fixture,
-        args.date_range_days,
+    print("[2/2] Running PARALLEL (max_workers=10)...")
+    par_sections = _collect(iters)
+
+    flat_seq: list[BenchResult] = []
+    flat_par: list[BenchResult] = []
+    for title, seq in seq_sections.items():
+        par = par_sections[title]
+        _print_section(title, seq, par)
+        flat_seq.extend(seq)
+        flat_par.extend(par)
+
+    _print_top_speedups(flat_seq, flat_par)
+
+    # Quick interpretive summary.
+    total_seq = sum(s.wall_mean for s in flat_seq)
+    total_par = sum(p.wall_mean for p in flat_par)
+    print(
+        f"\nAggregate across {len(flat_seq)} scenarios: "
+        f"sequential={total_seq:.0f}ms  parallel={total_par:.0f}ms  "
+        f"saved={total_seq - total_par:.0f}ms ({total_seq / max(total_par, 1e-6):.2f}x)"
     )
-
-    print_table("Raw timings (mean wall-clock ms)", list(seq) + list(par))
-    _summarise("Speedup summary", seq, par)
-
-    # Concurrency observations from the parallel run.
-    print("\nObserved concurrency (parallel run):")
-    for r, name in zip(par[1:], ("one-way", "round-trip top_n=5", "dates"), strict=False):
-        meta = r.payload or {}
-        per_run = meta.get("calls", 0) / max(r.iterations, 1)
-        peak = meta.get("concurrent_max", 1)
-        print(f"  {name:25s}  calls/run={per_run:5.1f}  peak in-flight={peak}")
 
     return 0
 
