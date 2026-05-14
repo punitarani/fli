@@ -19,6 +19,7 @@ from fli.models import (
     FlightSearchFilters,
 )
 from fli.models.google_flights.base import TripType
+from fli.search._concurrency import parallel_map
 from fli.search._decoders import (
     _try_parse_booking_row,  # noqa: F401 — back-compat re-export for tests
     parse_booking_chunk,
@@ -272,9 +273,18 @@ class SearchFlights:
         )
         response.raise_for_status()
 
+        # Booking responses are typically split into two wrb.fr chunks
+        # (vendor list + price refinements). Materialise both before
+        # parsing so we can parse them in parallel — each chunk is a few
+        # hundred KB of pure-Python tree walking, GIL-bound but cheap to
+        # overlap with the next chunk's JSON decode (which releases the GIL).
+        chunks = list(iter_wrb_chunks(response.text))
+        if not chunks:
+            return []
+        parsed = parallel_map(parse_booking_chunk, chunks)
         options: list[BookingOption] = []
-        for chunk in iter_wrb_chunks(response.text):
-            options.extend(parse_booking_chunk(chunk))
+        for chunk_options in parsed:
+            options.extend(chunk_options)
         return options
 
     def _capture_session_id(self, inner: list) -> None:
@@ -318,23 +328,42 @@ class SearchFlights:
         language: str | None,
         country: str | None,
     ) -> list[tuple[FlightResult, ...]] | list[FlightResult]:
-        """Recursively fetch next-leg options for round-trip / multi-city."""
+        """Fetch next-leg options for round-trip / multi-city in parallel.
+
+        Each ``outbound`` candidate triggers an independent follow-up
+        ``GetShoppingResults`` call to enumerate the next leg. Those
+        requests share no state, so we issue them in parallel through the
+        shared rate-limited executor. With ``top_n=5`` and Google's 10
+        req/sec ceiling, all five requests start within ~100ms and the
+        bottleneck becomes the network round trip rather than serial
+        request scheduling.
+        """
         num_segments = len(filters.flight_segments)
         selected_count = sum(1 for s in filters.flight_segments if s.selected_flight is not None)
         if selected_count >= num_segments - 1:
             return flights
 
-        combos: list[tuple[FlightResult, ...]] = []
-        for outbound in flights[:top_n]:
+        # Build the request descriptors up front so the worker function is
+        # a pure FlightResult → list[FlightResult|tuple] mapping with no
+        # mutable shared state.
+        candidates = list(flights[:top_n])
+
+        def expand(outbound: FlightResult):
             next_filters = deepcopy(filters)
             next_filters.flight_segments[selected_count].selected_flight = outbound
-            next_results = self.search(
+            results = self.search(
                 next_filters,
                 top_n=top_n,
                 currency=currency,
                 language=language,
                 country=country,
             )
+            return outbound, results
+
+        expansions = parallel_map(expand, candidates)
+
+        combos: list[tuple[FlightResult, ...]] = []
+        for outbound, next_results in expansions:
             if next_results is None:
                 continue
             for nxt in next_results:
