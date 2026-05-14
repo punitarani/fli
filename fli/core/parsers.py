@@ -8,7 +8,16 @@ import re
 from enum import Enum
 from typing import TypeVar
 
-from fli.models import Airline, Airport, Currency, EmissionsFilter, MaxStops, SeatType, SortBy
+from fli.models import (
+    Airline,
+    Airport,
+    Alliance,
+    Currency,
+    EmissionsFilter,
+    MaxStops,
+    SeatType,
+    SortBy,
+)
 
 _AIRLINE_SEPARATORS = re.compile(r"[,\s]+")
 
@@ -108,6 +117,49 @@ def parse_airlines(codes: list[str] | None) -> list[Airline] | None:
             raise ParseError(f"Invalid airline code: '{code}'") from e
 
     return airlines
+
+
+def parse_alliances(codes: list[str] | None) -> list[Alliance] | None:
+    """Parse a list of alliance identifiers into :class:`Alliance` enums.
+
+    Each item may itself contain multiple comma- or whitespace-separated
+    values, so the CLI can accept ``--alliance ONEWORLD,SKYTEAM`` and
+    repeated ``--alliance ONEWORLD --alliance STAR_ALLIANCE`` equally.
+    Case-insensitive; ``"Star Alliance"`` and ``"star_alliance"`` both
+    resolve to :data:`Alliance.STAR_ALLIANCE`.
+
+    Args:
+        codes: List of alliance names (may be combined with commas/spaces).
+
+    Returns:
+        List of :class:`Alliance` enum values, or ``None`` for empty input.
+
+    Raises:
+        ParseError: If any token is not a recognised alliance name.
+
+    """
+    if not codes:
+        return None
+
+    expanded: list[str] = [
+        token.strip().upper().replace(" ", "_").replace("-", "_")
+        for item in codes
+        for token in _AIRLINE_SEPARATORS.split(item)
+        if token.strip()
+    ]
+    if not expanded:
+        raise ParseError(f"No valid alliance names found in: {codes!r}")
+
+    out: list[Alliance] = []
+    for name in expanded:
+        try:
+            out.append(Alliance[name])
+        except KeyError as e:
+            valid = ", ".join(a.name for a in Alliance)
+            raise ParseError(
+                f"Invalid alliance: '{name}'. Valid values: {valid}"
+            ) from e
+    return out
 
 
 def parse_max_stops(stops: str) -> MaxStops:

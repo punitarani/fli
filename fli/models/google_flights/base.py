@@ -231,16 +231,24 @@ class Amenities(BaseModel):
 class Layover(BaseModel):
     """Layover info between two flight legs.
 
-    `duration` is the wait time at the layover airport in minutes. `overnight`
-    is set when the layover crosses local midnight at the airport. `change_of_airport`
-    is set when the next leg departs from a different airport than the previous
-    leg arrived at (rare but supported by Google Flights).
+    ``duration`` is the wait time at the layover airport in minutes.
+    ``overnight`` is set when the layover crosses local midnight at the
+    airport. ``change_of_airport`` is set when the next leg departs from a
+    different airport than the previous leg arrived at (rare but supported
+    by Google Flights — e.g. JFK arrival + LGA departure in NYC).
+
+    ``city`` and ``airport_name`` are populated from Google's response when
+    available (``detail[13]``); they are optional because the parser also
+    derives layovers structurally from leg timestamps when the detail block
+    isn't present (e.g. on captured fixtures with old responses).
     """
 
     airport: Airport
     duration: NonNegativeInt
     overnight: bool = False
     change_of_airport: bool = False
+    city: str | None = None
+    airport_name: str | None = None
 
 
 class FlightLeg(BaseModel):

@@ -19,6 +19,7 @@ from fli.core import (
     build_flight_segments,
     build_time_restrictions,
     parse_airlines,
+    parse_alliances,
     parse_cabin_class,
     parse_currency,
     parse_emissions,
@@ -149,6 +150,30 @@ class FlightSearchParams(BaseModel):
             "Optional ISO 3166-1 alpha-2 country code (e.g. 'GB') for Google's `gl` param."
         ),
     )
+    exclude_airlines: list[str] | None = Field(
+        None,
+        description="Airline IATA codes to EXCLUDE from results (e.g. ['DL', 'B6']).",
+    )
+    alliance: list[str] | None = Field(
+        None,
+        description=(
+            "Restrict to one or more alliances: 'ONEWORLD', 'SKYTEAM', 'STAR_ALLIANCE'."
+        ),
+    )
+    exclude_alliance: list[str] | None = Field(
+        None,
+        description="Alliance names to EXCLUDE from results.",
+    )
+    min_layover: int | None = Field(
+        None,
+        ge=1,
+        description="Minimum layover duration in minutes (multi-stop trips only).",
+    )
+    max_layover: int | None = Field(
+        None,
+        ge=1,
+        description="Maximum layover duration in minutes (multi-stop trips only).",
+    )
 
 
 class DateSearchParams(BaseModel):
@@ -201,6 +226,28 @@ class DateSearchParams(BaseModel):
         description=(
             "Optional ISO 3166-1 alpha-2 country code (e.g. 'GB') for Google's `gl` param."
         ),
+    )
+    exclude_airlines: list[str] | None = Field(
+        None,
+        description="Airline IATA codes to EXCLUDE from results.",
+    )
+    alliance: list[str] | None = Field(
+        None,
+        description="Restrict to alliances: 'ONEWORLD', 'SKYTEAM', 'STAR_ALLIANCE'.",
+    )
+    exclude_alliance: list[str] | None = Field(
+        None,
+        description="Alliance names to EXCLUDE from results.",
+    )
+    min_layover: int | None = Field(
+        None,
+        ge=1,
+        description="Minimum layover duration in minutes (multi-stop trips only).",
+    )
+    max_layover: int | None = Field(
+        None,
+        ge=1,
+        description="Maximum layover duration in minutes (multi-stop trips only).",
     )
 
 
@@ -359,6 +406,9 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
         max_stops = parse_max_stops(params.max_stops)
         sort_by = parse_sort_by(params.sort_by)
         airlines = parse_airlines(params.airlines)
+        airlines_exclude = parse_airlines(params.exclude_airlines)
+        alliances = parse_alliances(params.alliance)
+        alliances_exclude = parse_alliances(params.exclude_alliance)
 
         # Build time restrictions
         departure_window = params.departure_window or CONFIG.default_departure_window
@@ -379,6 +429,15 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
         if params.checked_bags > 0 or params.carry_on:
             bags_filter = BagsFilter(checked_bags=params.checked_bags, carry_on=params.carry_on)
 
+        layover_restrictions = None
+        if params.min_layover is not None or params.max_layover is not None:
+            from fli.models import LayoverRestrictions
+
+            layover_restrictions = LayoverRestrictions(
+                min_duration=params.min_layover,
+                max_duration=params.max_layover,
+            )
+
         # Create search filters
         filters = FlightSearchFilters(
             trip_type=trip_type,
@@ -387,6 +446,10 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
             stops=max_stops,
             seat_type=cabin_class,
             airlines=airlines,
+            airlines_exclude=airlines_exclude,
+            alliances=alliances,
+            alliances_exclude=alliances_exclude,
+            layover_restrictions=layover_restrictions,
             sort_by=sort_by,
             exclude_basic_economy=params.exclude_basic_economy,
             emissions=emissions_filter,
@@ -439,6 +502,9 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
         cabin_class = parse_cabin_class(params.cabin_class)
         max_stops = parse_max_stops(params.max_stops)
         airlines = parse_airlines(params.airlines)
+        airlines_exclude = parse_airlines(params.exclude_airlines)
+        alliances = parse_alliances(params.alliance)
+        alliances_exclude = parse_alliances(params.exclude_alliance)
 
         # Build time restrictions
         departure_window = params.departure_window or CONFIG.default_departure_window
@@ -454,6 +520,15 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
             time_restrictions=time_restrictions,
         )
 
+        layover_restrictions = None
+        if params.min_layover is not None or params.max_layover is not None:
+            from fli.models import LayoverRestrictions
+
+            layover_restrictions = LayoverRestrictions(
+                min_duration=params.min_layover,
+                max_duration=params.max_layover,
+            )
+
         # Create search filters
         filters = DateSearchFilters(
             trip_type=trip_type,
@@ -462,6 +537,10 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
             stops=max_stops,
             seat_type=cabin_class,
             airlines=airlines,
+            airlines_exclude=airlines_exclude,
+            alliances=alliances,
+            alliances_exclude=alliances_exclude,
+            layover_restrictions=layover_restrictions,
             from_date=params.start_date,
             to_date=params.end_date,
             duration=params.trip_duration if params.is_round_trip else None,
@@ -606,6 +685,26 @@ def search_flights(
         str | None,
         Field(description="Optional ISO 3166-1 alpha-2 country code (e.g., 'GB')."),
     ] = None,
+    exclude_airlines: Annotated[
+        list[str] | None,
+        Field(description="Airline IATA codes to EXCLUDE from results."),
+    ] = None,
+    alliance: Annotated[
+        list[str] | None,
+        Field(description="Restrict to alliances: ONEWORLD, SKYTEAM, STAR_ALLIANCE."),
+    ] = None,
+    exclude_alliance: Annotated[
+        list[str] | None,
+        Field(description="Alliance names to EXCLUDE from results."),
+    ] = None,
+    min_layover: Annotated[
+        int | None,
+        Field(description="Minimum layover duration in minutes.", ge=1),
+    ] = None,
+    max_layover: Annotated[
+        int | None,
+        Field(description="Maximum layover duration in minutes.", ge=1),
+    ] = None,
 ) -> dict[str, Any]:
     """Search for flights between two airports on a specific date.
 
@@ -632,6 +731,11 @@ def search_flights(
         currency=currency,
         language=language,
         country=country,
+        exclude_airlines=exclude_airlines,
+        alliance=alliance,
+        exclude_alliance=exclude_alliance,
+        min_layover=min_layover,
+        max_layover=max_layover,
     )
     return _execute_flight_search(params)
 
@@ -709,6 +813,26 @@ def search_dates(
         str | None,
         Field(description="Optional ISO 3166-1 alpha-2 country code (e.g., 'GB')."),
     ] = None,
+    exclude_airlines: Annotated[
+        list[str] | None,
+        Field(description="Airline IATA codes to EXCLUDE from results."),
+    ] = None,
+    alliance: Annotated[
+        list[str] | None,
+        Field(description="Restrict to alliances: ONEWORLD, SKYTEAM, STAR_ALLIANCE."),
+    ] = None,
+    exclude_alliance: Annotated[
+        list[str] | None,
+        Field(description="Alliance names to EXCLUDE from results."),
+    ] = None,
+    min_layover: Annotated[
+        int | None,
+        Field(description="Minimum layover duration in minutes.", ge=1),
+    ] = None,
+    max_layover: Annotated[
+        int | None,
+        Field(description="Maximum layover duration in minutes.", ge=1),
+    ] = None,
 ) -> dict[str, Any]:
     """Find the cheapest travel dates between two airports within a date range.
 
@@ -732,6 +856,11 @@ def search_dates(
         currency=currency,
         language=language,
         country=country,
+        exclude_airlines=exclude_airlines,
+        alliance=alliance,
+        exclude_alliance=exclude_alliance,
+        min_layover=min_layover,
+        max_layover=max_layover,
     )
     return _execute_date_search(params)
 

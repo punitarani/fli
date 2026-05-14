@@ -452,7 +452,10 @@ def display_flight_results(
                 # Show layover row between legs when populated.
                 if flight.layovers and leg_idx < len(flight.layovers):
                     lo = flight.layovers[leg_idx]
-                    lo_str = f"Layover {format_duration(lo.duration)} at {lo.airport.name}"
+                    where = (
+                        f"{lo.airport.name} ({lo.city})" if lo.city else lo.airport.name
+                    )
+                    lo_str = f"Layover {format_duration(lo.duration)} at {where}"
                     if lo.overnight:
                         lo_str += " (overnight)"
                     if lo.change_of_airport:

@@ -67,6 +67,21 @@ class TestLayover:
         assert lo.overnight is True
         assert lo.change_of_airport is True
 
+    def test_city_and_airport_name_defaults(self):
+        lo = Layover(airport=Airport.JFK, duration=60)
+        assert lo.city is None
+        assert lo.airport_name is None
+
+    def test_city_and_airport_name_populated(self):
+        lo = Layover(
+            airport=Airport.JFK,
+            duration=60,
+            city="New York",
+            airport_name="John F. Kennedy International Airport",
+        )
+        assert lo.city == "New York"
+        assert lo.airport_name == "John F. Kennedy International Airport"
+
     def test_negative_duration_rejected(self):
         with pytest.raises(ValueError):
             Layover(airport=Airport.JFK, duration=-1)

@@ -45,7 +45,9 @@ def parse_flight_row(row: list) -> FlightResult:
 
     raw_legs = detail[2] or []
     legs = [_parse_leg(fl) for fl in raw_legs]
-    layovers = _derive_layovers(legs) if len(legs) > 1 else None
+    layovers = (
+        _derive_layovers(legs, safe_get(detail, 13)) if len(legs) > 1 else None
+    )
 
     emissions = _parse_emissions(detail)
     primary_airline = _safe_airline(safe_get(detail, 0))
@@ -167,25 +169,44 @@ def _parse_emissions(detail: list) -> dict[str, Any]:
     return out
 
 
-def _derive_layovers(legs: list[FlightLeg]) -> list[Layover]:
+def _derive_layovers(
+    legs: list[FlightLeg],
+    detail_block: Any = None,
+) -> list[Layover]:
     """Compute layovers from consecutive leg timestamps.
 
-    Google also reports layovers in ``detail[13]`` with airport names, but
-    we recompute the durations from the parsed leg datetimes for internal
-    consistency (the leg times are already validated as ``datetime``).
+    Durations / overnight / change-of-airport are recomputed from the
+    parsed leg datetimes for internal consistency. When Google's
+    ``detail[13]`` block is provided it carries airport name + city for
+    each layover; those fields are merged in but never override the
+    structurally-derived numbers.
+
+    Shape of ``detail[13]`` (per layover entry, indices used here):
+    ``[duration_mins, IATA, IATA, None, airport_name, city, ...]``
     """
+    detail_entries: list = detail_block if isinstance(detail_block, list) else []
     layovers: list[Layover] = []
     for i in range(len(legs) - 1):
         prev = legs[i]
         nxt = legs[i + 1]
         wait_seconds = (nxt.departure_datetime - prev.arrival_datetime).total_seconds()
         delta_minutes = max(int(wait_seconds // 60), 0)
+
+        airport_name: str | None = None
+        city: str | None = None
+        entry = detail_entries[i] if i < len(detail_entries) else None
+        if isinstance(entry, list):
+            airport_name = as_str(safe_get(entry, 4))
+            city = as_str(safe_get(entry, 5))
+
         layovers.append(
             Layover(
                 airport=prev.arrival_airport,
                 duration=delta_minutes,
                 overnight=prev.arrival_datetime.date() != nxt.departure_datetime.date(),
                 change_of_airport=prev.arrival_airport != nxt.departure_airport,
+                airport_name=airport_name,
+                city=city,
             )
         )
     return layovers
