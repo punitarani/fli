@@ -111,9 +111,97 @@ class TestGetBookingOptionsTokenGuard:
     def test_raises_when_no_token(self):
         filters = _round_trip_filters()
         flight = filters.flight_segments[0].selected_flight
-        # selected_flight has no booking_token by default.
+        # selected_flight has no booking_token, and the client has no
+        # cached session id (no prior search() call).
         with pytest.raises(ValueError, match="Missing booking token"):
             SearchFlights().get_booking_options(flight, filters)
+
+
+class TestGetBookingOptionsSessionCaching:
+    def test_search_caches_session_id_on_client(self):
+        """`search` populates `_last_session_id` from the response."""
+        from unittest.mock import patch
+
+        from fli.search.flights import SearchFlights
+
+        sf = SearchFlights()
+        # Fake a response whose ``inner[0][4]`` is a session id string.
+        fake_inner = [
+            [None, None, None, None, "HCAPTUREDSESSIONID----123ABC"],
+            None,
+            None,
+            [
+                [
+                    [
+                        [None] * 25 + [None],  # detail block (unused)
+                    ]
+                ],
+                None,
+                None,
+                None,
+                None,
+            ],
+        ]
+        # Wrap as the chunked outer the client expects.
+        outer_inner_json = json.dumps(fake_inner, separators=(",", ":"))
+        outer = [["wrb.fr", None, outer_inner_json]]
+        body = ")]}'\n\n" + json.dumps(outer)
+
+        with patch.object(sf.client, "post") as mock_post:
+            mock_response = type("R", (), {"text": body, "raise_for_status": lambda s: None})()
+            mock_post.return_value = mock_response
+            try:
+                sf.search(_round_trip_filters())
+            except Exception:
+                # Parser will reject the fake flights — that's OK; we only
+                # care about the session-id capture side effect.
+                pass
+        assert sf._last_session_id == "HCAPTUREDSESSIONID----123ABC"
+
+    def test_get_booking_options_uses_cached_session_id(self):
+        """Cached session id flows into the protobuf token builder.
+
+        We mock the HTTP layer and inspect the request body — the token
+        embedded at outer[0][1] should decode to a protobuf whose
+        ``field 1`` is the cached session id.
+        """
+        from unittest.mock import patch
+
+        from fli.search._proto import decode_booking_token
+        from fli.search.flights import SearchFlights
+
+        sf = SearchFlights()
+        sf._last_session_id = "FAKE_SESSION_ID_12345"
+
+        filters = _round_trip_filters()
+        flight = filters.flight_segments[1].selected_flight  # return leg
+
+        captured_body = {}
+
+        def _fake_post(url, data, **kwargs):  # noqa: ANN001
+            captured_body["data"] = data
+            return type(
+                "R",
+                (),
+                {
+                    "content": b")]}'\n\n4\n[[]]\n",
+                    "text": ")]}'\n\n4\n[[]]\n",
+                    "raise_for_status": lambda self: None,
+                },
+            )()
+
+        with patch.object(sf.client, "post", side_effect=_fake_post):
+            sf.get_booking_options(flight, filters, currency="USD")
+
+        # Extract token from the URL-encoded body
+        body = captured_body["data"]
+        assert body.startswith("f.req=")
+        decoded_body = urllib.parse.unquote(body[len("f.req=") :])
+        outer = json.loads(decoded_body)
+        payload = json.loads(outer[1])
+        token = payload[0][1]
+        decoded = decode_booking_token(token)
+        assert decoded["field_1"] == "FAKE_SESSION_ID_12345"
 
 
 def _row(price=347, fare_label="Basic Economy"):

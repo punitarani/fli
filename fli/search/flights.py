@@ -59,6 +59,12 @@ class SearchFlights:
     def __init__(self):
         """Initialize the search client."""
         self.client = get_client()
+        # Last successful search response's ``inner[0][4]`` — the shopping
+        # session id used to authenticate the follow-up GetBookingResults
+        # call. Captured automatically by :meth:`search` so that
+        # :meth:`get_booking_options` can derive the booking token without
+        # the caller having to pass anything.
+        self._last_session_id: str | None = None
 
     # ------------------------------------------------------------------
     # Public search API
@@ -108,6 +114,16 @@ class SearchFlights:
             if not parsed:
                 return None
             inner = json.loads(parsed)
+            # Capture the shopping session id (``inner[0][4]``) so that
+            # ``get_booking_options`` can derive the booking-page token
+            # without an explicit token kwarg. The session is short-lived
+            # but valid for the immediate follow-up booking call.
+            try:
+                session_id = inner[0][4]
+                if isinstance(session_id, str) and session_id:
+                    self._last_session_id = session_id
+            except (IndexError, TypeError):
+                pass
             flights_raw = [
                 item for i in (2, 3) if isinstance(inner[i], list) for item in inner[i][0]
             ]
@@ -145,36 +161,37 @@ class SearchFlights:
     ) -> list[BookingOption]:
         """Fetch bookable fare options for a selected itinerary.
 
-        ⚠️  KNOWN LIMITATION (May 2026): GetBookingResults at outer[0][1]
-        wants a server-generated protobuf token that bundles the shopping
-        session id with the selected airline+flight pair and currency
-        metadata. The per-flight ``booking_token`` (``f0[8]``) from
-        :meth:`search` is *not* the same token, so live calls usually
-        return Google's ``ErrorResponse`` (INVALID_ARGUMENT). The parser
-        path is fully validated against a captured response — pass an
-        externally-captured token via ``booking_token`` to use it.
+        After a :meth:`search` call, the session id from Google's response
+        is cached on the client and used here automatically — no explicit
+        token plumbing is required by callers. The booking-call payload
+        carries the same selected_flight legs the caller used in their
+        round-trip search and a protobuf token constructed from the
+        cached session id + the chosen itinerary's identifiers.
 
         Args:
-            flight: A :class:`FlightResult` or tuple of results from
-                :meth:`search`.
+            flight: A :class:`FlightResult` (one-way) or tuple of results
+                (round-trip / multi-city) from :meth:`search`.
             filters: The same filters used in the preceding :meth:`search`
                 call. A copy is made internally; caller filters are not
                 mutated.
-            currency: Optional ISO 4217 currency code.
-            language: Optional BCP-47 language code.
-            country: Optional ISO 3166-1 alpha-2 country code.
-            booking_token: Explicit override for outer[0][1].
-            session_id: Server-generated session token (extracted from the
-                booking page's ``tfu`` URL parameter). When provided and
-                ``booking_token`` is None, the protobuf token is
-                constructed from the flight's metadata + this session id.
+            currency: Optional ISO 4217 currency code passed to Google as
+                ``curr=``. Also forms part of the booking token.
+            language: Optional BCP-47 language code (``hl`` URL param).
+            country: Optional ISO 3166-1 alpha-2 country code (``gl`` URL param).
+            booking_token: Explicit override for ``outer[0][1]``.
+                Bypasses the automatic construction; use this when you
+                have a token captured from a browser's ``tfu`` URL.
+            session_id: Explicit override for the session id used to build
+                the token. Defaults to the session captured by the most
+                recent :meth:`search` call on this client.
 
         Returns:
-            A list of :class:`BookingOption` (empty list when Google
-            returns no vendors or rejects the request).
+            A list of :class:`BookingOption`. Empty list when Google
+            returns no vendors.
 
         Raises:
-            ValueError: No token available.
+            ValueError: No session id available — either pass it
+                explicitly or call :meth:`search` first.
             Exception: HTTP request failure.
 
         """
@@ -182,18 +199,17 @@ class SearchFlights:
         if not results:
             raise ValueError("flight argument must be a FlightResult or non-empty tuple of them")
 
-        # Construct the booking token from session_id + flight metadata when
-        # the caller supplies the session id (extracted client-side from the
-        # `tfu` URL parameter, since the search-response session id is not
-        # the same as the one Google's booking page uses).
+        # Resolve the session id: explicit > cached from prior search.
+        effective_session = session_id or self._last_session_id
+
         token = booking_token
-        if token is None and session_id:
+        if token is None and effective_session:
             from fli.search._proto import build_booking_token
 
             last = results[-1]
             last_leg = last.legs[-1]
             token = build_booking_token(
-                session_id=session_id,
+                session_id=effective_session,
                 airline_code=last_leg.airline.name.lstrip("_"),
                 flight_number=last_leg.flight_number,
                 leg_index=1,
@@ -205,9 +221,9 @@ class SearchFlights:
             token = getattr(results[0], "booking_token", None)
         if not token:
             raise ValueError(
-                "Missing booking token. Pass `booking_token` explicitly, or "
-                "pass `session_id` (extracted from the `tfu` URL parameter on "
-                "the booking page) to construct it from flight metadata."
+                "Missing booking token. Call SearchFlights.search(...) before "
+                "get_booking_options(...) so the client can cache the session "
+                "id, or pass `session_id` / `booking_token` explicitly."
             )
 
         prepared = deepcopy(filters)

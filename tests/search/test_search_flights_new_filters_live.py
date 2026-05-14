@@ -259,6 +259,43 @@ class TestCurrencyURLParam:
         assert "EUR" in currencies, f"Expected EUR-priced results, got {currencies}"
 
 
+class TestBookingOptionsAutoSession:
+    """`get_booking_options` works end-to-end with no manual session plumbing.
+
+    After :meth:`search` caches the session id automatically, the booking
+    call constructs the protobuf token from the flight metadata and the
+    cached session — no `tfu` URL extraction, no browser involvement.
+    """
+
+    def test_round_trip_zero_friction_booking_options(self, client):
+        filters = FlightSearchFilters(
+            trip_type=TripType.ROUND_TRIP,
+            passenger_info=PassengerInfo(adults=1),
+            flight_segments=[
+                FlightSegment(
+                    departure_airport=[[Airport.JFK, 0]],
+                    arrival_airport=[[Airport.LAX, 0]],
+                    travel_date=_future(60),
+                ),
+                FlightSegment(
+                    departure_airport=[[Airport.LAX, 0]],
+                    arrival_airport=[[Airport.JFK, 0]],
+                    travel_date=_future(64),
+                ),
+            ],
+        )
+        results = _search_with_retry(client, filters, currency="USD")
+        assert client._last_session_id is not None
+        combo = results[0]
+        opts = client.get_booking_options(combo, filters, currency="USD")
+        assert len(opts) >= 1, "Expected at least one booking option"
+        # At least one option should carry a price and currency.
+        with_price = [o for o in opts if o.price is not None]
+        assert with_price, "No priced options returned"
+        with_currency = [o for o in opts if o.currency]
+        assert with_currency, "No options carry a decoded currency"
+
+
 class TestRichResponseFields:
     """The decoder must populate the new rich fields on live API responses."""
 
