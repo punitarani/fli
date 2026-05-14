@@ -5,7 +5,7 @@ It uses Google Flights' calendar view API to find the best prices for each date.
 It is intended to be used for finding the cheapest dates to fly, not the cheapest flights.
 """
 
-import json
+import logging
 from datetime import datetime, timedelta
 
 from pydantic import BaseModel
@@ -13,7 +13,11 @@ from pydantic import BaseModel
 from fli.core import extract_currency_from_price_token
 from fli.models import DateSearchFilters
 from fli.models.google_flights.base import TripType
+from fli.search._urls import with_locale_params
+from fli.search._wire import parse_first_wrb_payload
 from fli.search.client import get_client
+
+logger = logging.getLogger(__name__)
 
 
 class DatePrice(BaseModel):
@@ -140,37 +144,40 @@ class SearchDates:
             Exception: If the search fails or returns invalid data
 
         """
-        from fli.search.flights import _with_locale_params  # local import to avoid cycle
-
         encoded_filters = filters.encode()
-        url = _with_locale_params(self.BASE_URL, currency, language, country)
+        url = with_locale_params(self.BASE_URL, currency, language, country)
+
+        response = self.client.post(
+            url=url,
+            data=f"f.req={encoded_filters}",
+            impersonate="chrome",
+            allow_redirects=True,
+        )
+        response.raise_for_status()
+
+        data = parse_first_wrb_payload(response.text)
+        if data is None:
+            return None
 
         try:
-            response = self.client.post(
-                url=url,
-                data=f"f.req={encoded_filters}",
-                impersonate="chrome",
-                allow_redirects=True,
+            items = data[-1]
+        except (IndexError, TypeError):
+            logger.warning("Date search response shape unexpected: no terminal array")
+            return None
+
+        if not isinstance(items, list):
+            return None
+
+        dates_data = [
+            DatePrice(
+                date=self.__parse_date(item, filters.trip_type),
+                price=self.__parse_price(item),
+                currency=self.__parse_currency(item),
             )
-            response.raise_for_status()
-            parsed = json.loads(response.text.lstrip(")]}'"))[0][2]
-            if not parsed:
-                return None
-
-            data = json.loads(parsed)
-            dates_data = [
-                DatePrice(
-                    date=self.__parse_date(item, filters.trip_type),
-                    price=self.__parse_price(item),
-                    currency=self.__parse_currency(item),
-                )
-                for item in data[-1]
-                if self.__parse_price(item)
-            ]
-            return dates_data
-
-        except Exception as e:
-            raise Exception(f"Search failed: {str(e)}") from e
+            for item in items
+            if self.__parse_price(item)
+        ]
+        return dates_data
 
     @staticmethod
     def __parse_date(

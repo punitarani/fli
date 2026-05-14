@@ -23,6 +23,9 @@ dependency.
 from __future__ import annotations
 
 import base64
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _varint(value: int) -> bytes:
@@ -81,17 +84,37 @@ def build_booking_token(
         The base64-encoded protobuf token, suitable for use as
         ``outer[0][1]`` in a GetBookingResults POST.
 
+    Raises:
+        ValueError: ``price_cents`` is negative, or one of the string
+            arguments is empty.
+
     """
-    # Nested message at field 3
+    if price_cents < 0:
+        raise ValueError("price_cents must be non-negative")
+    if not session_id:
+        raise ValueError("session_id must be non-empty")
+    if not airline_code:
+        raise ValueError("airline_code must be non-empty")
+    if not flight_number:
+        raise ValueError("flight_number must be non-empty")
+    if not currency:
+        raise ValueError("currency must be non-empty")
+
+    # Protobuf length-delimited fields can hold arbitrary bytes; UTF-8 is
+    # the lingua-franca encoding and round-trips ASCII transparently. The
+    # earlier ``.encode("ascii")`` hard-crashed on any non-ASCII byte from
+    # Google — even though all current values are ASCII, that brittleness
+    # would surface as an opaque crash if Google ever shipped a non-ASCII
+    # session id. UTF-8 sidesteps that without changing live behaviour.
     nested = (
         _varint_field(1, price_cents)
         + _varint_field(2, 2)
-        + _length_delim(3, currency.encode("ascii"))
+        + _length_delim(3, currency.encode("utf-8"))
     )
 
     payload = (
-        _length_delim(1, session_id.encode("ascii"))
-        + _length_delim(2, f"{airline_code}{flight_number}#{leg_index}".encode("ascii"))
+        _length_delim(1, session_id.encode("utf-8"))
+        + _length_delim(2, f"{airline_code}{flight_number}#{leg_index}".encode())
         + _length_delim(3, nested)
         + _varint_field(7, 28)
         + _varint_field(14, price_cents)
@@ -150,7 +173,9 @@ def decode_booking_token(token: str) -> dict:
                     else:
                         nested[f"field_{nfield}"] = f"<wire {nwire}>"
                 result[f"field_{field}"] = nested
-            except Exception:  # noqa: BLE001
+            except (IndexError, UnicodeDecodeError, ValueError):
+                # Not a nested message — fall back to raw hex for debugging.
+                logger.debug("Field %d not a nested message; storing as hex", field)
                 result[f"field_{field}"] = data.hex()
         else:
             raise ValueError(f"unsupported wire type {wire} at offset {offset}")

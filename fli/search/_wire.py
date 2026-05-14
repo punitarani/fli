@@ -25,8 +25,11 @@ yields the decoded inner JSON of each ``wrb.fr`` chunk.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Iterator
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 _PREFIX = b")]}'"
 
@@ -56,6 +59,7 @@ def iter_wrb_chunks(body: str | bytes) -> Iterator[Any]:
         try:
             outer = json.loads(raw.decode("utf-8"))
         except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
+            logger.warning("Failed to decode single-chunk wrb.fr body as JSON", exc_info=True)
             return
         yield from _chunks_from_outer(outer)
         return
@@ -69,6 +73,10 @@ def iter_wrb_chunks(body: str | bytes) -> Iterator[Any]:
         try:
             length = int(raw[cursor:end])
         except ValueError:
+            logger.warning(
+                "Malformed length header at offset %d; truncating chunk stream",
+                cursor,
+            )
             break
         # Google's length header counts the leading newline after the header
         # AND the trailing newline that separates this chunk from the next.
@@ -81,6 +89,7 @@ def iter_wrb_chunks(body: str | bytes) -> Iterator[Any]:
         try:
             outer = json.loads(payload.strip().decode("utf-8"))
         except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
+            logger.warning("Discarding malformed wrb.fr chunk", exc_info=True)
             continue
         yield from _chunks_from_outer(outer)
 
@@ -100,6 +109,7 @@ def _chunks_from_outer(outer: Any) -> Iterator[Any]:
         try:
             yield json.loads(inner)
         except (ValueError, json.JSONDecodeError):
+            logger.warning("Failed to decode wrb.fr inner JSON payload", exc_info=True)
             continue
 
 

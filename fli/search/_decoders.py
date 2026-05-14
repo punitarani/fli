@@ -12,6 +12,7 @@ booking-option row).
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -26,6 +27,8 @@ from fli.models import (
     Layover,
 )
 from fli.search._helpers import as_bool, as_int, as_non_negative_int, as_str, safe_get
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Flight result decoding
@@ -206,20 +209,38 @@ def _derive_layovers(
 
 
 def _parse_price_info(row: list) -> tuple[float, str | None]:
-    """Extract numeric price + ISO currency code from the price block."""
+    """Extract numeric price + ISO currency code from the price block.
+
+    Raises ``ValueError`` when the price block is present but malformed
+    (non-numeric, wrong shape). Callers in :func:`parse_flight_row` will
+    catch this and skip the row rather than ship a misleading ``$0.00``
+    flight. Truly missing price blocks (sponsor placements with no
+    ``row[1]``) yield ``0.0`` and an empty currency — these rows are
+    filtered out at the model layer by ``FlightResult``'s
+    ``NonNegativeFloat`` constraint plus the existing skip path.
+    """
     price_block = _get_price_block(row)
-    price = 0.0
+    if price_block is None:
+        raise ValueError("price block missing — skip row")
+
+    try:
+        head = price_block[0]
+        if not (isinstance(head, list) and head):
+            raise ValueError("price head is not a non-empty list")
+        raw_price = head[-1]
+        if isinstance(raw_price, bool) or not isinstance(raw_price, int | float):
+            raise ValueError(f"price field is not numeric: {raw_price!r}")
+        price = float(raw_price)
+    except (IndexError, TypeError) as e:
+        raise ValueError(f"malformed price block: {e}") from e
+
     currency: str | None = None
-    try:
-        if price_block and price_block[0]:
-            price = float(price_block[0][-1])
-    except (IndexError, TypeError):
-        pass
-    try:
-        if price_block and len(price_block) > 1:
+    if len(price_block) > 1:
+        try:
             currency = extract_currency_from_price_token(price_block[1])
-    except (IndexError, TypeError):
-        pass
+        except (IndexError, TypeError, ValueError) as e:
+            # Currency is optional metadata; failure here is not fatal.
+            logger.debug("Currency token decode failed: %s", e)
     return price, currency
 
 
@@ -244,18 +265,40 @@ def _parse_airline(code: str) -> Airline:
 
 
 def _safe_airline(code: Any) -> Airline | None:
-    """Parse an airline code defensively; return None on missing/invalid."""
+    """Parse an airline code defensively; return None on missing/invalid.
+
+    A code that *is* a non-empty string but doesn't resolve to a known
+    ``Airline`` enum value triggers a warning — it usually signals that
+    Google has added a new IATA code we haven't catalogued yet.
+    """
     if not isinstance(code, str) or not code:
         return None
     try:
         return _parse_airline(code)
     except (AttributeError, IndexError):
+        logger.warning(
+            "Unknown airline IATA code %r — add to fli.models.Airline enum",
+            code,
+        )
         return None
 
 
 def _parse_airport(code: str) -> Airport:
-    """Convert an airport IATA code into an :class:`Airport` enum value."""
-    return getattr(Airport, code)
+    """Convert an airport IATA code into an :class:`Airport` enum value.
+
+    Raises ``AttributeError`` for unknown codes — the caller in
+    :func:`parse_flight_row` treats that as a "skip this row" signal,
+    but we log a warning here so new airports surface in operator logs
+    rather than vanishing silently from search results.
+    """
+    try:
+        return getattr(Airport, code)
+    except AttributeError:
+        logger.warning(
+            "Unknown airport IATA code %r — add to fli.models.Airport enum",
+            code,
+        )
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +371,12 @@ def _try_parse_booking_row(row: list) -> BookingOption | None:
             and isinstance(entry[0], str)
             and isinstance(entry[1], str)
         ]
+        if not gathered and row[3]:
+            # row[3] was a non-empty list but no entry matched the shape —
+            # likely a wire-format change. Log so the next debug session
+            # has a breadcrumb; the booking option still parses with
+            # ``flights=None`` (the model treats that as "unknown").
+            logger.debug("Booking row[3] had %d entries but none matched shape", len(row[3]))
         flights = gathered or None
 
     booking_url, google_click_url = _extract_booking_urls(row[5])
@@ -378,6 +427,7 @@ def _extract_fare_name(row: list) -> str | None:
         try:
             label = row[14][0][0][1][1]
         except (IndexError, TypeError):
+            logger.debug("Fare-name fallback path at row[14] failed shape match")
             label = None
         if isinstance(label, str) and label:
             return label

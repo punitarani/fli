@@ -236,6 +236,66 @@ class TestParseFlightsDataLayover:
         assert self.flight.co2_emissions_delta_pct == 17
 
 
+class TestLayoverDetailBlockEnrichment:
+    """``_derive_layovers`` merges city / airport_name from ``detail[13]`` when present."""
+
+    def _build_row(self, layovers_block):
+        leg1 = _leg(
+            dep_iata="JFK",
+            arr_iata="CDG",
+            dep_date=(2026, 7, 15),
+            arr_date=(2026, 7, 16),
+            dep_time=(22, 0),
+            arr_time=(9, 5),
+            duration=395,
+            airline_code="DL",
+            flight_number="100",
+            airline_name="Delta",
+        )
+        leg2 = _leg(
+            dep_iata="CDG",
+            arr_iata="FRA",
+            dep_date=(2026, 7, 16),
+            arr_date=(2026, 7, 16),
+            dep_time=(13, 20),
+            arr_time=(15, 0),
+            duration=100,
+            airline_code="AF",
+            flight_number="200",
+            airline_name="Air France",
+        )
+        return _row(legs=[leg1, leg2], layovers_block=layovers_block)
+
+    def test_city_and_airport_name_populated(self):
+        # Google's detail[13] layover entry:
+        # [duration_mins, IATA, IATA, None, airport_name, city, ...]
+        row = self._build_row(
+            layovers_block=[[255, "CDG", "CDG", None, "Charles de Gaulle Airport", "Paris"]],
+        )
+        flight = SearchFlights._parse_flights_data(row)
+        assert flight.layovers is not None
+        lo = flight.layovers[0]
+        assert lo.airport_name == "Charles de Gaulle Airport"
+        assert lo.city == "Paris"
+
+    def test_missing_entry_yields_none_fields(self):
+        """detail[13] absent ⇒ derived layover has both enrichment fields as None."""
+        row = self._build_row(layovers_block=None)
+        flight = SearchFlights._parse_flights_data(row)
+        lo = flight.layovers[0]
+        assert lo.airport_name is None
+        assert lo.city is None
+
+    def test_malformed_entry_does_not_raise(self):
+        """A None or empty entry in detail[13] is tolerated."""
+        for bad in ([None], [[]], [["only-one-element"]]):
+            row = self._build_row(layovers_block=bad)
+            flight = SearchFlights._parse_flights_data(row)
+            lo = flight.layovers[0]
+            assert lo.airport_name is None
+            assert lo.city is None
+
+
 class TestParseFlightsDataDefensive:
     """Parser handles missing optional fields without raising."""
 

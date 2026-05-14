@@ -194,44 +194,54 @@ def test_multiple_searches(search, basic_search_params, complex_search_params):
 
 
 class TestParsePriceInfo:
-    """Tests for _parse_price_info method handling missing/malformed price data."""
+    """Tests for _parse_price_info — malformed shapes raise rather than ship $0.00.
+
+    Skipped by ``parse_flight_row``'s outer ``except`` rather than dragging a
+    fake-zero flight into results.
+    """
 
     def test_parse_price_info_valid_data(self):
-        """Test _parse_price_info with valid price data."""
+        """Valid price data: returns the numeric price."""
         data = [None, [[100, 200, 299.99]]]
         price, currency = SearchFlights._parse_price_info(data)
         assert price == 299.99
         assert currency is None
 
-    def test_parse_price_info_empty_inner_list(self):
-        """Test _parse_price_info returns 0.0 when inner price list is empty."""
+    def test_parse_price_info_empty_inner_list_raises(self):
+        """An empty inner price list is shape-wrong; raise rather than ship $0.00."""
         data = [None, [[]]]
-        price, _ = SearchFlights._parse_price_info(data)
-        assert price == 0.0
+        with pytest.raises(ValueError):
+            SearchFlights._parse_price_info(data)
 
-    def test_parse_price_info_empty_outer_list(self):
-        """Test _parse_price_info returns 0.0 when outer price list is empty."""
+    def test_parse_price_info_empty_outer_list_raises(self):
+        """An empty outer price list has no head element; raise."""
         data = [None, []]
-        price, _ = SearchFlights._parse_price_info(data)
-        assert price == 0.0
+        with pytest.raises(ValueError):
+            SearchFlights._parse_price_info(data)
 
-    def test_parse_price_info_none_price_section(self):
-        """Test _parse_price_info returns 0.0 when price section is None."""
+    def test_parse_price_info_none_price_section_raises(self):
+        """A None price section means no usable price; raise to skip the row."""
         data = [None, None]
-        price, _ = SearchFlights._parse_price_info(data)
-        assert price == 0.0
+        with pytest.raises(ValueError):
+            SearchFlights._parse_price_info(data)
 
-    def test_parse_price_info_missing_price_section(self):
-        """Test _parse_price_info returns 0.0 when data has no price section."""
+    def test_parse_price_info_missing_price_section_raises(self):
+        """A row with no row[1] at all: raise (parse_flight_row will skip)."""
         data = [None]
-        price, _ = SearchFlights._parse_price_info(data)
-        assert price == 0.0
+        with pytest.raises(ValueError):
+            SearchFlights._parse_price_info(data)
 
-    def test_parse_price_info_inner_list_none(self):
-        """Test _parse_price_info returns 0.0 when inner list is None."""
+    def test_parse_price_info_inner_list_none_raises(self):
+        """A None head element is malformed; raise."""
         data = [None, [None]]
-        price, _ = SearchFlights._parse_price_info(data)
-        assert price == 0.0
+        with pytest.raises(ValueError):
+            SearchFlights._parse_price_info(data)
+
+    def test_parse_price_info_non_numeric_price_raises(self):
+        """A non-numeric value at price[-1] is malformed; raise."""
+        data = [None, [[100, 200, "not-a-price"]]]
+        with pytest.raises(ValueError):
+            SearchFlights._parse_price_info(data)
 
     def test_parse_currency_from_live_price_token(self):
         """_parse_currency should decode the returned currency from a live token sample."""

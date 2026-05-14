@@ -117,6 +117,91 @@ class TestGetBookingOptionsTokenGuard:
             SearchFlights().get_booking_options(flight, filters)
 
 
+class TestGetBookingOptionsErrorPaths:
+    """Booking-flow failure modes: HTTP error, segment mismatch, malformed body."""
+
+    def test_http_error_propagates_naturally(self):
+        """HTTP failures bubble up unchanged — no wrapping into generic Exception."""
+        from unittest.mock import patch
+
+        sf = SearchFlights()
+        sf._last_session_id = "S"
+        filters = _round_trip_filters()
+        flight = filters.flight_segments[1].selected_flight
+
+        class FakeHTTPError(RuntimeError):
+            pass
+
+        def _boom(*args, **kwargs):
+            raise FakeHTTPError("network down")
+
+        with patch.object(sf.client, "post", side_effect=_boom):
+            with pytest.raises(FakeHTTPError, match="network down"):
+                sf.get_booking_options(flight, filters)
+
+    def test_more_results_than_segments_rejected(self):
+        """Caller passes a 3-tuple against 2-segment filters → ValueError."""
+        filters = _round_trip_filters()  # 2 segments
+        # Build a 3-tuple of flight results.
+        f = filters.flight_segments[0].selected_flight
+        oversized = (f, f, f)
+        sf = SearchFlights()
+        sf._last_session_id = "S"
+        with pytest.raises(ValueError, match="3 segments but filters has 2"):
+            sf.get_booking_options(oversized, filters)
+
+    def test_malformed_body_returns_empty_options(self):
+        """Garbage body still allows the call to complete with an empty list.
+
+        This is the documented contract — the wire parser yields zero
+        chunks for unrecognised bodies, so callers get ``[]`` rather than
+        an exception when Google reshapes the response.
+        """
+        from unittest.mock import patch
+
+        sf = SearchFlights()
+        sf._last_session_id = "S"
+        filters = _round_trip_filters()
+        flight = filters.flight_segments[1].selected_flight
+
+        def _fake_post(url, data, **kwargs):  # noqa: ANN001
+            return type(
+                "R",
+                (),
+                {
+                    "content": b"garbage-no-prefix",
+                    "text": "garbage-no-prefix",
+                    "raise_for_status": lambda self: None,
+                },
+            )()
+
+        with patch.object(sf.client, "post", side_effect=_fake_post):
+            opts = sf.get_booking_options(flight, filters, currency="USD")
+        assert opts == []
+
+
+class TestEncodeBookingPayloadValidation:
+    """``_encode_booking_payload`` rejects filters that can't produce a main struct."""
+
+    def test_raises_when_filters_format_returns_no_main(self):
+        """Patching the class method (Pydantic instances are frozen-ish)."""
+        from unittest.mock import patch
+
+        filters = _round_trip_filters()
+        with patch.object(type(filters), "format", lambda self: [None]):
+            with pytest.raises(ValueError, match="did not return a main struct"):
+                SearchFlights._encode_booking_payload("TOKEN", filters)
+
+    def test_raises_when_main_is_not_a_list(self):
+        """If format()[1] is a non-list value, the encoder still rejects loudly."""
+        from unittest.mock import patch
+
+        filters = _round_trip_filters()
+        with patch.object(type(filters), "format", lambda self: [None, "not-a-list"]):
+            with pytest.raises(ValueError, match="did not return a main struct"):
+                SearchFlights._encode_booking_payload("TOKEN", filters)
+
+
 class TestGetBookingOptionsSessionCaching:
     def test_search_caches_session_id_on_client(self):
         """`search` populates `_last_session_id` from the response."""

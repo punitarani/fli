@@ -286,3 +286,61 @@ class TestCombinedFilters:
         assert f.alliances == [Alliance.ONEWORLD]
         assert f.airlines_exclude == [Airline.BA]
         assert f.layover_restrictions.min_duration == 90
+
+
+class TestLocaleFlags:
+    """``--currency`` / ``--language`` / ``--country`` reach SearchFlights.search."""
+
+    def _kwargs_from_last_call(self, mock_search_flights) -> dict:
+        last = mock_search_flights.search.call_args_list[-1]
+        return dict(last.kwargs)
+
+    def test_currency_forwarded(self, runner, mock_search_flights, mock_console):
+        result = runner.invoke(
+            app,
+            [
+                "flights",
+                "JFK",
+                "LAX",
+                datetime.now().strftime("%Y-%m-%d"),
+                "--currency",
+                "EUR",
+            ],
+        )
+        assert result.exit_code == 0
+        kwargs = self._kwargs_from_last_call(mock_search_flights)
+        assert kwargs.get("currency") == "EUR"
+
+    def test_language_and_country_forwarded(self, runner, mock_search_flights, mock_console):
+        result = runner.invoke(
+            app,
+            [
+                "flights",
+                "JFK",
+                "LAX",
+                datetime.now().strftime("%Y-%m-%d"),
+                "--language",
+                "en-GB",
+                "--country",
+                "GB",
+            ],
+        )
+        assert result.exit_code == 0
+        kwargs = self._kwargs_from_last_call(mock_search_flights)
+        assert kwargs.get("language") == "en-GB"
+        assert kwargs.get("country") == "GB"
+
+    def test_invalid_currency_rejected(self, runner, mock_search_flights, mock_console):
+        """The ``validate_currency`` callback must reject malformed codes."""
+        result = runner.invoke(
+            app,
+            [
+                "flights",
+                "JFK",
+                "LAX",
+                datetime.now().strftime("%Y-%m-%d"),
+                "--currency",
+                "US1",  # contains a digit — not a valid ISO 4217 code
+            ],
+        )
+        assert result.exit_code != 0

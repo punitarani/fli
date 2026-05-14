@@ -26,10 +26,19 @@ from fli.search._decoders import (
 )
 from fli.search._urls import with_locale_params
 from fli.search._urls import with_locale_params as _with_locale_params  # noqa: F401
-from fli.search._wire import iter_wrb_chunks
+from fli.search._wire import iter_wrb_chunks, parse_first_wrb_payload
 from fli.search.client import get_client
 
 logger = logging.getLogger(__name__)
+
+
+class SearchParseError(Exception):
+    """Raised when a successful HTTP response cannot be parsed into flights.
+
+    Distinct from network / HTTP errors raised by the underlying client —
+    use this to tell "Google responded but the shape changed" apart from
+    "Google didn't respond at all".
+    """
 
 
 class SearchFlights:
@@ -42,6 +51,19 @@ class SearchFlights:
     - :meth:`get_booking_options` — follow up with GetBookingResults to
       surface bookable fares for a selected itinerary. See the method
       docstring for the live-token limitation.
+
+    Concurrency:
+        ``SearchFlights`` is **not thread-safe**. The instance caches the
+        shopping-session id from the most recent :meth:`search` call so
+        :meth:`get_booking_options` can derive the booking token; two
+        concurrent ``search`` calls on the same instance will race on that
+        cache and may cross-pollinate sessions between unrelated bookings.
+
+        For multi-threaded or async server use, either (a) instantiate a
+        fresh ``SearchFlights`` per request, or (b) pass the
+        ``session_id`` returned by your own session bookkeeping into
+        :meth:`get_booking_options` explicitly (the kwarg overrides the
+        cached value).
     """
 
     BASE_URL = (
@@ -101,53 +123,57 @@ class SearchFlights:
         encoded = filters.encode()
         url = with_locale_params(self.BASE_URL, currency, language, country)
 
-        try:
-            response = self.client.post(
-                url=url,
-                data=f"f.req={encoded}",
-                impersonate="chrome",
-                allow_redirects=True,
-            )
-            response.raise_for_status()
+        response = self.client.post(
+            url=url,
+            data=f"f.req={encoded}",
+            impersonate="chrome",
+            allow_redirects=True,
+        )
+        response.raise_for_status()
 
-            parsed = json.loads(response.text.lstrip(")]}'"))[0][2]
-            if not parsed:
-                return None
-            inner = json.loads(parsed)
-            # Capture the shopping session id (``inner[0][4]``) so that
-            # ``get_booking_options`` can derive the booking-page token
-            # without an explicit token kwarg. The session is short-lived
-            # but valid for the immediate follow-up booking call.
-            try:
-                session_id = inner[0][4]
-                if isinstance(session_id, str) and session_id:
-                    self._last_session_id = session_id
-            except (IndexError, TypeError):
-                pass
+        inner = parse_first_wrb_payload(response.text)
+        if inner is None:
+            return None
+
+        self._capture_session_id(inner)
+
+        try:
             flights_raw = [
                 item for i in (2, 3) if isinstance(inner[i], list) for item in inner[i][0]
             ]
-            flights: list[FlightResult] = []
-            for row in flights_raw:
-                try:
-                    flights.append(parse_flight_row(row))
-                except (AttributeError, KeyError, ValueError, TypeError) as e:
-                    logger.debug("Skipping flight with unparseable data: %s", e)
+        except (IndexError, TypeError) as e:
+            raise SearchParseError(
+                f"Shopping response shape changed — no flights array at inner[2]/[3]: {e}"
+            ) from e
 
-            if not flights:
-                return None
-            if filters.trip_type == TripType.ONE_WAY:
-                return flights
-            return self._expand_multi_leg(
-                flights,
-                filters,
-                top_n=top_n,
-                currency=currency,
-                language=language,
-                country=country,
+        flights: list[FlightResult] = []
+        failed = 0
+        for row in flights_raw:
+            try:
+                flights.append(parse_flight_row(row))
+            except (AttributeError, KeyError, ValueError, TypeError) as e:
+                failed += 1
+                logger.debug("Skipping flight with unparseable data: %s", e)
+
+        if flights_raw and failed and not flights:
+            # Every row failed to parse — likely a wire-format change.
+            # Don't pretend "no flights"; surface so operators see it.
+            raise SearchParseError(
+                f"Parsed 0/{len(flights_raw)} flight rows — Google response shape may have changed"
             )
-        except Exception as e:
-            raise Exception(f"Search failed: {str(e)}") from e
+
+        if not flights:
+            return None
+        if filters.trip_type == TripType.ONE_WAY:
+            return flights
+        return self._expand_multi_leg(
+            flights,
+            filters,
+            top_n=top_n,
+            currency=currency,
+            language=language,
+            country=country,
+        )
 
     def get_booking_options(
         self,
@@ -210,7 +236,7 @@ class SearchFlights:
             last_leg = last.legs[-1]
             token = build_booking_token(
                 session_id=effective_session,
-                airline_code=last_leg.airline.name.lstrip("_"),
+                airline_code=last_leg.airline.name.removeprefix("_"),
                 flight_number=last_leg.flight_number,
                 leg_index=1,
                 price_cents=int(last.price * 100),
@@ -218,7 +244,10 @@ class SearchFlights:
             )
 
         if token is None:
-            token = getattr(results[0], "booking_token", None)
+            # The decoder always populates ``booking_token`` (or ``None``) on
+            # FlightResult — accessing the attribute directly fails loudly
+            # if the caller passes a non-FlightResult, which is what we want.
+            token = results[0].booking_token
         if not token:
             raise ValueError(
                 "Missing booking token. Call SearchFlights.search(...) before "
@@ -235,21 +264,45 @@ class SearchFlights:
 
         encoded = self._encode_booking_payload(token, prepared)
         url = with_locale_params(self.BOOKING_URL, currency, language, country)
-        try:
-            response = self.client.post(
-                url=url,
-                data=f"f.req={encoded}",
-                impersonate="chrome",
-                allow_redirects=True,
-            )
-            response.raise_for_status()
-        except Exception as e:
-            raise Exception(f"Booking options request failed: {str(e)}") from e
+        response = self.client.post(
+            url=url,
+            data=f"f.req={encoded}",
+            impersonate="chrome",
+            allow_redirects=True,
+        )
+        response.raise_for_status()
 
         options: list[BookingOption] = []
         for chunk in iter_wrb_chunks(response.text):
             options.extend(parse_booking_chunk(chunk))
         return options
+
+    def _capture_session_id(self, inner: list) -> None:
+        """Cache the shopping session id from ``inner[0][4]`` of a search response.
+
+        The session id is used by :meth:`get_booking_options` to derive a
+        booking token automatically. A shape change here means booking
+        calls will fall back to "missing token" errors, so we log a
+        warning rather than silently leaving the cache untouched.
+        """
+        try:
+            session_id = inner[0][4]
+        except (IndexError, TypeError):
+            logger.warning(
+                "Failed to capture shopping session id from search response; "
+                "subsequent get_booking_options() calls without an explicit "
+                "session_id will fail.",
+                exc_info=True,
+            )
+            return
+        if isinstance(session_id, str) and session_id:
+            self._last_session_id = session_id
+        else:
+            logger.warning(
+                "Shopping response inner[0][4] is %r, not a non-empty string; "
+                "session cache unchanged.",
+                session_id,
+            )
 
     # ------------------------------------------------------------------
     # Round-trip / multi-city expansion
@@ -303,12 +356,23 @@ class SearchFlights:
         (ends at position 17 — the trailing constant). Google's
         GetBookingResults validates the struct shape and rejects requests
         with the longer 29-element main that GetShoppingResults accepts.
+
+        Raises:
+            ValueError: ``filters.format()`` did not yield a main struct.
+                Sending ``main=null`` produces an opaque 400 from Google,
+                so we fail loudly here instead.
+
         """
         formatted = filters.format()
-        main = formatted[1] if len(formatted) > 1 else None
+        if len(formatted) < 2 or not isinstance(formatted[1], list):
+            raise ValueError(
+                "filters.format() did not return a main struct at index 1; "
+                "cannot construct a booking payload."
+            )
+        main = formatted[1]
         # The browser sends only main[0..17]; the longer struct used for
         # GetShoppingResults is rejected here. Trim the tail.
-        if isinstance(main, list) and len(main) > 18:
+        if len(main) > 18:
             main = main[:18]
         payload = [
             [None, token],

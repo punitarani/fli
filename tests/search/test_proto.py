@@ -102,7 +102,7 @@ class TestVarintEncoding:
 
     def test_small_varint_single_byte(self):
         # 0-127 fit in one byte
-        token = build_booking_token("", "A", "1", 0, 0, "X")
+        token = build_booking_token("S", "A", "1", 0, 0, "X")
         decoded = decode_booking_token(token)
         assert decoded["field_3"]["field_1"] == 0
         assert decoded["field_2"] == "A1#0"
@@ -112,6 +112,53 @@ class TestVarintEncoding:
         token = build_booking_token("ABC", "AA", "1", 1, 100, "USD")
         decoded = decode_booking_token(token)
         assert decoded["field_1"] == "ABC"
+
+
+class TestBuildBookingTokenValidation:
+    """Reject empty / negative inputs upfront.
+
+    Guarantees no live POST is ever sent with a structurally broken token.
+    """
+
+    def test_negative_price_rejected(self):
+        with pytest.raises(ValueError, match="price_cents must be non-negative"):
+            build_booking_token("S", "AA", "1", 1, -1, "USD")
+
+    def test_empty_session_rejected(self):
+        with pytest.raises(ValueError, match="session_id must be non-empty"):
+            build_booking_token("", "AA", "1", 1, 100, "USD")
+
+    def test_empty_airline_rejected(self):
+        with pytest.raises(ValueError, match="airline_code must be non-empty"):
+            build_booking_token("S", "", "1", 1, 100, "USD")
+
+    def test_empty_flight_number_rejected(self):
+        with pytest.raises(ValueError, match="flight_number must be non-empty"):
+            build_booking_token("S", "AA", "", 1, 100, "USD")
+
+    def test_empty_currency_rejected(self):
+        with pytest.raises(ValueError, match="currency must be non-empty"):
+            build_booking_token("S", "AA", "1", 1, 100, "")
+
+    def test_non_ascii_session_id_encodes(self):
+        # If Google ever returns a non-ASCII session id, the builder must
+        # not crash — UTF-8 keeps round-trip equivalence for ASCII data
+        # while accepting arbitrary bytes for the future.
+        token = build_booking_token("Sé", "AA", "1", 1, 100, "USD")
+        decoded = decode_booking_token(token)
+        # decode_booking_token's ascii-decoder will replace the non-ascii
+        # byte, but the call doesn't raise.
+        assert "field_1" in decoded
+
+
+class TestDecodeBookingTokenEdgeCases:
+    def test_unsupported_top_level_wire_type_rejected(self):
+        # Build a payload with wire type 5 (fixed32) at top level.
+        # Tag byte = (1 << 3) | 5 = 0x0D, then 4 bytes of data.
+        bad_payload = bytes([0x0D, 0x01, 0x02, 0x03, 0x04])
+        bad_token = base64.b64encode(bad_payload).decode("ascii")
+        with pytest.raises(ValueError, match="unsupported wire type 5"):
+            decode_booking_token(bad_token)
 
 
 # Live `tfu` URL parameter captured 2026-05-14 from a JFK→LAX RT booking page.
