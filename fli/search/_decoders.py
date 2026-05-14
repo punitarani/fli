@@ -269,9 +269,13 @@ def _safe_airline(code: Any) -> Airline | None:
 
     A code that *is* a non-empty string but doesn't resolve to a known
     ``Airline`` enum value triggers a warning — it usually signals that
-    Google has added a new IATA code we haven't catalogued yet.
+    Google has added a new IATA code we haven't catalogued yet. Known
+    sentinels like ``"multi"`` (Google's codeshare placeholder) are
+    accepted silently.
     """
     if not isinstance(code, str) or not code:
+        return None
+    if code in _AIRLINE_SENTINELS:
         return None
     try:
         return _parse_airline(code)
@@ -281,6 +285,11 @@ def _safe_airline(code: Any) -> Airline | None:
             code,
         )
         return None
+
+
+# Pseudo-codes Google emits in place of a real IATA carrier identifier.
+# Treat as "no single primary airline" rather than warning per row.
+_AIRLINE_SENTINELS = frozenset({"multi"})
 
 
 def _parse_airport(code: str) -> Airport:

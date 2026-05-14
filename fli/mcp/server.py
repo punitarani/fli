@@ -282,8 +282,6 @@ def _serialize_flight_leg(leg: Any) -> dict[str, Any]:
         out["legroom"] = leg.legroom
     if getattr(leg, "overnight", False):
         out["overnight"] = True
-    if getattr(leg, "co2_emissions_g", None) is not None:
-        out["co2_emissions_g"] = leg.co2_emissions_g
     amenities = getattr(leg, "amenities", None)
     if amenities is not None:
         a = amenities.model_dump(exclude_none=True)
@@ -305,13 +303,14 @@ def _serialize_layover(layover: Any) -> dict[str, Any]:
 
 
 def _flight_extras(flight: Any) -> dict[str, Any]:
-    """Surface optional rich fields when populated by the parser."""
+    """Surface optional rich fields when populated by the parser.
+
+    Emissions fields (``co2_emissions_g`` etc.) are deliberately omitted —
+    the ``--emissions LESS`` filter still flows through to Google, but
+    raw CO₂ numbers are not part of the tool's response shape.
+    """
     out: dict[str, Any] = {}
     for src, key in (
-        ("co2_emissions_g", "co2_emissions_g"),
-        ("co2_emissions_typical_g", "co2_emissions_typical_g"),
-        ("co2_emissions_delta_pct", "co2_emissions_delta_pct"),
-        ("emissions_tag", "emissions_tag"),
         ("primary_airline_name", "primary_airline_name"),
         ("self_transfer", "self_transfer"),
         ("mixed_cabin", "mixed_cabin"),

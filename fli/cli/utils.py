@@ -200,8 +200,6 @@ def serialize_flight_leg(leg: Any) -> dict[str, Any]:
         payload["legroom"] = leg.legroom
     if getattr(leg, "overnight", False):
         payload["overnight"] = True
-    if getattr(leg, "co2_emissions_g", None) is not None:
-        payload["co2_emissions_g"] = leg.co2_emissions_g
     if getattr(leg, "operating_airline", None) is not None:
         payload["operating_airline"] = serialize_airline(leg.operating_airline)
     amenities = getattr(leg, "amenities", None)
@@ -227,12 +225,11 @@ def _serialize_flight_segment_result(
     if include_price:
         payload["price"] = flight.price
         payload["currency"] = flight.currency or default_currency
-    # Optional rich fields surfaced when populated.
+    # Optional rich fields surfaced when populated. Emissions are
+    # intentionally omitted — the ``--emissions LESS`` filter is still
+    # honoured server-side, but CO₂ figures are not rendered in CLI
+    # output.
     for src in (
-        "co2_emissions_g",
-        "co2_emissions_typical_g",
-        "co2_emissions_delta_pct",
-        "emissions_tag",
         "self_transfer",
         "mixed_cabin",
         "booking_token",
@@ -392,21 +389,6 @@ def display_flight_results(
         table.add_row("Total Duration", format_duration(total_duration))
         total_stops = sum(flight.stops for flight in flight_segments)
         table.add_row("Total Stops", str(total_stops))
-
-        # CO2 emissions summary across all legs of all segments
-        total_co2_g = sum((leg.co2_emissions_g or 0) for s in flight_segments for leg in s.legs)
-        if total_co2_g > 0:
-            kg = total_co2_g / 1000
-            tag = price_segment.emissions_tag
-            extra = ""
-            if price_segment.co2_emissions_delta_pct is not None:
-                sign = "+" if price_segment.co2_emissions_delta_pct >= 0 else ""
-                extra = f" ({sign}{price_segment.co2_emissions_delta_pct}% vs typical"
-                if tag:
-                    extra += f", {tag})"
-                else:
-                    extra += ")"
-            table.add_row("CO₂ Emissions", f"{kg:.0f} kg{extra}")
 
         # Self-transfer / mixed-cabin warnings
         if price_segment.self_transfer:
