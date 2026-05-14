@@ -158,49 +158,76 @@ class SearchFlights:
 
     def get_booking_options(
         self,
-        flight: FlightResult,
+        flight: FlightResult | tuple[FlightResult, ...],
         filters: FlightSearchFilters,
         currency: str | None = None,
         language: str | None = None,
         country: str | None = None,
+        booking_token: str | None = None,
     ) -> list[BookingOption]:
-        """Fetch bookable fare options for an already-selected itinerary.
+        """Fetch bookable fare options for a selected itinerary.
 
-        After :meth:`search` returns a list of :class:`FlightResult` objects,
-        each result carries a `booking_token` (mirrors Google's ``f0[8]``).
-        This method calls the GetBookingResults endpoint with that token plus
-        the filter object (with `selected_flight` populated on each segment)
-        to retrieve the vendor list — including airline-direct fares, OTAs,
-        per-fare prices, and Google's click-through redirect URLs.
+        ⚠️  KNOWN LIMITATION (May 2026): the GetBookingResults endpoint
+        accepts a protobuf-encoded token at outer[0][1] that is *not* the
+        same as the per-flight ``booking_token`` field surfaced on
+        :class:`FlightResult`. Google's UI generates the booking-page
+        token by concatenating the shopping session id from
+        ``inner[0][4]`` with the selected airline+flight-number pair and
+        currency metadata. Until that protobuf is reproduced client-side,
+        live calls usually return Google's ``ErrorResponse`` (INVALID_ARGUMENT).
+
+        The method still works perfectly when a valid token is supplied —
+        e.g. captured from a browser session via the ``booking_token``
+        argument, or via the :func:`fli.search._wire.iter_wrb_chunks` parser
+        against a recorded response. The parser positions for the response
+        side are stable; see ``tests/search/test_booking_options_live_fixture.py``.
 
         Args:
-            flight: The :class:`FlightResult` returned by ``search``. Its
-                ``booking_token`` field must be set (it is populated by the
-                parser for live API responses).
+            flight: A single :class:`FlightResult` (one-way) or tuple of
+                results (round-trip / multi-city) returned by :meth:`search`.
+                Its legs populate the ``selected_flight`` slot of each filter
+                segment so Google can match the itinerary.
             filters: The same :class:`FlightSearchFilters` used in the
-                preceding ``search`` call. ``selected_flight`` should be
-                populated on every segment.
+                preceding ``search`` call. A copy is made internally; the
+                caller's filters are not mutated.
             currency: Optional ISO 4217 currency code (``curr`` URL param).
             language: Optional BCP-47 language code (``hl`` URL param).
             country: Optional ISO 3166-1 alpha-2 country code (``gl`` URL param).
+            booking_token: Optional explicit token to send at outer[0][1].
+                Override for advanced use; defaults to ``flight.booking_token``.
 
         Returns:
-            A list of :class:`BookingOption` objects. Empty list when no
-            vendors are available.
+            A list of :class:`BookingOption` objects. Empty list when Google
+            returns no vendors *or* when the request is rejected.
 
         Raises:
-            ValueError: If ``flight.booking_token`` is missing.
-            Exception: If the HTTP request fails.
+            ValueError: If no token is available (neither argument nor flight).
+            Exception: If the HTTP request itself fails (non-200, network).
 
         """
-        token = getattr(flight, "booking_token", None)
+        results: list[FlightResult] = list(flight) if isinstance(flight, tuple) else [flight]
+        if not results:
+            raise ValueError("flight argument must be a FlightResult or non-empty tuple of them")
+        token = booking_token or getattr(results[0], "booking_token", None)
         if not token:
             raise ValueError(
-                "flight.booking_token is required to fetch booking options; "
-                "did you call SearchFlights.search first?"
+                "booking_token is required to fetch booking options; pass an "
+                "explicit token or call SearchFlights.search to populate "
+                "flight.booking_token first."
             )
 
-        encoded_body = self._encode_booking_payload(token, filters)
+        # Populate selected_flight on each segment so the encoded payload
+        # carries the full itinerary the user picked.
+        prepared = deepcopy(filters)
+        segments = prepared.flight_segments
+        if len(results) > len(segments):
+            raise ValueError(
+                f"flight has {len(results)} segments but filters has {len(segments)}"
+            )
+        for seg, res in zip(segments, results, strict=False):
+            seg.selected_flight = res
+
+        encoded_body = self._encode_booking_payload(token, prepared)
         url = _with_locale_params(self.BOOKING_URL, currency, language, country)
 
         try:
@@ -563,11 +590,29 @@ def _walk_for_booking_rows(node: Any, out: list[BookingOption]) -> None:
 
 
 def _try_parse_booking_row(row: list) -> BookingOption | None:
-    if len(row) < 5:
+    """Parse a single booking-option row using *positional* indices.
+
+    Positions verified from a live GetBookingResults capture (May 2026):
+
+    - [0]: index int
+    - [1]: vendor list ``[[code, name, ?, is_airline_direct]]``
+    - [3]: flights list ``[[airline_code, flight_no], ...]``
+    - [5]: URL block ``[vendor_url_pattern, None, [google_click_url, ...]]``
+    - [7]: price block ``[[None, price_int], currency_b64_token]`` (same
+      shape as the price block on flight rows, so the same currency
+      extractor works)
+    - [14]: fare-code wrapper ``[[[None, [airline_code, FARE_CODE], 1]]]``
+    - [21]: human-readable fare name at ``[3]``
+
+    Returns None for anything that doesn't structurally look like a row.
+    """
+    if not isinstance(row, list) or len(row) < 8:
         return None
     if not isinstance(row[0], int):
         return None
-    vendor_block = row[1] if len(row) > 1 else None
+
+    # Vendor block ----------------------------------------------------
+    vendor_block = row[1]
     if not (isinstance(vendor_block, list) and vendor_block):
         return None
     first_vendor = vendor_block[0]
@@ -575,28 +620,41 @@ def _try_parse_booking_row(row: list) -> BookingOption | None:
         return None
     if not isinstance(first_vendor[0], str) or not isinstance(first_vendor[1], str):
         return None
-
-    flights_block = row[3] if len(row) > 3 else None
-    if flights_block is not None and not isinstance(flights_block, list):
-        return None
-    flights: list[tuple[str, str]] | None = None
-    if isinstance(flights_block, list):
-        gathered: list[tuple[str, str]] = []
-        for entry in flights_block:
-            if isinstance(entry, list) and len(entry) >= 2:
-                al, fn = entry[0], entry[1]
-                if isinstance(al, str) and isinstance(fn, str):
-                    gathered.append((al, fn))
-        flights = gathered or None
-
-    url_block = row[5] if len(row) > 5 else None
-    booking_url, google_click_url = _extract_booking_urls(url_block)
-
-    price, currency, fare_name = _extract_booking_pricing(row)
-
     is_direct = False
     if len(first_vendor) >= 4 and isinstance(first_vendor[3], bool):
         is_direct = first_vendor[3]
+
+    # Flights covered ------------------------------------------------
+    flights: list[tuple[str, str]] | None = None
+    if isinstance(row[3], list):
+        gathered: list[tuple[str, str]] = []
+        for entry in row[3]:
+            if (
+                isinstance(entry, list)
+                and len(entry) >= 2
+                and isinstance(entry[0], str)
+                and isinstance(entry[1], str)
+            ):
+                gathered.append((entry[0], entry[1]))
+        flights = gathered or None
+
+    # URLs -----------------------------------------------------------
+    booking_url, google_click_url = _extract_booking_urls(row[5])
+
+    # Price + currency from the canonical price block at row[7] -----
+    price: float | None = None
+    currency: str | None = None
+    if isinstance(row[7], list):
+        pblock = row[7]
+        if pblock and isinstance(pblock[0], list) and len(pblock[0]) >= 2:
+            raw_price = pblock[0][-1]
+            if isinstance(raw_price, int | float) and not isinstance(raw_price, bool):
+                price = float(raw_price)
+        if len(pblock) > 1 and isinstance(pblock[1], str):
+            currency = extract_currency_from_price_token(pblock[1])
+
+    # Fare name --------------------------------------------------------
+    fare_name = _extract_fare_name(row)
 
     return BookingOption(
         vendor_code=first_vendor[0],
@@ -612,54 +670,34 @@ def _try_parse_booking_row(row: list) -> BookingOption | None:
 
 
 def _extract_booking_urls(block: Any) -> tuple[str | None, str | None]:
-    """Return (vendor_url_pattern, google_click_url) from a row[5]-shaped block."""
+    """Return (vendor_url_pattern, google_click_url) from row[5]."""
     if not isinstance(block, list):
         return None, None
     vendor_url = block[0] if block and isinstance(block[0], str) else None
-    google_click_url = None
-    # Recursively search for a string that starts with "https://www.google.com/travel/clk".
-    def walk(node: Any) -> None:
-        nonlocal google_click_url
-        if google_click_url is not None:
-            return
-        if isinstance(node, list):
-            for child in node:
-                walk(child)
-        elif isinstance(node, str) and "/travel/clk" in node:
-            google_click_url = node
-    walk(block)
+    google_click_url: str | None = None
+    if len(block) > 2 and isinstance(block[2], list) and block[2]:
+        candidate = block[2][0]
+        if isinstance(candidate, str) and "/travel/clk" in candidate:
+            google_click_url = candidate
     return vendor_url, google_click_url
 
 
-def _extract_booking_pricing(row: list) -> tuple[float | None, str | None, str | None]:
-    """Best-effort extraction of price/currency/fare_name from a booking row."""
-    # Google places per-fare details deeper in the row, but at varying indices.
-    # We scan all string values for an ISO currency code and the closest float.
-    currency: str | None = None
-    price: float | None = None
-    fare_name: str | None = None
-
-    def walk(node: Any, depth: int = 0) -> None:
-        nonlocal currency, price, fare_name
-        if isinstance(node, list):
-            for child in node:
-                walk(child, depth + 1)
-        elif isinstance(node, str):
-            if currency is None and len(node) == 3 and node.isupper() and node.isalpha():
-                currency = node
-            elif fare_name is None and node and " " not in node and len(node) > 1:
-                # Skip; fare names usually have spaces ("Basic Economy", "Main Cabin").
-                pass
-            elif fare_name is None and node and len(node) <= 30 and " " in node:
-                # Heuristic: short, contains a space, isn't a URL.
-                if "http" not in node and "/" not in node:
-                    fare_name = node
-        elif isinstance(node, int | float) and not isinstance(node, bool):
-            if price is None and 10 <= node <= 100000:
-                price = float(node)
-
-    walk(row)
-    return price, currency, fare_name
+def _extract_fare_name(row: list) -> str | None:
+    """Pick the human-readable fare name from row[21][3]; fall back to row[14]."""
+    # Preferred: row[21][3] -> "Basic Economy" / "Main Cabin" / etc.
+    if len(row) > 21 and isinstance(row[21], list) and len(row[21]) > 3:
+        candidate = row[21][3]
+        if isinstance(candidate, str) and candidate:
+            return candidate
+    # Fallback: row[14][0][0][1][1] which is the uppercase fare code.
+    if len(row) > 14 and isinstance(row[14], list) and row[14]:
+        try:
+            label = row[14][0][0][1][1]
+        except (IndexError, TypeError):
+            label = None
+        if isinstance(label, str) and label:
+            return label
+    return None
 
 
 def _with_locale_params(

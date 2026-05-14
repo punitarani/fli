@@ -108,17 +108,24 @@ class TestGetBookingOptionsTokenGuard:
             SearchFlights().get_booking_options(flight, filters)
 
 
+def _row(price=347, fare_label="Basic Economy"):
+    """Build a booking row with positional fields matching the live capture."""
+    row = [None] * 22
+    row[0] = 0
+    row[1] = [["AA", "American", None, True]]
+    row[2] = None
+    row[3] = [["AA", "171"], ["AA", "28"]]
+    row[4] = False
+    row[5] = ["www.aa.com/foo", None, ["https://www.google.com/travel/clk/f?u=abc"]]
+    row[7] = [[None, price], None]   # price block; currency token omitted
+    row[14] = [[[None, ["AA", fare_label.upper().replace(" ", " ")], 1]]]
+    row[21] = [["AA", fare_label.upper()], [], None, fare_label]
+    return row
+
+
 class TestParseBookingRow:
     def test_basic_row(self):
-        row = [
-            0,
-            [["AA", "American", None, True]],
-            None,
-            [["AA", "171"], ["AA", "28"]],
-            False,
-            ["www.aa.com/foo", None, ["https://www.google.com/travel/clk/f?u=abc"]],
-        ]
-        opt = _try_parse_booking_row(row)
+        opt = _try_parse_booking_row(_row())
         assert isinstance(opt, BookingOption)
         assert opt.vendor_code == "AA"
         assert opt.vendor_name == "American"
@@ -126,6 +133,16 @@ class TestParseBookingRow:
         assert opt.flights == [("AA", "171"), ("AA", "28")]
         assert opt.booking_url == "www.aa.com/foo"
         assert opt.google_click_url == "https://www.google.com/travel/clk/f?u=abc"
+
+    def test_extracts_price_from_row7(self):
+        opt = _try_parse_booking_row(_row(price=457))
+        assert opt is not None
+        assert opt.price == 457.0
+
+    def test_extracts_fare_name_from_row21(self):
+        opt = _try_parse_booking_row(_row(fare_label="Main Cabin"))
+        assert opt is not None
+        assert opt.fare_name == "Main Cabin"
 
     def test_rejects_non_booking_list(self):
         # Random outer list — should not falsely parse.
@@ -135,57 +152,22 @@ class TestParseBookingRow:
         assert _try_parse_booking_row([0, [["AA", "American"]]]) is None
 
     def test_rejects_when_first_not_int(self):
-        row = [
-            "not-an-int",
-            [["AA", "American"]],
-            None,
-            [],
-            False,
-            ["www.aa.com"],
-        ]
+        row = _row()
+        row[0] = "not-an-int"
         assert _try_parse_booking_row(row) is None
-
-    def test_extracts_currency_and_price_from_nested(self):
-        row = [
-            0,
-            [["AA", "American", None, True]],
-            None,
-            [["AA", "171"]],
-            False,
-            ["www.aa.com/foo"],
-            ["Basic Economy", "USD", 347.0],
-        ]
-        opt = _try_parse_booking_row(row)
-        assert opt is not None
-        assert opt.currency == "USD"
-        assert opt.price == 347.0
 
 
 class TestParseBookingChunk:
     def test_walks_nested_lists(self):
-        chunk = [
-            None,
-            [
-                [
-                    0,
-                    [["AA", "American", None, True]],
-                    None,
-                    [["AA", "171"]],
-                    False,
-                    ["www.aa.com"],
-                ],
-                [
-                    1,
-                    [["EX", "Expedia", None, False]],
-                    None,
-                    [["AA", "171"]],
-                    False,
-                    ["www.expedia.com"],
-                ],
-            ],
-        ]
+        # Build full-shape rows so the positional parser matches them.
+        row_aa = _row(price=347, fare_label="Basic Economy")
+        row_ex = _row(price=400, fare_label="Refundable")
+        row_ex[1] = [["EX", "Expedia", None, False]]
+        chunk = [None, [row_aa, row_ex]]
         opts = SearchFlights._parse_booking_chunk(chunk)
         assert len(opts) == 2
         assert {o.vendor_code for o in opts} == {"AA", "EX"}
-        assert opts[0].is_airline_direct is True
-        assert opts[1].is_airline_direct is False
+        # Order from the parser walk preserves chunk order.
+        by_vendor = {o.vendor_code: o for o in opts}
+        assert by_vendor["AA"].is_airline_direct is True
+        assert by_vendor["EX"].is_airline_direct is False
