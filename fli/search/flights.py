@@ -370,21 +370,24 @@ class SearchFlights:
             return None
         # Slots positions inferred from comparison across many leg rows.
         # Tri-state: True / False / None.
+        # Confirmed: slot 1 = wifi, slot 5 = power, slot 9 = video (in-seat
+        # or on-demand depending on aircraft). Slot 11 carries a small int
+        # (2 or 3) that correlates with legroom rating.
         wifi = _as_bool(_safe_get(slots, 1))
         power = _as_bool(_safe_get(slots, 5))
-        usb_power = _as_bool(_safe_get(slots, 9))
         on_demand_video = _as_bool(_safe_get(slots, 9))
-        in_seat_video = None
+        # Note: in_seat_video and usb_power slot positions not yet
+        # disambiguated from live captures; left as None until confirmed.
         legroom_rating = _safe_get(slots, 11)
         if not isinstance(legroom_rating, int):
             legroom_rating = None
-        if wifi is None and power is None and usb_power is None and legroom_rating is None:
+        if wifi is None and power is None and on_demand_video is None and legroom_rating is None:
             return None
         return Amenities(
             wifi=wifi,
             power=power,
-            usb_power=usb_power,
-            in_seat_video=in_seat_video,
+            usb_power=None,
+            in_seat_video=None,
             on_demand_video=on_demand_video,
             legroom_rating=legroom_rating,
         )
