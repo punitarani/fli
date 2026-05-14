@@ -4,6 +4,14 @@ The recursion mutates a deep copy of the caller's filters as it walks
 segment-by-segment, so it has been a quiet source of subtle bugs around
 selected-flight state and locale kwarg propagation. These mock-based
 tests pin the contract without hitting Google.
+
+Mocking note: as of the parallelisation refactor, ``_expand_multi_leg``
+calls ``self._fetch_flights`` directly (with ``capture_session=False``)
+rather than ``self.search`` — that change keeps the parallel workers
+from racing on ``_last_session_id``. The tests below mock
+``_fetch_flights`` accordingly. Each mocked call returns a flat list of
+next-leg ``FlightResult`` instances; ``_expand_multi_leg`` handles its
+own recursion for multi-city.
 """
 
 from __future__ import annotations
@@ -76,24 +84,22 @@ class TestExpandMultiLeg:
     def test_multi_city_three_segments_produces_3_tuples(self):
         """3-segment multi-city flattens to 3-tuples of FlightResult.
 
-        The recursion model: ``_expand_multi_leg`` calls ``self.search()``
-        for the next segment, and ``search()`` internally calls
-        ``_expand_multi_leg`` again until every-but-last segment has a
-        ``selected_flight``. We mock the *inner* ``search()`` to return
-        the already-expanded tail (a tuple) so the outer call can prepend
-        ``outbound`` and produce the full 3-tuple.
+        The new recursion path: ``_expand_multi_leg`` calls
+        ``self._fetch_flights`` for the next segment and, while more
+        segments remain unselected, recurses into ``_expand_multi_leg``
+        directly. Mock ``_fetch_flights`` to return the next-leg
+        candidates as a flat list at each level.
         """
         client = SearchFlights()
         outbound = [_result(Airport.JFK, Airport.LAX)]
         leg2 = _result(Airport.LAX, Airport.SEA)
         leg3 = _result(Airport.SEA, Airport.JFK)
+        responses = iter([[leg2], [leg3]])
 
-        def _fake_search(filters, **kwargs):
-            # First (and only) recursive call: 1 segment selected; the real
-            # ``search()`` would expand to a list of (leg2, leg3) tuples.
-            return [(leg2, leg3)]
+        def _fake_fetch(filters, **kwargs):
+            return next(responses)
 
-        with patch.object(SearchFlights, "search", side_effect=_fake_search):
+        with patch.object(SearchFlights, "_fetch_flights", side_effect=_fake_fetch):
             combos = client._expand_multi_leg(
                 outbound,
                 _three_segment_filters(),
@@ -117,7 +123,7 @@ class TestExpandMultiLeg:
         leg2 = [_result(Airport.LAX, Airport.JFK)]
         captured_kwargs: list[dict] = []
 
-        def _fake_search(filters, **kwargs):
+        def _fake_fetch(filters, **kwargs):
             captured_kwargs.append(dict(kwargs))
             return leg2
 
@@ -138,7 +144,7 @@ class TestExpandMultiLeg:
                 ),
             ],
         )
-        with patch.object(SearchFlights, "search", side_effect=_fake_search):
+        with patch.object(SearchFlights, "_fetch_flights", side_effect=_fake_fetch):
             client._expand_multi_leg(
                 outbound,
                 rt_filters,
@@ -147,11 +153,13 @@ class TestExpandMultiLeg:
                 language="en-GB",
                 country="GB",
             )
-        assert captured_kwargs, "Expected at least one recursive search() call"
+        assert captured_kwargs, "Expected at least one expansion fetch() call"
         for call in captured_kwargs:
             assert call["currency"] == "EUR"
             assert call["language"] == "en-GB"
             assert call["country"] == "GB"
+            # Expansion calls must never write to the shared session cache.
+            assert call["capture_session"] is False
 
     def test_caller_filters_not_mutated(self):
         """``_expand_multi_leg`` must operate on a deepcopy of the input."""
@@ -162,10 +170,10 @@ class TestExpandMultiLeg:
         leg3 = [_result(Airport.SEA, Airport.JFK)]
         responses = iter([leg2, leg3])
 
-        def _fake_search(filters_arg, **kwargs):
+        def _fake_fetch(filters_arg, **kwargs):
             return next(responses)
 
-        with patch.object(SearchFlights, "search", side_effect=_fake_search):
+        with patch.object(SearchFlights, "_fetch_flights", side_effect=_fake_fetch):
             client._expand_multi_leg(
                 outbound,
                 filters,
@@ -178,19 +186,19 @@ class TestExpandMultiLeg:
         assert all(seg.selected_flight is None for seg in filters.flight_segments)
 
     def test_empty_next_results_skipped(self):
-        """When a recursive search returns None, that combo is dropped."""
+        """When a recursive fetch returns None, that combo is dropped."""
         client = SearchFlights()
         outbound = [_result(Airport.JFK, Airport.LAX), _result(Airport.JFK, Airport.LAX, hour=14)]
 
-        def _fake_search(filters, **kwargs):
-            # First outbound recursion returns results, second returns None.
-            if _fake_search.calls == 0:
-                _fake_search.calls += 1
+        def _fake_fetch(filters, **kwargs):
+            # First outbound expansion returns results, second returns None.
+            if _fake_fetch.calls == 0:
+                _fake_fetch.calls += 1
                 return [_result(Airport.LAX, Airport.JFK)]
-            _fake_search.calls += 1
+            _fake_fetch.calls += 1
             return None
 
-        _fake_search.calls = 0
+        _fake_fetch.calls = 0
 
         rt_filters = FlightSearchFilters(
             trip_type=TripType.ROUND_TRIP,
@@ -208,7 +216,7 @@ class TestExpandMultiLeg:
                 ),
             ],
         )
-        with patch.object(SearchFlights, "search", side_effect=_fake_search):
+        with patch.object(SearchFlights, "_fetch_flights", side_effect=_fake_fetch):
             combos = client._expand_multi_leg(
                 outbound,
                 rt_filters,

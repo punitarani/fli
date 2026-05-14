@@ -160,12 +160,12 @@ def configure_concurrency(max_workers: int) -> None:
     """Resize the shared executor's worker cap (must be > 0)."""
     if max_workers <= 0:
         raise ValueError("max_workers must be positive")
-    global _executor_max_workers
+    global _executor, _executor_max_workers
     with _executor_lock:
         _executor_max_workers = max_workers
         if _executor is not None:
             _executor.shutdown(wait=False)
-            globals()["_executor"] = None
+            _executor = None
 
 
 def shutdown_executor(wait: bool = True) -> None:

@@ -16,12 +16,16 @@ from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
 from fli.models import (
+    Airline,
     Airport,
     DateSearchFilters,
+    FlightLeg,
+    FlightResult,
     FlightSearchFilters,
     FlightSegment,
     PassengerInfo,
@@ -177,6 +181,72 @@ class TestRoundTripParallel:
         assert wall_ms < sequential_floor * 0.7, (
             f"Round-trip wall={wall_ms:.0f}ms not significantly under "
             f"sequential floor {sequential_floor}ms"
+        )
+
+    def test_only_outbound_call_captures_session_id(self):
+        """Parallel expansion workers must not write ``_last_session_id``.
+
+        Regression test for the data race Greptile caught: previously,
+        every expansion worker called ``self.search()`` recursively and
+        each captured a session id, so ``_last_session_id`` ended up
+        holding whichever expansion finished last (non-deterministic).
+        After the fix only the top-level outbound search captures.
+        """
+        outbound_session = "SESSION_OUTBOUND"
+        expansion_session = "SESSION_EXPANSION"
+        captures: list[bool] = []
+        lock = threading.Lock()
+
+        def _make_result(tag: str) -> FlightResult:
+            return FlightResult(
+                legs=[
+                    FlightLeg(
+                        airline=Airline.AA,
+                        flight_number=tag,
+                        departure_airport=Airport.JFK,
+                        arrival_airport=Airport.LAX,
+                        departure_datetime=datetime(2026, 7, 15, 9, 0),
+                        arrival_datetime=datetime(2026, 7, 15, 12, 0),
+                        duration=180,
+                    )
+                ],
+                price=300,
+                currency="USD",
+                duration=180,
+                stops=0,
+            )
+
+        def _capturing_fetch(_self, filters, **kwargs):
+            with lock:
+                captures.append(kwargs["capture_session"])
+            if kwargs["capture_session"]:
+                _self._last_session_id = outbound_session
+                # Outbound: return 5 candidates so the expansion fans out.
+                return [_make_result(f"out-{i}") for i in range(5)]
+            # Expansion: a well-behaved version of this code path must NOT
+            # touch ``_last_session_id``. Assert it stayed as the outbound's.
+            assert _self._last_session_id == outbound_session, (
+                "Expansion worker observed _last_session_id != outbound — "
+                "a previous expansion clobbered it."
+            )
+            # Returning a single return-leg candidate; the assembler will
+            # produce one (outbound, return) tuple per expansion.
+            return [_make_result(f"ret-{expansion_session}")]
+
+        with patch.object(
+            SearchFlights, "_fetch_flights", autospec=True, side_effect=_capturing_fetch
+        ):
+            search = SearchFlights()
+            results = search.search(_round_trip_filters(), top_n=5)
+
+        assert results is not None and len(results) == 5
+        # Outbound call (capture=True) + 5 expansion workers (capture=False).
+        assert captures.count(True) == 1, f"captures: {captures}"
+        assert captures.count(False) == 5, f"captures: {captures}"
+        # The cache must still hold the OUTBOUND session id — not whichever
+        # expansion worker finished last.
+        assert search._last_session_id == outbound_session, (
+            f"Expected outbound session cached, got {search._last_session_id!r}"
         )
 
 

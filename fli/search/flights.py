@@ -121,6 +121,45 @@ class SearchFlights:
             Exception: HTTP failure or unparseable response.
 
         """
+        flights = self._fetch_flights(
+            filters,
+            currency=currency,
+            language=language,
+            country=country,
+            capture_session=True,
+        )
+        if flights is None:
+            return None
+        if filters.trip_type == TripType.ONE_WAY:
+            return flights
+        return self._expand_multi_leg(
+            flights,
+            filters,
+            top_n=top_n,
+            currency=currency,
+            language=language,
+            country=country,
+        )
+
+    def _fetch_flights(
+        self,
+        filters: FlightSearchFilters,
+        *,
+        currency: str | None,
+        language: str | None,
+        country: str | None,
+        capture_session: bool,
+    ) -> list[FlightResult] | None:
+        """Issue one ``GetShoppingResults`` call and decode the flight rows.
+
+        ``capture_session`` controls whether the response's session id is
+        written back to ``self._last_session_id``. Only the top-level
+        :meth:`search` call sets this; expansion sub-calls in
+        :meth:`_expand_multi_leg` run in parallel worker threads and must
+        not write to that field — both because the writes would race and
+        because the user-visible session id should describe the original
+        shopping query, not whichever expansion completed last.
+        """
         encoded = filters.encode()
         url = with_locale_params(self.BASE_URL, currency, language, country)
 
@@ -136,7 +175,8 @@ class SearchFlights:
         if inner is None:
             return None
 
-        self._capture_session_id(inner)
+        if capture_session:
+            self._capture_session_id(inner)
 
         try:
             flights_raw = [
@@ -163,18 +203,7 @@ class SearchFlights:
                 f"Parsed 0/{len(flights_raw)} flight rows — Google response shape may have changed"
             )
 
-        if not flights:
-            return None
-        if filters.trip_type == TripType.ONE_WAY:
-            return flights
-        return self._expand_multi_leg(
-            flights,
-            filters,
-            top_n=top_n,
-            currency=currency,
-            language=language,
-            country=country,
-        )
+        return flights or None
 
     def get_booking_options(
         self,
@@ -337,6 +366,15 @@ class SearchFlights:
         req/sec ceiling, all five requests start within ~100ms and the
         bottleneck becomes the network round trip rather than serial
         request scheduling.
+
+        Each worker calls :meth:`_fetch_flights` directly (not
+        :meth:`search`) with ``capture_session=False`` so the parallel
+        workers never write to ``self._last_session_id``. The session id
+        captured by the original outbound :meth:`search` call describes
+        the user-visible shopping query and is the one
+        :meth:`get_booking_options` should use; letting expansion workers
+        race over it would yield non-deterministic results and violate
+        the "one session per visible search" contract.
         """
         num_segments = len(filters.flight_segments)
         selected_count = sum(1 for s in filters.flight_segments if s.selected_flight is not None)
@@ -351,14 +389,28 @@ class SearchFlights:
         def expand(outbound: FlightResult):
             next_filters = deepcopy(filters)
             next_filters.flight_segments[selected_count].selected_flight = outbound
-            results = self.search(
+            sub_flights = self._fetch_flights(
                 next_filters,
-                top_n=top_n,
                 currency=currency,
                 language=language,
                 country=country,
+                capture_session=False,
             )
-            return outbound, results
+            if sub_flights is None:
+                return outbound, None
+            # If more segments remain unselected (multi-city ≥ 3), keep
+            # expanding. Otherwise return the flat list of next-leg
+            # candidates and let the caller assemble tuples.
+            if selected_count + 1 < num_segments - 1:
+                return outbound, self._expand_multi_leg(
+                    sub_flights,
+                    next_filters,
+                    top_n=top_n,
+                    currency=currency,
+                    language=language,
+                    country=country,
+                )
+            return outbound, sub_flights
 
         expansions = parallel_map(expand, candidates)
 
