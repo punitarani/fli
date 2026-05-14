@@ -45,9 +45,7 @@ def parse_flight_row(row: list) -> FlightResult:
 
     raw_legs = detail[2] or []
     legs = [_parse_leg(fl) for fl in raw_legs]
-    layovers = (
-        _derive_layovers(legs, safe_get(detail, 13)) if len(legs) > 1 else None
-    )
+    layovers = _derive_layovers(legs, safe_get(detail, 13)) if len(legs) > 1 else None
 
     emissions = _parse_emissions(detail)
     primary_airline = _safe_airline(safe_get(detail, 0))
@@ -132,12 +130,7 @@ def _parse_amenities(slots: Any) -> Amenities | None:
     power = as_bool(safe_get(slots, 5))
     on_demand_video = as_bool(safe_get(slots, 9))
     legroom_rating = as_non_negative_int(safe_get(slots, 11))
-    if (
-        wifi is None
-        and power is None
-        and on_demand_video is None
-        and legroom_rating is None
-    ):
+    if wifi is None and power is None and on_demand_video is None and legroom_rating is None:
         return None
     return Amenities(
         wifi=wifi,

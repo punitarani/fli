@@ -119,9 +119,7 @@ class TestFlightLegRichFields:
 class TestFlightResultRichFields:
     def test_defaults_backwards_compatible(self):
         leg = _make_leg()
-        flight = FlightResult(
-            legs=[leg], price=164.0, currency="USD", duration=378, stops=0
-        )
+        flight = FlightResult(legs=[leg], price=164.0, currency="USD", duration=378, stops=0)
         assert flight.layovers is None
         assert flight.co2_emissions_g is None
         assert flight.co2_emissions_typical_g is None

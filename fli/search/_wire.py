@@ -45,7 +45,7 @@ def iter_wrb_chunks(body: str | bytes) -> Iterator[Any]:
 
     raw = raw.lstrip()
     if raw.startswith(_PREFIX):
-        raw = raw[len(_PREFIX):]
+        raw = raw[len(_PREFIX) :]
     raw = raw.lstrip()
 
     if not raw:

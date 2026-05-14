@@ -39,9 +39,12 @@ class TestAllianceFlag:
         result = runner.invoke(
             app,
             [
-                "flights", "JFK", "LAX",
+                "flights",
+                "JFK",
+                "LAX",
                 datetime.now().strftime("%Y-%m-%d"),
-                "--alliance", "ONEWORLD",
+                "--alliance",
+                "ONEWORLD",
             ],
         )
         assert result.exit_code == 0
@@ -52,9 +55,12 @@ class TestAllianceFlag:
         result = runner.invoke(
             app,
             [
-                "flights", "JFK", "LAX",
+                "flights",
+                "JFK",
+                "LAX",
                 datetime.now().strftime("%Y-%m-%d"),
-                "--alliance", "ONEWORLD,SKYTEAM",
+                "--alliance",
+                "ONEWORLD,SKYTEAM",
             ],
         )
         assert result.exit_code == 0
@@ -65,10 +71,14 @@ class TestAllianceFlag:
         result = runner.invoke(
             app,
             [
-                "flights", "JFK", "LAX",
+                "flights",
+                "JFK",
+                "LAX",
                 datetime.now().strftime("%Y-%m-%d"),
-                "--alliance", "ONEWORLD",
-                "--alliance", "STAR_ALLIANCE",
+                "--alliance",
+                "ONEWORLD",
+                "--alliance",
+                "STAR_ALLIANCE",
             ],
         )
         assert result.exit_code == 0
@@ -79,9 +89,12 @@ class TestAllianceFlag:
         result = runner.invoke(
             app,
             [
-                "flights", "JFK", "LAX",
+                "flights",
+                "JFK",
+                "LAX",
                 datetime.now().strftime("%Y-%m-%d"),
-                "--alliance", "oneworld",
+                "--alliance",
+                "oneworld",
             ],
         )
         assert result.exit_code == 0
@@ -92,9 +105,12 @@ class TestAllianceFlag:
         result = runner.invoke(
             app,
             [
-                "flights", "JFK", "LAX",
+                "flights",
+                "JFK",
+                "LAX",
                 datetime.now().strftime("%Y-%m-%d"),
-                "--alliance", "BOGUS_ALLIANCE",
+                "--alliance",
+                "BOGUS_ALLIANCE",
             ],
         )
         assert result.exit_code != 0
@@ -105,9 +121,12 @@ class TestExcludeAirlinesFlag:
         result = runner.invoke(
             app,
             [
-                "flights", "JFK", "LAX",
+                "flights",
+                "JFK",
+                "LAX",
                 datetime.now().strftime("%Y-%m-%d"),
-                "--exclude-airlines", "DL",
+                "--exclude-airlines",
+                "DL",
             ],
         )
         assert result.exit_code == 0
@@ -118,9 +137,12 @@ class TestExcludeAirlinesFlag:
         result = runner.invoke(
             app,
             [
-                "flights", "JFK", "LAX",
+                "flights",
+                "JFK",
+                "LAX",
                 datetime.now().strftime("%Y-%m-%d"),
-                "--exclude-airlines", "DL,B6",
+                "--exclude-airlines",
+                "DL,B6",
             ],
         )
         assert result.exit_code == 0
@@ -132,9 +154,12 @@ class TestExcludeAirlinesFlag:
         result = runner.invoke(
             app,
             [
-                "flights", "JFK", "LAX",
+                "flights",
+                "JFK",
+                "LAX",
                 datetime.now().strftime("%Y-%m-%d"),
-                "-A", "DL",
+                "-A",
+                "DL",
             ],
         )
         assert result.exit_code == 0
@@ -147,9 +172,12 @@ class TestExcludeAllianceFlag:
         result = runner.invoke(
             app,
             [
-                "flights", "JFK", "LAX",
+                "flights",
+                "JFK",
+                "LAX",
                 datetime.now().strftime("%Y-%m-%d"),
-                "--exclude-alliance", "STAR_ALLIANCE",
+                "--exclude-alliance",
+                "STAR_ALLIANCE",
             ],
         )
         assert result.exit_code == 0
@@ -162,9 +190,12 @@ class TestLayoverDurationFlags:
         result = runner.invoke(
             app,
             [
-                "flights", "BUF", "ATH",
+                "flights",
+                "BUF",
+                "ATH",
                 datetime.now().strftime("%Y-%m-%d"),
-                "--min-layover", "120",
+                "--min-layover",
+                "120",
             ],
         )
         assert result.exit_code == 0
@@ -177,9 +208,12 @@ class TestLayoverDurationFlags:
         result = runner.invoke(
             app,
             [
-                "flights", "BUF", "ATH",
+                "flights",
+                "BUF",
+                "ATH",
                 datetime.now().strftime("%Y-%m-%d"),
-                "--max-layover", "300",
+                "--max-layover",
+                "300",
             ],
         )
         assert result.exit_code == 0
@@ -192,10 +226,14 @@ class TestLayoverDurationFlags:
         result = runner.invoke(
             app,
             [
-                "flights", "BUF", "ATH",
+                "flights",
+                "BUF",
+                "ATH",
                 datetime.now().strftime("%Y-%m-%d"),
-                "--min-layover", "60",
-                "--max-layover", "240",
+                "--min-layover",
+                "60",
+                "--max-layover",
+                "240",
             ],
         )
         assert result.exit_code == 0
@@ -208,10 +246,14 @@ class TestLayoverDurationFlags:
         result = runner.invoke(
             app,
             [
-                "flights", "BUF", "ATH",
+                "flights",
+                "BUF",
+                "ATH",
                 datetime.now().strftime("%Y-%m-%d"),
-                "--layover", "ORD",
-                "--min-layover", "90",
+                "--layover",
+                "ORD",
+                "--min-layover",
+                "90",
             ],
         )
         assert result.exit_code == 0
@@ -227,11 +269,16 @@ class TestCombinedFilters:
         result = runner.invoke(
             app,
             [
-                "flights", "JFK", "FRA",
+                "flights",
+                "JFK",
+                "FRA",
                 datetime.now().strftime("%Y-%m-%d"),
-                "--alliance", "ONEWORLD",
-                "--exclude-airlines", "BA",
-                "--min-layover", "90",
+                "--alliance",
+                "ONEWORLD",
+                "--exclude-airlines",
+                "BA",
+                "--min-layover",
+                "90",
             ],
         )
         assert result.exit_code == 0

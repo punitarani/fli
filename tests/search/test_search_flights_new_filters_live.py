@@ -72,16 +72,71 @@ def _codes(results) -> set[str]:
 #   - SAS (SK) left Star Alliance and joined SkyTeam in September 2024.
 #   - Virgin Atlantic (VS) is a SkyTeam member (joined 2023).
 _ONEWORLD = {
-    "AA", "AS", "AT", "AY", "BA", "CX", "FJ", "IB", "JL", "MH", "QF", "QR",
-    "RJ", "S7", "UL",
+    "AA",
+    "AS",
+    "AT",
+    "AY",
+    "BA",
+    "CX",
+    "FJ",
+    "IB",
+    "JL",
+    "MH",
+    "QF",
+    "QR",
+    "RJ",
+    "S7",
+    "UL",
 }
 _SKYTEAM = {
-    "AF", "AM", "AR", "CI", "DL", "GA", "KE", "KL", "KQ", "ME", "MF", "MU",
-    "OK", "RO", "SK", "SU", "SV", "VN", "VS", "XK",
+    "AF",
+    "AM",
+    "AR",
+    "CI",
+    "DL",
+    "GA",
+    "KE",
+    "KL",
+    "KQ",
+    "ME",
+    "MF",
+    "MU",
+    "OK",
+    "RO",
+    "SK",
+    "SU",
+    "SV",
+    "VN",
+    "VS",
+    "XK",
 }
 _STAR_ALLIANCE = {
-    "A3", "AC", "AI", "AV", "AZ", "BR", "CA", "CM", "ET", "EW", "LH", "LO", "LX",
-    "MS", "NH", "NZ", "OS", "OZ", "SA", "SN", "SQ", "TG", "TK", "TP", "UA", "ZH",
+    "A3",
+    "AC",
+    "AI",
+    "AV",
+    "AZ",
+    "BR",
+    "CA",
+    "CM",
+    "ET",
+    "EW",
+    "LH",
+    "LO",
+    "LX",
+    "MS",
+    "NH",
+    "NZ",
+    "OS",
+    "OZ",
+    "SA",
+    "SN",
+    "SQ",
+    "TG",
+    "TK",
+    "TP",
+    "UA",
+    "ZH",
 }
 
 
@@ -175,9 +230,7 @@ class TestMinLayoverDuration:
             if not target.layovers:
                 continue
             for lo in target.layovers:
-                assert lo.duration >= 120, (
-                    f"Found layover of {lo.duration} min, expected ≥120"
-                )
+                assert lo.duration >= 120, f"Found layover of {lo.duration} min, expected ≥120"
 
 
 class TestCurrencyURLParam:
@@ -222,10 +275,7 @@ class TestRichResponseFields:
 
     def test_co2_emissions_populated(self, jfk_lax_results):
         # At least one result must report CO₂ emissions.
-        with_co2 = [
-            f for f in jfk_lax_results
-            if not isinstance(f, tuple) and f.co2_emissions_g
-        ]
+        with_co2 = [f for f in jfk_lax_results if not isinstance(f, tuple) and f.co2_emissions_g]
         assert with_co2, "Expected at least one result with co2_emissions_g populated"
 
     def test_aircraft_type_populated_on_some_legs(self, jfk_lax_results):

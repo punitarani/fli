@@ -62,12 +62,7 @@ def _replay(name: str) -> list:
     if not inner_str:
         return []
     inner = json.loads(inner_str)
-    rows = [
-        item
-        for i in (2, 3)
-        if isinstance(inner[i], list)
-        for item in inner[i][0]
-    ]
+    rows = [item for i in (2, 3) if isinstance(inner[i], list) for item in inner[i][0]]
     flights = []
     for row in rows:
         try:
@@ -161,12 +156,7 @@ class TestSnapshotFlightShape:
         assert with_pa, "Expected primary_airline on at least one flight"
 
     def test_aircraft_populated_on_some_legs(self, jfk_lax_oneway):
-        with_ac = [
-            leg
-            for f in jfk_lax_oneway
-            for leg in f.legs
-            if leg.aircraft
-        ]
+        with_ac = [leg for f in jfk_lax_oneway for leg in f.legs if leg.aircraft]
         assert with_ac, "Expected aircraft set on at least one leg"
 
 
@@ -174,25 +164,33 @@ class TestSnapshotFilterEnforcement:
     """The captured filter responses should reflect the filter applied."""
 
     _ONEWORLD = {
-        "AA", "AS", "AT", "AY", "BA", "CX", "FJ", "IB", "JL", "MH", "QF",
-        "QR", "RJ", "S7", "UL", "DE",  # Condor is a Oneworld-connect partner
+        "AA",
+        "AS",
+        "AT",
+        "AY",
+        "BA",
+        "CX",
+        "FJ",
+        "IB",
+        "JL",
+        "MH",
+        "QF",
+        "QR",
+        "RJ",
+        "S7",
+        "UL",
+        "DE",  # Condor is a Oneworld-connect partner
     }
 
     def test_oneworld_filter_only_oneworld(self, jfk_fra_oneworld):
-        carriers = {
-            f.legs[0].airline.name.lstrip("_")
-            for f in jfk_fra_oneworld
-        }
+        carriers = {f.legs[0].airline.name.lstrip("_") for f in jfk_fra_oneworld}
         # Ignore "multi" pseudo-code for codeshares.
         carriers.discard("multi")
         outside = carriers - self._ONEWORLD
         assert not outside, f"Non-Oneworld carriers found in fixture: {outside}"
 
     def test_exclude_dl_drops_delta(self, jfk_lax_exclude_dl):
-        carriers = {
-            f.legs[0].airline.name.lstrip("_")
-            for f in jfk_lax_exclude_dl
-        }
+        carriers = {f.legs[0].airline.name.lstrip("_") for f in jfk_lax_exclude_dl}
         assert "DL" not in carriers
 
     def test_min_layover_120_minutes_all_satisfy(self, buf_ath_min_layover):
@@ -201,9 +199,7 @@ class TestSnapshotFilterEnforcement:
             if not f.layovers:
                 continue
             for lo in f.layovers:
-                assert lo.duration >= 120, (
-                    f"Found {lo.duration}-min layover at {lo.airport.name}"
-                )
+                assert lo.duration >= 120, f"Found {lo.duration}-min layover at {lo.airport.name}"
 
 
 class TestSnapshotLayoversAndOvernight:

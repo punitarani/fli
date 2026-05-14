@@ -177,9 +177,7 @@ class FlightSearchFilters(BaseModel):
             )
 
             # Segment classifier: 3 for outbound (or only leg), 1 for return.
-            is_return = (
-                self.trip_type == TripType.ROUND_TRIP and seg_idx > 0
-            )
+            is_return = self.trip_type == TripType.ROUND_TRIP and seg_idx > 0
             classifier = 1 if is_return else 3
 
             segment_formatted = [

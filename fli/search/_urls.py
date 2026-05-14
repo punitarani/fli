@@ -9,6 +9,8 @@ hiding them as undocumented HTTP details.
 
 from __future__ import annotations
 
+import urllib.parse
+
 
 def with_locale_params(
     url: str,
@@ -23,16 +25,20 @@ def with_locale_params(
     - ``language`` is passed through verbatim (BCP-47, may contain a hyphen).
     - ``country`` is uppercased (ISO 3166-1 alpha-2).
 
+    All values are percent-encoded so a caller typo (a stray ``&``, ``+``,
+    or whitespace) can't break the URL — typical inputs like ``en-GB`` are
+    already URL-safe so the encoding is a no-op for them.
+
     No-op when all three are None — returns the input URL unchanged so
     callers can pass through without checking.
     """
     params: list[str] = []
     if currency:
-        params.append(f"curr={currency.upper()}")
+        params.append(f"curr={urllib.parse.quote(currency.upper(), safe='')}")
     if language:
-        params.append(f"hl={language}")
+        params.append(f"hl={urllib.parse.quote(language, safe='')}")
     if country:
-        params.append(f"gl={country.upper()}")
+        params.append(f"gl={urllib.parse.quote(country.upper(), safe='')}")
     if not params:
         return url
     sep = "&" if "?" in url else "?"

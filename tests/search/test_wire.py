@@ -23,9 +23,12 @@ def _multi_chunk(*payloads):
     for p in payloads:
         inner_json = json.dumps(p, separators=(",", ":"))
         outer_json = json.dumps([["wrb.fr", None, inner_json]], separators=(",", ":"))
-        # +2 accounts for both newlines the count covers (the header
-        # terminator and the trailing separator).
-        parts.append(f"{len(outer_json) + 2}\n{outer_json}\n")
+        # The length header counts UTF-8 BYTES (not Python str chars) plus
+        # the two surrounding newlines. Encoding the JSON before measuring
+        # keeps the test correct when payloads contain non-ASCII characters
+        # like accented airport names or Japanese carrier strings.
+        byte_len = len(outer_json.encode("utf-8")) + 2
+        parts.append(f"{byte_len}\n{outer_json}\n")
     return "".join(parts)
 
 
@@ -52,6 +55,14 @@ class TestIterWrbChunks:
     def test_handles_malformed_inner_json_gracefully(self):
         body = ")]}'\n\n" + json.dumps([["wrb.fr", None, "{not valid"]])
         assert list(iter_wrb_chunks(body)) == []
+
+    def test_non_ascii_chunk_payload(self):
+        # The length header counts UTF-8 bytes, not characters — confirm a
+        # payload with multi-byte chars round-trips correctly (regression
+        # guard for the byte-vs-char-length bug in the test helper).
+        body = _multi_chunk([1, "東京", "café", "résumé"])
+        chunks = list(iter_wrb_chunks(body))
+        assert chunks == [[1, "東京", "café", "résumé"]]
 
 
 class TestParseFirstWrbPayload:

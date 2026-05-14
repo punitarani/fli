@@ -109,10 +109,7 @@ class SearchFlights:
                 return None
             inner = json.loads(parsed)
             flights_raw = [
-                item
-                for i in (2, 3)
-                if isinstance(inner[i], list)
-                for item in inner[i][0]
+                item for i in (2, 3) if isinstance(inner[i], list) for item in inner[i][0]
             ]
             flights: list[FlightResult] = []
             for row in flights_raw:
@@ -216,9 +213,7 @@ class SearchFlights:
         prepared = deepcopy(filters)
         segments = prepared.flight_segments
         if len(results) > len(segments):
-            raise ValueError(
-                f"flight has {len(results)} segments but filters has {len(segments)}"
-            )
+            raise ValueError(f"flight has {len(results)} segments but filters has {len(segments)}")
         for seg, res in zip(segments, results, strict=False):
             seg.selected_flight = res
 
@@ -256,9 +251,7 @@ class SearchFlights:
     ) -> list[tuple[FlightResult, ...]] | list[FlightResult]:
         """Recursively fetch next-leg options for round-trip / multi-city."""
         num_segments = len(filters.flight_segments)
-        selected_count = sum(
-            1 for s in filters.flight_segments if s.selected_flight is not None
-        )
+        selected_count = sum(1 for s in filters.flight_segments if s.selected_flight is not None)
         if selected_count >= num_segments - 1:
             return flights
 

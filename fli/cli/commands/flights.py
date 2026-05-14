@@ -101,9 +101,7 @@ def _search_flights_core(
             if parsed_exclude_airlines
             else None
         )
-        query["alliances"] = (
-            [a.value for a in parsed_alliances] if parsed_alliances else None
-        )
+        query["alliances"] = [a.value for a in parsed_alliances] if parsed_alliances else None
         query["exclude_alliances"] = (
             [a.value for a in parsed_exclude_alliances] if parsed_exclude_alliances else None
         )

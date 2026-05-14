@@ -107,9 +107,13 @@ class TestParseFlightsDataNonStop:
 
     def setup_method(self):
         self.row = _row(
-            legs=[_leg(dep_iata="JFK", arr_iata="LAX", amenities=[None, True, None, None, None,
-                                                                  True, None, None, None,
-                                                                  True, None, 2])],
+            legs=[
+                _leg(
+                    dep_iata="JFK",
+                    arr_iata="LAX",
+                    amenities=[None, True, None, None, None, True, None, None, None, True, None, 2],
+                )
+            ],
         )
         self.flight = SearchFlights._parse_flights_data(self.row)
 
@@ -171,24 +175,38 @@ class TestParseFlightsDataLayover:
 
     def setup_method(self):
         leg1 = _leg(
-            dep_iata="JFK", arr_iata="CDG",
-            dep_time=(19, 15), arr_time=(9, 5),
-            dep_date=(2026, 7, 15), arr_date=(2026, 7, 16),
-            duration=470, airline_code="DL", flight_number="262",
+            dep_iata="JFK",
+            arr_iata="CDG",
+            dep_time=(19, 15),
+            arr_time=(9, 5),
+            dep_date=(2026, 7, 15),
+            arr_date=(2026, 7, 16),
+            duration=470,
+            airline_code="DL",
+            flight_number="262",
             aircraft="Boeing 767",
         )
         leg2 = _leg(
-            dep_iata="CDG", arr_iata="ATH",
-            dep_time=(13, 20), arr_time=(17, 40),
-            dep_date=(2026, 7, 16), arr_date=(2026, 7, 16),
-            duration=200, airline_code="AF", flight_number="1832",
+            dep_iata="CDG",
+            arr_iata="ATH",
+            dep_time=(13, 20),
+            arr_time=(17, 40),
+            dep_date=(2026, 7, 16),
+            arr_date=(2026, 7, 16),
+            duration=200,
+            airline_code="AF",
+            flight_number="1832",
             aircraft="Airbus A321",
         )
         self.row = _row(
             legs=[leg1, leg2],
             price=618,
-            co2_this=625000, co2_typ=533000, co2_delta_pct=17, co2_tag=3,
-            primary_airline_code="DL", primary_airline_name="Delta",
+            co2_this=625000,
+            co2_typ=533000,
+            co2_delta_pct=17,
+            co2_tag=3,
+            primary_airline_code="DL",
+            primary_airline_name="Delta",
         )
         self.flight = SearchFlights._parse_flights_data(self.row)
 

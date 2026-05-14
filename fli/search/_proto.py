@@ -125,7 +125,7 @@ def decode_booking_token(token: str) -> dict:
             # Try string
             try:
                 s = data.decode("ascii")
-                if all(0x20 <= ord(c) <= 0x7e for c in s):
+                if all(0x20 <= ord(c) <= 0x7E for c in s):
                     result[f"field_{field}"] = s
                     continue
             except UnicodeDecodeError:

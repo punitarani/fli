@@ -394,9 +394,7 @@ def display_flight_results(
         table.add_row("Total Stops", str(total_stops))
 
         # CO2 emissions summary across all legs of all segments
-        total_co2_g = sum(
-            (leg.co2_emissions_g or 0) for s in flight_segments for leg in s.legs
-        )
+        total_co2_g = sum((leg.co2_emissions_g or 0) for s in flight_segments for leg in s.legs)
         if total_co2_g > 0:
             kg = total_co2_g / 1000
             tag = price_segment.emissions_tag
@@ -452,9 +450,7 @@ def display_flight_results(
                 # Show layover row between legs when populated.
                 if flight.layovers and leg_idx < len(flight.layovers):
                     lo = flight.layovers[leg_idx]
-                    where = (
-                        f"{lo.airport.name} ({lo.city})" if lo.city else lo.airport.name
-                    )
+                    where = f"{lo.airport.name} ({lo.city})" if lo.city else lo.airport.name
                     lo_str = f"Layover {format_duration(lo.duration)} at {where}"
                     if lo.overnight:
                         lo_str += " (overnight)"

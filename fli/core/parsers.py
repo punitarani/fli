@@ -156,9 +156,7 @@ def parse_alliances(codes: list[str] | None) -> list[Alliance] | None:
             out.append(Alliance[name])
         except KeyError as e:
             valid = ", ".join(a.name for a in Alliance)
-            raise ParseError(
-                f"Invalid alliance: '{name}'. Valid values: {valid}"
-            ) from e
+            raise ParseError(f"Invalid alliance: '{name}'. Valid values: {valid}") from e
     return out
 
 
@@ -280,9 +278,7 @@ def parse_currency(currency: str | None) -> str | None:
         return None
     normalized = currency.strip().upper()
     if len(normalized) != 3 or not normalized.isalpha():
-        raise ParseError(
-            f"Invalid currency code: '{currency}'. Expected a 3-letter ISO 4217 code."
-        )
+        raise ParseError(f"Invalid currency code: '{currency}'. Expected a 3-letter ISO 4217 code.")
     # If recognised, prefer the Currency enum's canonical value.
     try:
         return Currency(normalized).value

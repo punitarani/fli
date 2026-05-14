@@ -45,9 +45,7 @@ class TestBuildBookingToken:
         b_built = base64.b64decode(built + "=" * ((4 - len(built) % 4) % 4))
         capt_padding = "=" * ((4 - len(CAPTURED_TOKEN) % 4) % 4)
         b_capt = base64.urlsafe_b64decode(CAPTURED_TOKEN + capt_padding)
-        assert b_built == b_capt, (
-            f"\nbuilt: {b_built.hex()}\ncapt:  {b_capt.hex()}"
-        )
+        assert b_built == b_capt, f"\nbuilt: {b_built.hex()}\ncapt:  {b_capt.hex()}"
 
     def test_round_trip_decode(self):
         token = build_booking_token(

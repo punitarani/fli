@@ -156,9 +156,7 @@ class FlightSearchParams(BaseModel):
     )
     alliance: list[str] | None = Field(
         None,
-        description=(
-            "Restrict to one or more alliances: 'ONEWORLD', 'SKYTEAM', 'STAR_ALLIANCE'."
-        ),
+        description=("Restrict to one or more alliances: 'ONEWORLD', 'SKYTEAM', 'STAR_ALLIANCE'."),
     )
     exclude_alliance: list[str] | None = Field(
         None,

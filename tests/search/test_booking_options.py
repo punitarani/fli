@@ -41,10 +41,18 @@ def _round_trip_filters():
         duration=339,
     )
     sel_out = FlightResult(
-        legs=[leg_out], price=347, currency="USD", duration=361, stops=0,
+        legs=[leg_out],
+        price=347,
+        currency="USD",
+        duration=361,
+        stops=0,
     )
     sel_in = FlightResult(
-        legs=[leg_in], price=347, currency="USD", duration=339, stops=0,
+        legs=[leg_in],
+        price=347,
+        currency="USD",
+        duration=339,
+        stops=0,
     )
     seg_out = FlightSegment(
         departure_airport=[[Airport.JFK, 0]],
@@ -117,7 +125,7 @@ def _row(price=347, fare_label="Basic Economy"):
     row[3] = [["AA", "171"], ["AA", "28"]]
     row[4] = False
     row[5] = ["www.aa.com/foo", None, ["https://www.google.com/travel/clk/f?u=abc"]]
-    row[7] = [[None, price], None]   # price block; currency token omitted
+    row[7] = [[None, price], None]  # price block; currency token omitted
     row[14] = [[[None, ["AA", fare_label.upper().replace(" ", " ")], 1]]]
     row[21] = [["AA", fare_label.upper()], [], None, fare_label]
     return row
