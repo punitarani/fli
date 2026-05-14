@@ -197,9 +197,23 @@ def dates(
         typer.Option(
             "--currency",
             callback=validate_currency,
-            help="Fallback currency code when not returned by Google (e.g., CAD, EUR).",
+            help="Currency code (USD, EUR, GBP, JPY...). Passed to Google as `curr=`.",
         ),
     ] = "USD",
+    language: Annotated[
+        str | None,
+        typer.Option(
+            "--language",
+            help="Optional BCP-47 language code (e.g., 'en-GB') passed to Google as `hl=`.",
+        ),
+    ] = None,
+    country: Annotated[
+        str | None,
+        typer.Option(
+            "--country",
+            help="Optional ISO 3166-1 alpha-2 country code (e.g., 'GB') passed to Google as `gl=`.",
+        ),
+    ] = None,
 ):
     """Find the cheapest dates to fly between two airports.
 
@@ -283,9 +297,14 @@ def dates(
             duration=trip_duration if trip_type == TripType.ROUND_TRIP else None,
         )
 
-        # Perform search
+        # Perform search; pass currency/language/country through as URL params.
         search_client = SearchDates()
-        results = search_client.search(filters)
+        results = search_client.search(
+            filters,
+            currency=currency,
+            language=language,
+            country=country,
+        )
 
         if not results:
             results = []

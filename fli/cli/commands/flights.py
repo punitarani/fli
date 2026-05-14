@@ -52,6 +52,8 @@ def _search_flights_core(
     all_results: bool = True,
     output_format: OutputFormat = OutputFormat.TEXT,
     currency: str = "USD",
+    language: str | None = None,
+    country: str | None = None,
 ) -> None:
     """Core flight search functionality."""
     query: dict[str, Any] = {
@@ -134,9 +136,15 @@ def _search_flights_core(
             show_all_results=all_results,
         )
 
-        # Perform search
+        # Perform search; `currency` doubles as Google's `curr=` URL param so
+        # results come back priced in the requested currency.
         search_client = SearchFlights()
-        results = search_client.search(filters)
+        results = search_client.search(
+            filters,
+            currency=currency,
+            language=language,
+            country=country,
+        )
 
         if not results:
             if output_format == OutputFormat.JSON:
@@ -313,9 +321,23 @@ def flights(
         typer.Option(
             "--currency",
             callback=validate_currency,
-            help="Fallback currency code when not returned by Google (e.g., CAD, EUR).",
+            help="Currency code (USD, EUR, GBP, JPY...). Passed to Google as `curr=`.",
         ),
     ] = "USD",
+    language: Annotated[
+        str | None,
+        typer.Option(
+            "--language",
+            help="Optional BCP-47 language code (e.g., 'en-GB') passed to Google as `hl=`.",
+        ),
+    ] = None,
+    country: Annotated[
+        str | None,
+        typer.Option(
+            "--country",
+            help="Optional ISO 3166-1 alpha-2 country code (e.g., 'GB') passed to Google as `gl=`.",
+        ),
+    ] = None,
 ):
     """Search for flights on a specific date.
 
@@ -346,4 +368,6 @@ def flights(
         all_results=all_results,
         output_format=output_format,
         currency=currency,
+        language=language,
+        country=country,
     )

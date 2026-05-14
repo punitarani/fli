@@ -8,7 +8,7 @@ import re
 from enum import Enum
 from typing import TypeVar
 
-from fli.models import Airline, Airport, EmissionsFilter, MaxStops, SeatType, SortBy
+from fli.models import Airline, Airport, Currency, EmissionsFilter, MaxStops, SeatType, SortBy
 
 _AIRLINE_SEPARATORS = re.compile(r"[,\s]+")
 
@@ -205,6 +205,37 @@ def parse_sort_by(sort_by: str) -> SortBy:
         raise ParseError(
             f"Invalid sort_by value: '{sort_by}'. Valid values: {', '.join(valid_values)}"
         ) from e
+
+
+def parse_currency(currency: str | None) -> str | None:
+    """Validate and normalize a currency code string.
+
+    Accepts any ISO 4217 code; emits a warning-free passthrough for codes
+    listed in :class:`fli.models.Currency`, and uppercases unknown but
+    syntactically-valid 3-letter codes for transparent passthrough.
+
+    Args:
+        currency: ISO 4217 currency code or None.
+
+    Returns:
+        Uppercased currency code, or None if ``currency`` is None/empty.
+
+    Raises:
+        ParseError: If the value is not a valid ISO 4217-style code.
+
+    """
+    if currency is None or currency == "":
+        return None
+    normalized = currency.strip().upper()
+    if len(normalized) != 3 or not normalized.isalpha():
+        raise ParseError(
+            f"Invalid currency code: '{currency}'. Expected a 3-letter ISO 4217 code."
+        )
+    # If recognised, prefer the Currency enum's canonical value.
+    try:
+        return Currency(normalized).value
+    except ValueError:
+        return normalized
 
 
 def parse_emissions(emissions: str) -> EmissionsFilter:

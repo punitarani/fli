@@ -74,10 +74,57 @@ class EmissionsFilter(Enum):
 
 
 class Currency(Enum):
-    """Supported currencies for pricing. Currently only USD."""
+    """ISO 4217 currency codes accepted by Google Flights via `curr=` URL param.
 
+    Google honours the `curr=` URL query parameter on its frontend service
+    endpoints to translate prices into a requested currency. The set below
+    covers the codes Google Flights' UI lets the user pick. Codes not in this
+    list may still work; pass a plain string via :class:`PriceLimit.currency`
+    or the search-level ``currency`` argument when calling
+    :class:`fli.search.SearchFlights`.
+    """
+
+    AED = "AED"
+    ARS = "ARS"
+    AUD = "AUD"
+    BGN = "BGN"
+    BRL = "BRL"
+    CAD = "CAD"
+    CHF = "CHF"
+    CLP = "CLP"
+    CNY = "CNY"
+    COP = "COP"
+    CZK = "CZK"
+    DKK = "DKK"
+    EGP = "EGP"
+    EUR = "EUR"
+    GBP = "GBP"
+    HKD = "HKD"
+    HUF = "HUF"
+    IDR = "IDR"
+    ILS = "ILS"
+    INR = "INR"
+    JPY = "JPY"
+    KRW = "KRW"
+    MXN = "MXN"
+    MYR = "MYR"
+    NOK = "NOK"
+    NZD = "NZD"
+    PEN = "PEN"
+    PHP = "PHP"
+    PLN = "PLN"
+    QAR = "QAR"
+    RON = "RON"
+    SAR = "SAR"
+    SEK = "SEK"
+    SGD = "SGD"
+    THB = "THB"
+    TRY = "TRY"
+    TWD = "TWD"
+    UAH = "UAH"
     USD = "USD"
-    # Placeholder for other currencies
+    VND = "VND"
+    ZAR = "ZAR"
 
 
 class BagsFilter(BaseModel):
@@ -145,6 +192,36 @@ class LayoverRestrictions(BaseModel):
     max_duration: PositiveInt | None = None
 
 
+class Amenities(BaseModel):
+    """Per-leg amenities reported by Google Flights.
+
+    All fields are tri-state (`True`, `False`, or `None` when Google did not
+    publish that signal for the leg).
+    """
+
+    wifi: bool | None = None
+    power: bool | None = None
+    usb_power: bool | None = None
+    in_seat_video: bool | None = None
+    on_demand_video: bool | None = None
+    legroom_rating: NonNegativeInt | None = None
+
+
+class Layover(BaseModel):
+    """Layover info between two flight legs.
+
+    `duration` is the wait time at the layover airport in minutes. `overnight`
+    is set when the layover crosses local midnight at the airport. `change_of_airport`
+    is set when the next leg departs from a different airport than the previous
+    leg arrived at (rare but supported by Google Flights).
+    """
+
+    airport: Airport
+    duration: NonNegativeInt
+    overnight: bool = False
+    change_of_airport: bool = False
+
+
 class FlightLeg(BaseModel):
     """A single flight leg (segment) with airline and timing details."""
 
@@ -156,6 +233,18 @@ class FlightLeg(BaseModel):
     arrival_datetime: datetime
     duration: PositiveInt  # in minutes
 
+    # Optional richer fields populated when present in Google's response.
+    departure_airport_name: str | None = None
+    arrival_airport_name: str | None = None
+    operating_airline: Airline | None = None
+    operating_flight_number: str | None = None
+    aircraft: str | None = None
+    legroom: str | None = None
+    legroom_short: str | None = None
+    amenities: Amenities | None = None
+    overnight: bool = False
+    co2_emissions_g: NonNegativeInt | None = None
+
 
 class FlightResult(BaseModel):
     """Complete flight search result with pricing and timing."""
@@ -165,6 +254,18 @@ class FlightResult(BaseModel):
     currency: str | None = None
     duration: PositiveInt  # total duration in minutes
     stops: NonNegativeInt
+
+    # Optional richer fields populated when present in Google's response.
+    layovers: list[Layover] | None = None
+    co2_emissions_g: NonNegativeInt | None = None
+    co2_emissions_typical_g: NonNegativeInt | None = None
+    co2_emissions_delta_pct: int | None = None
+    emissions_tag: str | None = None  # "lower" | "typical" | "higher"
+    self_transfer: bool | None = None
+    mixed_cabin: bool | None = None
+    primary_airline: Airline | None = None
+    primary_airline_name: str | None = None
+    booking_token: str | None = None
 
 
 class FlightSegment(BaseModel):

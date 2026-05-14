@@ -41,11 +41,20 @@ class SearchDates:
         """Initialize the search client for date-based searches."""
         self.client = get_client()
 
-    def search(self, filters: DateSearchFilters) -> list[DatePrice] | None:
+    def search(
+        self,
+        filters: DateSearchFilters,
+        currency: str | None = None,
+        language: str | None = None,
+        country: str | None = None,
+    ) -> list[DatePrice] | None:
         """Search for flight prices across a date range and search parameters.
 
         Args:
             filters: Search parameters including date range, airports, and preferences
+            currency: Optional ISO 4217 currency code (e.g. ``"EUR"``) to bill prices in.
+            language: Optional BCP-47 language code passed via the ``hl`` URL param.
+            country: Optional ISO 3166-1 alpha-2 country code passed via the ``gl`` URL param.
 
         Returns:
             List of DatePrice objects containing date and price pairs, or None if no results
@@ -63,7 +72,9 @@ class SearchDates:
         date_range = (to_date - from_date).days + 1
 
         if date_range <= self.MAX_DAYS_PER_SEARCH:
-            return self._search_chunk(filters)
+            return self._search_chunk(
+                filters, currency=currency, language=language, country=country
+            )
 
         # Split into chunks of MAX_DAYS_PER_SEARCH
         all_results = []
@@ -86,13 +97,20 @@ class SearchDates:
                 flight_segments=filters.flight_segments,
                 stops=filters.stops,
                 seat_type=filters.seat_type,
+                price_limit=filters.price_limit,
                 airlines=filters.airlines,
+                max_duration=filters.max_duration,
+                layover_restrictions=filters.layover_restrictions,
+                emissions=filters.emissions,
+                bags=filters.bags,
                 from_date=current_from.strftime("%Y-%m-%d"),
                 to_date=current_to.strftime("%Y-%m-%d"),
                 duration=filters.duration,
             )
 
-            chunk_results = self._search_chunk(chunk_filters)
+            chunk_results = self._search_chunk(
+                chunk_filters, currency=currency, language=language, country=country
+            )
             if chunk_results:
                 all_results.extend(chunk_results)
 
@@ -100,11 +118,20 @@ class SearchDates:
 
         return all_results if all_results else None
 
-    def _search_chunk(self, filters: DateSearchFilters) -> list[DatePrice] | None:
+    def _search_chunk(
+        self,
+        filters: DateSearchFilters,
+        currency: str | None = None,
+        language: str | None = None,
+        country: str | None = None,
+    ) -> list[DatePrice] | None:
         """Search for flight prices for a single date range chunk.
 
         Args:
             filters: Search parameters including date range, airports, and preferences
+            currency: Optional ISO 4217 currency code passed via the ``curr`` URL param.
+            language: Optional BCP-47 language code passed via the ``hl`` URL param.
+            country: Optional ISO 3166-1 alpha-2 country code passed via the ``gl`` URL param.
 
         Returns:
             List of DatePrice objects containing date and price pairs, or None if no results
@@ -113,11 +140,14 @@ class SearchDates:
             Exception: If the search fails or returns invalid data
 
         """
+        from fli.search.flights import _with_locale_params  # local import to avoid cycle
+
         encoded_filters = filters.encode()
+        url = _with_locale_params(self.BASE_URL, currency, language, country)
 
         try:
             response = self.client.post(
-                url=self.BASE_URL,
+                url=url,
                 data=f"f.req={encoded_filters}",
                 impersonate="chrome",
                 allow_redirects=True,

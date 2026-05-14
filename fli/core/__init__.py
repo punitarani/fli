@@ -16,6 +16,7 @@ from .currency import extract_currency_from_price_token, format_price, format_pr
 from .parsers import (
     parse_airlines,
     parse_cabin_class,
+    parse_currency,
     parse_emissions,
     parse_max_stops,
     parse_sort_by,
@@ -28,6 +29,7 @@ __all__ = [
     # Parsers
     "parse_airlines",
     "parse_cabin_class",
+    "parse_currency",
     "parse_emissions",
     "parse_max_stops",
     "parse_sort_by",

@@ -1,13 +1,16 @@
 from .airline import Airline
 from .airport import Airport
 from .google_flights import (
+    Amenities,
     BagsFilter,
+    Currency,
     DateSearchFilters,
     EmissionsFilter,
     FlightLeg,
     FlightResult,
     FlightSearchFilters,
     FlightSegment,
+    Layover,
     LayoverRestrictions,
     MaxStops,
     PassengerInfo,
@@ -21,13 +24,16 @@ from .google_flights import (
 __all__ = [
     "Airline",
     "Airport",
+    "Amenities",
     "BagsFilter",
+    "Currency",
     "DateSearchFilters",
     "EmissionsFilter",
     "FlightLeg",
     "FlightResult",
     "FlightSearchFilters",
     "FlightSegment",
+    "Layover",
     "LayoverRestrictions",
     "MaxStops",
     "PassengerInfo",

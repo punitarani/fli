@@ -20,6 +20,7 @@ from fli.core import (
     build_time_restrictions,
     parse_airlines,
     parse_cabin_class,
+    parse_currency,
     parse_emissions,
     parse_max_stops,
     parse_sort_by,
@@ -131,6 +132,23 @@ class FlightSearchParams(BaseModel):
     show_all_results: bool = Field(
         True, description="Return all available results instead of curated ~30"
     )
+    currency: str | None = Field(
+        None,
+        description=(
+            "ISO 4217 currency code (e.g. 'USD', 'EUR', 'GBP') to bill prices in. "
+            "When omitted, Google picks based on locale (usually USD)."
+        ),
+    )
+    language: str | None = Field(
+        None,
+        description="Optional BCP-47 language code (e.g. 'en-GB') passed to Google as `hl`.",
+    )
+    country: str | None = Field(
+        None,
+        description=(
+            "Optional ISO 3166-1 alpha-2 country code (e.g. 'GB') for Google's `gl` param."
+        ),
+    )
 
 
 class DateSearchParams(BaseModel):
@@ -167,6 +185,23 @@ class DateSearchParams(BaseModel):
         ge=1,
         description="Number of adult passengers",
     )
+    currency: str | None = Field(
+        None,
+        description=(
+            "ISO 4217 currency code (e.g. 'USD', 'EUR', 'GBP') to bill prices in. "
+            "When omitted, Google picks based on locale (usually USD)."
+        ),
+    )
+    language: str | None = Field(
+        None,
+        description="Optional BCP-47 language code (e.g. 'en-GB') passed to Google as `hl`.",
+    )
+    country: str | None = Field(
+        None,
+        description=(
+            "Optional ISO 3166-1 alpha-2 country code (e.g. 'GB') for Google's `gl` param."
+        ),
+    )
 
 
 # =============================================================================
@@ -174,35 +209,98 @@ class DateSearchParams(BaseModel):
 # =============================================================================
 
 
+def _airline_code(airline: Any) -> str:
+    return getattr(airline, "name", str(airline)).lstrip("_")
+
+
 def _serialize_flight_leg(leg: Any) -> dict[str, Any]:
     """Serialize a single flight leg to a dictionary."""
-    return {
+    out: dict[str, Any] = {
         "departure_airport": leg.departure_airport,
         "arrival_airport": leg.arrival_airport,
         "departure_time": leg.departure_datetime,
         "arrival_time": leg.arrival_datetime,
         "duration": leg.duration,
         "airline": leg.airline,
-        "airline_code": getattr(leg.airline, "name", leg.airline).lstrip("_"),
+        "airline_code": _airline_code(leg.airline),
         "flight_number": leg.flight_number,
     }
+    if getattr(leg, "departure_airport_name", None):
+        out["departure_airport_name"] = leg.departure_airport_name
+    if getattr(leg, "arrival_airport_name", None):
+        out["arrival_airport_name"] = leg.arrival_airport_name
+    if getattr(leg, "operating_airline", None):
+        out["operating_airline"] = _airline_code(leg.operating_airline)
+    if getattr(leg, "aircraft", None):
+        out["aircraft"] = leg.aircraft
+    if getattr(leg, "legroom", None):
+        out["legroom"] = leg.legroom
+    if getattr(leg, "overnight", False):
+        out["overnight"] = True
+    if getattr(leg, "co2_emissions_g", None) is not None:
+        out["co2_emissions_g"] = leg.co2_emissions_g
+    amenities = getattr(leg, "amenities", None)
+    if amenities is not None:
+        a = amenities.model_dump(exclude_none=True)
+        if a:
+            out["amenities"] = a
+    return out
+
+
+def _serialize_layover(layover: Any) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "airport": _airline_code(layover.airport),
+        "duration": layover.duration,
+    }
+    if layover.overnight:
+        out["overnight"] = True
+    if layover.change_of_airport:
+        out["change_of_airport"] = True
+    return out
+
+
+def _flight_extras(flight: Any) -> dict[str, Any]:
+    """Surface optional rich fields when populated by the parser."""
+    out: dict[str, Any] = {}
+    for src, key in (
+        ("co2_emissions_g", "co2_emissions_g"),
+        ("co2_emissions_typical_g", "co2_emissions_typical_g"),
+        ("co2_emissions_delta_pct", "co2_emissions_delta_pct"),
+        ("emissions_tag", "emissions_tag"),
+        ("primary_airline_name", "primary_airline_name"),
+        ("self_transfer", "self_transfer"),
+        ("mixed_cabin", "mixed_cabin"),
+        ("booking_token", "booking_token"),
+    ):
+        v = getattr(flight, src, None)
+        if v is not None and v != "":
+            out[key] = v
+    primary = getattr(flight, "primary_airline", None)
+    if primary is not None:
+        out["primary_airline"] = _airline_code(primary)
+    layovers = getattr(flight, "layovers", None)
+    if layovers:
+        out["layovers"] = [_serialize_layover(lo) for lo in layovers]
+    return out
 
 
 def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[str, Any]:
     """Serialize a flight result (or round-trip/multi-city tuple) to a dictionary."""
     if not isinstance(flight, tuple):
-        return {
+        out = {
             "price": flight.price,
             "currency": flight.currency or CONFIG.default_currency,
             "legs": [_serialize_flight_leg(leg) for leg in flight.legs],
         }
+        out.update(_flight_extras(flight))
+        return out
 
     segments = list(flight)
 
     if len(segments) == 2 and is_round_trip:
         # Google Flights returns the full round-trip price on the outbound leg
         outbound, return_flight = segments
-        return {
+        out = {
             "price": outbound.price,
             "currency": outbound.currency or CONFIG.default_currency,
             "legs": [
@@ -210,15 +308,22 @@ def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[s
                 *[_serialize_flight_leg(leg) for leg in return_flight.legs],
             ],
         }
+        out.update(_flight_extras(outbound))
+        return_extras = _flight_extras(return_flight)
+        if return_extras:
+            out["return_flight"] = return_extras
+        return out
 
     # Multi-city (3+ legs) or 2-leg non-round-trip: combined price on the
     # final leg (matches Google Flights pricing and the CLI display logic).
     price_segment = segments[-1] if len(segments) > 2 else segments[0]
-    return {
+    out = {
         "price": price_segment.price,
         "currency": price_segment.currency or CONFIG.default_currency,
         "legs": [_serialize_flight_leg(leg) for segment in segments for leg in segment.legs],
     }
+    out.update(_flight_extras(price_segment))
+    return out
 
 
 def _serialize_date_result(date_result: Any) -> dict[str, Any]:
@@ -290,8 +395,14 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
         )
 
         # Perform search
+        currency = parse_currency(params.currency)
         search_client = SearchFlights()
-        flights = search_client.search(filters)
+        flights = search_client.search(
+            filters,
+            currency=currency,
+            language=params.language,
+            country=params.country,
+        )
 
         if not flights:
             return {"success": True, "flights": [], "count": 0, "trip_type": trip_type.name}
@@ -357,8 +468,14 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
         )
 
         # Perform search
+        currency = parse_currency(params.currency)
         search_client = SearchDates()
-        dates = search_client.search(filters)
+        dates = search_client.search(
+            filters,
+            currency=currency,
+            language=params.language,
+            country=params.country,
+        )
 
         if not dates:
             return {
@@ -472,6 +589,23 @@ def search_flights(
         bool,
         Field(description="Return all available results instead of curated ~30"),
     ] = True,
+    currency: Annotated[
+        str | None,
+        Field(
+            description=(
+                "ISO 4217 currency code (USD, EUR, GBP, JPY...) for prices. "
+                "When omitted, Google picks based on locale."
+            )
+        ),
+    ] = None,
+    language: Annotated[
+        str | None,
+        Field(description="Optional BCP-47 language code (e.g., 'en-GB') for the `hl` URL param."),
+    ] = None,
+    country: Annotated[
+        str | None,
+        Field(description="Optional ISO 3166-1 alpha-2 country code (e.g., 'GB')."),
+    ] = None,
 ) -> dict[str, Any]:
     """Search for flights between two airports on a specific date.
 
@@ -495,6 +629,9 @@ def search_flights(
         checked_bags=checked_bags,
         carry_on=carry_on,
         show_all_results=show_all_results,
+        currency=currency,
+        language=language,
+        country=country,
     )
     return _execute_flight_search(params)
 
@@ -560,6 +697,18 @@ def search_dates(
         int | None,
         Field(description="Number of adult passengers", ge=1),
     ] = None,
+    currency: Annotated[
+        str | None,
+        Field(description="ISO 4217 currency code (USD, EUR, GBP, JPY...) for prices."),
+    ] = None,
+    language: Annotated[
+        str | None,
+        Field(description="Optional BCP-47 language code (e.g., 'en-GB') for the `hl` URL param."),
+    ] = None,
+    country: Annotated[
+        str | None,
+        Field(description="Optional ISO 3166-1 alpha-2 country code (e.g., 'GB')."),
+    ] = None,
 ) -> dict[str, Any]:
     """Find the cheapest travel dates between two airports within a date range.
 
@@ -580,6 +729,9 @@ def search_dates(
         departure_window=effective_departure_window,
         sort_by_price=sort_by_price,
         passengers=passengers or CONFIG.default_passengers,
+        currency=currency,
+        language=language,
+        country=country,
     )
     return _execute_date_search(params)
 
