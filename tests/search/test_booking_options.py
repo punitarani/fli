@@ -104,7 +104,7 @@ class TestGetBookingOptionsTokenGuard:
         filters = _round_trip_filters()
         flight = filters.flight_segments[0].selected_flight
         # selected_flight has no booking_token by default.
-        with pytest.raises(ValueError, match="booking_token is required"):
+        with pytest.raises(ValueError, match="Missing booking token"):
             SearchFlights().get_booking_options(flight, filters)
 
 

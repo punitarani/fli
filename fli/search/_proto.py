@@ -1,0 +1,168 @@
+"""Minimal protobuf wire-format encoder used to build the GetBookingResults token.
+
+Google's booking-options endpoint accepts a base64-encoded protobuf as
+``outer[0][1]``. The structure was reverse-engineered from a live capture
+on 2026-05-14 (see ``.reverse-eng/notes/booking_results.md``):
+
+::
+
+    field 1 (length-delim): shopping session id            (response `inner[0][4]`)
+    field 2 (length-delim): "{airline}{flight_no}#{idx}"   (selected itinerary)
+    field 3 (length-delim, nested):
+        field 1 (varint): price in smallest currency unit   (e.g. cents)
+        field 2 (varint): 2                                 (constant in our samples)
+        field 3 (length-delim): ISO currency code           (e.g. "USD")
+    field 7 (varint): 28                                    (stops bucket marker)
+    field 14 (varint): same as inner field 1                (price duplicated)
+
+We implement only the protobuf primitives we need here — varint, length-
+delimited string/bytes, nested-message — to avoid the protobuf-runtime
+dependency.
+"""
+
+from __future__ import annotations
+
+import base64
+
+
+def _varint(value: int) -> bytes:
+    """Encode an unsigned integer as a protobuf varint."""
+    if value < 0:
+        raise ValueError("varint encoder takes non-negative ints only")
+    out = bytearray()
+    while True:
+        byte = value & 0x7F
+        value >>= 7
+        if value:
+            out.append(byte | 0x80)
+        else:
+            out.append(byte)
+            return bytes(out)
+
+
+def _tag(field: int, wire: int) -> bytes:
+    """Encode a protobuf field tag (field_number << 3 | wire_type)."""
+    return _varint((field << 3) | wire)
+
+
+def _length_delim(field: int, payload: bytes) -> bytes:
+    """Encode a length-delimited field (wire type 2)."""
+    return _tag(field, 2) + _varint(len(payload)) + payload
+
+
+def _varint_field(field: int, value: int) -> bytes:
+    """Encode a varint field (wire type 0)."""
+    return _tag(field, 0) + _varint(value)
+
+
+def build_booking_token(
+    session_id: str,
+    airline_code: str,
+    flight_number: str,
+    leg_index: int,
+    price_cents: int,
+    currency: str = "USD",
+) -> str:
+    """Construct the GetBookingResults outer[0][1] token.
+
+    Args:
+        session_id: Shopping session id from a prior search response
+            (``inner[0][4]`` — a 50-ish-byte opaque string).
+        airline_code: IATA code of the airline carrying the *last leg* of
+            the selected itinerary (e.g. ``"AA"``).
+        flight_number: Flight number of the last leg (e.g. ``"28"``).
+        leg_index: 1-based position of the leg in the itinerary. For
+            one-way, ``1``. For round-trip, use ``1`` for the return leg.
+        price_cents: Booking price in the smallest unit of ``currency``
+            (e.g. cents, pence, yen — for USD multiply dollars by 100).
+        currency: ISO 4217 currency code; defaults to ``"USD"``.
+
+    Returns:
+        The base64-encoded protobuf token, suitable for use as
+        ``outer[0][1]`` in a GetBookingResults POST.
+
+    """
+    # Nested message at field 3
+    nested = (
+        _varint_field(1, price_cents)
+        + _varint_field(2, 2)
+        + _length_delim(3, currency.encode("ascii"))
+    )
+
+    payload = (
+        _length_delim(1, session_id.encode("ascii"))
+        + _length_delim(2, f"{airline_code}{flight_number}#{leg_index}".encode("ascii"))
+        + _length_delim(3, nested)
+        + _varint_field(7, 28)
+        + _varint_field(14, price_cents)
+    )
+
+    # base64 (standard alphabet — the captured token uses + and /)
+    return base64.b64encode(payload).decode("ascii")
+
+
+def decode_booking_token(token: str) -> dict:
+    """Decode a booking token for debugging / round-trip tests.
+
+    Mirrors :func:`build_booking_token` — useful for assertions in tests
+    and for displaying captured tokens in human-readable form.
+    """
+    padded = token + "=" * ((4 - len(token) % 4) % 4)
+    raw = base64.urlsafe_b64decode(padded.replace("+", "-").replace("/", "_"))
+    result: dict = {}
+    offset = 0
+    while offset < len(raw):
+        tag, offset = _read_varint(raw, offset)
+        field = tag >> 3
+        wire = tag & 0x7
+        if wire == 0:
+            value, offset = _read_varint(raw, offset)
+            result[f"field_{field}"] = value
+        elif wire == 2:
+            length, offset = _read_varint(raw, offset)
+            data = raw[offset : offset + length]
+            offset += length
+            # Try string
+            try:
+                s = data.decode("ascii")
+                if all(0x20 <= ord(c) <= 0x7e for c in s):
+                    result[f"field_{field}"] = s
+                    continue
+            except UnicodeDecodeError:
+                pass
+            # Otherwise nested
+            try:
+                nested = {}
+                noff = 0
+                while noff < len(data):
+                    tag, noff = _read_varint(data, noff)
+                    nfield = tag >> 3
+                    nwire = tag & 0x7
+                    if nwire == 0:
+                        v, noff = _read_varint(data, noff)
+                        nested[f"field_{nfield}"] = v
+                    elif nwire == 2:
+                        nl, noff = _read_varint(data, noff)
+                        nested[f"field_{nfield}"] = data[noff : noff + nl].decode(
+                            "ascii", errors="replace"
+                        )
+                        noff += nl
+                    else:
+                        nested[f"field_{nfield}"] = f"<wire {nwire}>"
+                result[f"field_{field}"] = nested
+            except Exception:  # noqa: BLE001
+                result[f"field_{field}"] = data.hex()
+        else:
+            raise ValueError(f"unsupported wire type {wire} at offset {offset}")
+    return result
+
+
+def _read_varint(buf: bytes, off: int) -> tuple[int, int]:
+    value, shift = 0, 0
+    while True:
+        byte = buf[off]
+        off += 1
+        value |= (byte & 0x7F) << shift
+        if not (byte & 0x80):
+            return value, off
+        shift += 7

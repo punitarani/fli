@@ -144,6 +144,7 @@ class SearchFlights:
         language: str | None = None,
         country: str | None = None,
         booking_token: str | None = None,
+        session_id: str | None = None,
     ) -> list[BookingOption]:
         """Fetch bookable fare options for a selected itinerary.
 
@@ -166,6 +167,10 @@ class SearchFlights:
             language: Optional BCP-47 language code.
             country: Optional ISO 3166-1 alpha-2 country code.
             booking_token: Explicit override for outer[0][1].
+            session_id: Server-generated session token (extracted from the
+                booking page's ``tfu`` URL parameter). When provided and
+                ``booking_token`` is None, the protobuf token is
+                constructed from the flight's metadata + this session id.
 
         Returns:
             A list of :class:`BookingOption` (empty list when Google
@@ -179,12 +184,33 @@ class SearchFlights:
         results: list[FlightResult] = list(flight) if isinstance(flight, tuple) else [flight]
         if not results:
             raise ValueError("flight argument must be a FlightResult or non-empty tuple of them")
-        token = booking_token or getattr(results[0], "booking_token", None)
+
+        # Construct the booking token from session_id + flight metadata when
+        # the caller supplies the session id (extracted client-side from the
+        # `tfu` URL parameter, since the search-response session id is not
+        # the same as the one Google's booking page uses).
+        token = booking_token
+        if token is None and session_id:
+            from fli.search._proto import build_booking_token
+
+            last = results[-1]
+            last_leg = last.legs[-1]
+            token = build_booking_token(
+                session_id=session_id,
+                airline_code=last_leg.airline.name.lstrip("_"),
+                flight_number=last_leg.flight_number,
+                leg_index=1,
+                price_cents=int(last.price * 100),
+                currency=last.currency or currency or "USD",
+            )
+
+        if token is None:
+            token = getattr(results[0], "booking_token", None)
         if not token:
             raise ValueError(
-                "booking_token is required to fetch booking options; pass an "
-                "explicit token or call SearchFlights.search to populate "
-                "flight.booking_token first."
+                "Missing booking token. Pass `booking_token` explicitly, or "
+                "pass `session_id` (extracted from the `tfu` URL parameter on "
+                "the booking page) to construct it from flight metadata."
             )
 
         prepared = deepcopy(filters)
