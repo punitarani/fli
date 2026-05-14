@@ -1,4 +1,5 @@
 from .base import (
+    Alliance,
     Amenities,
     BagsFilter,
     BookingOption,
@@ -23,6 +24,7 @@ from .flights import FlightSearchFilters
 __all__ = [
     "Airline",
     "Airport",
+    "Alliance",
     "Amenities",
     "BagsFilter",
     "BookingOption",

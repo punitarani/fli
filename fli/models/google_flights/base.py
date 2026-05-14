@@ -185,10 +185,31 @@ class PriceLimit(BaseModel):
     currency: Currency | None = Currency.USD
 
 
+class Alliance(Enum):
+    """Airline alliances accepted by Google Flights' include/exclude filters.
+
+    Google Flights treats alliance identifiers as drop-in values inside the
+    airline include (segment[4]) or exclude (segment[5]) lists. The string
+    form below matches Google's accepted spelling (note ``STAR_ALLIANCE``
+    requires an underscore — ``"Star Alliance"`` and ``"STAR ALLIANCE"``
+    both return zero results).
+    """
+
+    ONEWORLD = "ONEWORLD"
+    SKYTEAM = "SKYTEAM"
+    STAR_ALLIANCE = "STAR_ALLIANCE"
+
+
 class LayoverRestrictions(BaseModel):
-    """Constraints for layovers in multi-leg flights."""
+    """Constraints for layovers in multi-leg flights.
+
+    ``airports`` is an include list — only the listed airports may be used
+    as layover stops. ``min_duration`` / ``max_duration`` bound the wait
+    time between legs in minutes; either can be set independently.
+    """
 
     airports: list[Airport] | None = None
+    min_duration: PositiveInt | None = None
     max_duration: PositiveInt | None = None
 
 

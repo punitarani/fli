@@ -14,6 +14,7 @@ from pydantic import (
 from fli.models.airline import Airline
 from fli.models.airport import Airport
 from fli.models.google_flights.base import (
+    Alliance,
     BagsFilter,
     EmissionsFilter,
     FlightSegment,
@@ -42,6 +43,9 @@ class DateSearchFilters(BaseModel):
     seat_type: SeatType = SeatType.ECONOMY
     price_limit: PriceLimit | None = None
     airlines: list[Airline] | None = None
+    airlines_exclude: list[Airline] | None = None
+    alliances: list[Alliance] | None = None
+    alliances_exclude: list[Alliance] | None = None
     max_duration: PositiveInt | None = None
     layover_restrictions: LayoverRestrictions | None = None
     emissions: EmissionsFilter = EmissionsFilter.ALL
@@ -192,11 +196,30 @@ class DateSearchFilters(BaseModel):
             else:
                 time_filters = None
 
-            # Airlines
-            airlines_filters = None
+            # Airlines include — accepts a mix of airline codes + alliance
+            # identifier strings ("ONEWORLD" / "SKYTEAM" / "STAR_ALLIANCE").
+            airlines_filters: list | None = None
+            include_tokens: list[str] = []
             if self.airlines:
-                sorted_airlines = sorted(self.airlines, key=lambda x: x.value)
-                airlines_filters = [serialize(airline) for airline in sorted_airlines]
+                include_tokens.extend(
+                    serialize(a) for a in sorted(self.airlines, key=lambda x: x.value)
+                )
+            if self.alliances:
+                include_tokens.extend(sorted(a.value for a in self.alliances))
+            if include_tokens:
+                airlines_filters = include_tokens
+
+            # Airlines exclude — stored at segment[5]; same token shape.
+            exclude_filters: list | None = None
+            exclude_tokens: list[str] = []
+            if self.airlines_exclude:
+                exclude_tokens.extend(
+                    serialize(a) for a in sorted(self.airlines_exclude, key=lambda x: x.value)
+                )
+            if self.alliances_exclude:
+                exclude_tokens.extend(sorted(a.value for a in self.alliances_exclude))
+            if exclude_tokens:
+                exclude_filters = exclude_tokens
 
             # Layover restrictions
             layover_airports = (
@@ -204,7 +227,10 @@ class DateSearchFilters(BaseModel):
                 if self.layover_restrictions and self.layover_restrictions.airports
                 else None
             )
-            layover_duration = (
+            layover_min_duration = (
+                self.layover_restrictions.min_duration if self.layover_restrictions else None
+            )
+            layover_max_duration = (
                 self.layover_restrictions.max_duration if self.layover_restrictions else None
             )
 
@@ -214,21 +240,21 @@ class DateSearchFilters(BaseModel):
             )
 
             segment_formatted = [
-                segment_filters[0],  # departure airport
-                segment_filters[1],  # arrival airport
-                time_filters,  # time restrictions
-                serialize(self.stops.value),  # stops
-                airlines_filters,  # airlines
-                None,  # unknown: accepts [] but 400s on scalars; no observable effect
-                segment.travel_date,  # travel date
-                [self.max_duration] if self.max_duration else None,  # max duration
-                None,  # selected flight (unused in date search)
-                layover_airports,  # layover airports
-                None,  # unknown: accepts [] but 400s on scalars; no observable effect
-                None,  # seemingly no effect: accepts any value without changing results
-                layover_duration,  # layover duration
-                emissions_filter,  # emissions filter: [1]=less emissions, None=all
-                3,  # seemingly no effect: accepts any value without changing results
+                segment_filters[0],  # 0: departure airport
+                segment_filters[1],  # 1: arrival airport
+                time_filters,  # 2: time restrictions
+                serialize(self.stops.value),  # 3: stops int
+                airlines_filters,  # 4: airline / alliance INCLUDE list
+                exclude_filters,  # 5: airline / alliance EXCLUDE list
+                segment.travel_date,  # 6: travel date
+                [self.max_duration] if self.max_duration else None,  # 7: max duration
+                None,  # 8: selected flight (unused in date search)
+                layover_airports,  # 9: layover airport include list
+                None,  # 10: ? (rejects scalars; no observed effect)
+                layover_min_duration,  # 11: min layover duration (mins)
+                layover_max_duration,  # 12: max layover duration (mins)
+                emissions_filter,  # 13: emissions filter [1]=less emissions
+                3,  # 14: classifier hardcoded
             ]
             formatted_segments.append(segment_formatted)
 
