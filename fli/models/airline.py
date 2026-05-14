@@ -1,15 +1,21 @@
 """Airline IATA codes.
 
-This is auto-generated from data/airlines.csv.
+Auto-generated from data/airlines.csv.
+
+Exports:
+
+* :data:`Airline` — the ``Enum`` class for typed APIs.
+* :data:`AIRLINE_NAMES` — the underlying ``dict[code, name]``
+  for callers that want raw dict speed.
 """
 
 from enum import Enum
 
-# Stored as a plain dict (one literal) to minimise import time —
-# Python parses a dict literal in a single pass; defining the
-# same data as Enum members in a class body costs one metaclass
-# call per member, which scales linearly with size.
-_AIRLINE_NAMES: dict[str, str] = {
+# A single dict literal — Python parses this in one pass.
+# Defining the same data as ``class <Enum>(Enum):`` members
+# costs one metaclass call per member; ``Enum(name, mapping)``
+# below walks the dict once instead.
+AIRLINE_NAMES: dict[str, str] = {
     'A0': 'Macair Jet',
     'A1': 'APG Distribution System',
     'A2': 'Astra Airlines',
@@ -1116,5 +1122,5 @@ _AIRLINE_NAMES: dict[str, str] = {
     'STAR_ALLIANCE': 'Star Alliance',
 }
 
-Airline = Enum('Airline', _AIRLINE_NAMES)
+Airline = Enum('Airline', AIRLINE_NAMES)
 Airline.__doc__ = """Airline IATA codes."""

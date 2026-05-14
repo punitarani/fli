@@ -1,15 +1,21 @@
 """Airport IATA codes.
 
-This is auto-generated from data/airports.csv.
+Auto-generated from data/airports.csv.
+
+Exports:
+
+* :data:`Airport` — the ``Enum`` class for typed APIs.
+* :data:`AIRPORT_NAMES` — the underlying ``dict[code, name]``
+  for callers that want raw dict speed.
 """
 
 from enum import Enum
 
-# Stored as a plain dict (one literal) to minimise import time —
-# Python parses a dict literal in a single pass; defining the
-# same data as Enum members in a class body costs one metaclass
-# call per member, which scales linearly with size.
-_AIRPORT_NAMES: dict[str, str] = {
+# A single dict literal — Python parses this in one pass.
+# Defining the same data as ``class <Enum>(Enum):`` members
+# costs one metaclass call per member; ``Enum(name, mapping)``
+# below walks the dict once instead.
+AIRPORT_NAMES: dict[str, str] = {
     'AAA': 'Anaa Airport',
     'AAB': 'Arrabury Airport',
     'AAC': 'El Arish International Airport',
@@ -7895,5 +7901,5 @@ _AIRPORT_NAMES: dict[str, str] = {
     'ZZV': 'Zanesville Municipal Airport',
 }
 
-Airport = Enum('Airport', _AIRPORT_NAMES)
+Airport = Enum('Airport', AIRPORT_NAMES)
 Airport.__doc__ = """Airport IATA codes."""
