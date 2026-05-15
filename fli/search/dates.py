@@ -5,7 +5,7 @@ It uses Google Flights' calendar view API to find the best prices for each date.
 It is intended to be used for finding the cheapest dates to fly, not the cheapest flights.
 """
 
-import json
+import logging
 from datetime import datetime, timedelta
 
 from pydantic import BaseModel
@@ -13,7 +13,11 @@ from pydantic import BaseModel
 from fli.core import extract_currency_from_price_token
 from fli.models import DateSearchFilters
 from fli.models.google_flights.base import TripType
+from fli.search._urls import with_locale_params
+from fli.search._wire import parse_first_wrb_payload
 from fli.search.client import get_client
+
+logger = logging.getLogger(__name__)
 
 
 class DatePrice(BaseModel):
@@ -41,11 +45,20 @@ class SearchDates:
         """Initialize the search client for date-based searches."""
         self.client = get_client()
 
-    def search(self, filters: DateSearchFilters) -> list[DatePrice] | None:
+    def search(
+        self,
+        filters: DateSearchFilters,
+        currency: str | None = None,
+        language: str | None = None,
+        country: str | None = None,
+    ) -> list[DatePrice] | None:
         """Search for flight prices across a date range and search parameters.
 
         Args:
             filters: Search parameters including date range, airports, and preferences
+            currency: Optional ISO 4217 currency code (e.g. ``"EUR"``) to bill prices in.
+            language: Optional BCP-47 language code passed via the ``hl`` URL param.
+            country: Optional ISO 3166-1 alpha-2 country code passed via the ``gl`` URL param.
 
         Returns:
             List of DatePrice objects containing date and price pairs, or None if no results
@@ -63,7 +76,9 @@ class SearchDates:
         date_range = (to_date - from_date).days + 1
 
         if date_range <= self.MAX_DAYS_PER_SEARCH:
-            return self._search_chunk(filters)
+            return self._search_chunk(
+                filters, currency=currency, language=language, country=country
+            )
 
         # Split into chunks of MAX_DAYS_PER_SEARCH
         all_results = []
@@ -86,13 +101,20 @@ class SearchDates:
                 flight_segments=filters.flight_segments,
                 stops=filters.stops,
                 seat_type=filters.seat_type,
+                price_limit=filters.price_limit,
                 airlines=filters.airlines,
+                max_duration=filters.max_duration,
+                layover_restrictions=filters.layover_restrictions,
+                emissions=filters.emissions,
+                bags=filters.bags,
                 from_date=current_from.strftime("%Y-%m-%d"),
                 to_date=current_to.strftime("%Y-%m-%d"),
                 duration=filters.duration,
             )
 
-            chunk_results = self._search_chunk(chunk_filters)
+            chunk_results = self._search_chunk(
+                chunk_filters, currency=currency, language=language, country=country
+            )
             if chunk_results:
                 all_results.extend(chunk_results)
 
@@ -100,11 +122,20 @@ class SearchDates:
 
         return all_results if all_results else None
 
-    def _search_chunk(self, filters: DateSearchFilters) -> list[DatePrice] | None:
+    def _search_chunk(
+        self,
+        filters: DateSearchFilters,
+        currency: str | None = None,
+        language: str | None = None,
+        country: str | None = None,
+    ) -> list[DatePrice] | None:
         """Search for flight prices for a single date range chunk.
 
         Args:
             filters: Search parameters including date range, airports, and preferences
+            currency: Optional ISO 4217 currency code passed via the ``curr`` URL param.
+            language: Optional BCP-47 language code passed via the ``hl`` URL param.
+            country: Optional ISO 3166-1 alpha-2 country code passed via the ``gl`` URL param.
 
         Returns:
             List of DatePrice objects containing date and price pairs, or None if no results
@@ -114,33 +145,39 @@ class SearchDates:
 
         """
         encoded_filters = filters.encode()
+        url = with_locale_params(self.BASE_URL, currency, language, country)
+
+        response = self.client.post(
+            url=url,
+            data=f"f.req={encoded_filters}",
+            impersonate="chrome",
+            allow_redirects=True,
+        )
+        response.raise_for_status()
+
+        data = parse_first_wrb_payload(response.text)
+        if data is None:
+            return None
 
         try:
-            response = self.client.post(
-                url=self.BASE_URL,
-                data=f"f.req={encoded_filters}",
-                impersonate="chrome",
-                allow_redirects=True,
+            items = data[-1]
+        except (IndexError, TypeError):
+            logger.warning("Date search response shape unexpected: no terminal array")
+            return None
+
+        if not isinstance(items, list):
+            return None
+
+        dates_data = [
+            DatePrice(
+                date=self.__parse_date(item, filters.trip_type),
+                price=self.__parse_price(item),
+                currency=self.__parse_currency(item),
             )
-            response.raise_for_status()
-            parsed = json.loads(response.text.lstrip(")]}'"))[0][2]
-            if not parsed:
-                return None
-
-            data = json.loads(parsed)
-            dates_data = [
-                DatePrice(
-                    date=self.__parse_date(item, filters.trip_type),
-                    price=self.__parse_price(item),
-                    currency=self.__parse_currency(item),
-                )
-                for item in data[-1]
-                if self.__parse_price(item)
-            ]
-            return dates_data
-
-        except Exception as e:
-            raise Exception(f"Search failed: {str(e)}") from e
+            for item in items
+            if self.__parse_price(item)
+        ]
+        return dates_data
 
     @staticmethod
     def __parse_date(

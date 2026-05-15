@@ -1,244 +1,413 @@
-"""Flight search implementation.
+"""Flight search orchestrator.
 
-This module provides the core flight search functionality, interfacing directly
-with Google Flights' API to find available flights and their details.
+A thin wrapper around the FlightsFrontendService's ``GetShoppingResults``
+and ``GetBookingResults`` endpoints. Response decoding lives in
+:mod:`fli.search._decoders`; wire framing lives in :mod:`fli.search._wire`;
+URL parameter construction lives in :mod:`fli.search._urls`.
 """
+
+from __future__ import annotations
 
 import json
 import logging
+import urllib.parse
 from copy import deepcopy
-from datetime import datetime
 
-from fli.core import extract_currency_from_price_token
 from fli.models import (
-    Airline,
-    Airport,
-    FlightLeg,
+    BookingOption,
     FlightResult,
     FlightSearchFilters,
 )
 from fli.models.google_flights.base import TripType
+from fli.search._decoders import (
+    _try_parse_booking_row,  # noqa: F401 — back-compat re-export for tests
+    parse_booking_chunk,
+    parse_flight_row,
+)
+from fli.search._urls import with_locale_params
+from fli.search._urls import with_locale_params as _with_locale_params  # noqa: F401
+from fli.search._wire import iter_wrb_chunks, parse_first_wrb_payload
 from fli.search.client import get_client
+
+logger = logging.getLogger(__name__)
+
+
+class SearchParseError(Exception):
+    """Raised when a successful HTTP response cannot be parsed into flights.
+
+    Distinct from network / HTTP errors raised by the underlying client —
+    use this to tell "Google responded but the shape changed" apart from
+    "Google didn't respond at all".
+    """
 
 
 class SearchFlights:
-    """Flight search implementation using Google Flights' API.
+    """Flight search via Google Flights' FlightsFrontendService API.
 
-    This class handles searching for specific flights with detailed filters,
-    parsing the results into structured data models.
+    Public surface:
+
+    - :meth:`search` — issue a GetShoppingResults call and return the
+      parsed flights.
+    - :meth:`get_booking_options` — follow up with GetBookingResults to
+      surface bookable fares for a selected itinerary. See the method
+      docstring for the live-token limitation.
+
+    Concurrency:
+        ``SearchFlights`` is **not thread-safe**. The instance caches the
+        shopping-session id from the most recent :meth:`search` call so
+        :meth:`get_booking_options` can derive the booking token; two
+        concurrent ``search`` calls on the same instance will race on that
+        cache and may cross-pollinate sessions between unrelated bookings.
+
+        For multi-threaded or async server use, either (a) instantiate a
+        fresh ``SearchFlights`` per request, or (b) pass the
+        ``session_id`` returned by your own session bookkeeping into
+        :meth:`get_booking_options` explicitly (the kwarg overrides the
+        cached value).
     """
 
-    BASE_URL = "https://www.google.com/_/FlightsFrontendUi/data/travel.frontend.flights.FlightsFrontendService/GetShoppingResults"
+    BASE_URL = (
+        "https://www.google.com/_/FlightsFrontendUi/data/"
+        "travel.frontend.flights.FlightsFrontendService/GetShoppingResults"
+    )
+    BOOKING_URL = (
+        "https://www.google.com/_/FlightsFrontendUi/data/"
+        "travel.frontend.flights.FlightsFrontendService/GetBookingResults"
+    )
     DEFAULT_HEADERS = {
         "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
     }
 
     def __init__(self):
-        """Initialize the search client for flight searches."""
+        """Initialize the search client."""
         self.client = get_client()
+        # Last successful search response's ``inner[0][4]`` — the shopping
+        # session id used to authenticate the follow-up GetBookingResults
+        # call. Captured automatically by :meth:`search` so that
+        # :meth:`get_booking_options` can derive the booking token without
+        # the caller having to pass anything.
+        self._last_session_id: str | None = None
+
+    # ------------------------------------------------------------------
+    # Public search API
+    # ------------------------------------------------------------------
 
     def search(
-        self, filters: FlightSearchFilters, top_n: int = 5
+        self,
+        filters: FlightSearchFilters,
+        top_n: int = 5,
+        currency: str | None = None,
+        language: str | None = None,
+        country: str | None = None,
     ) -> list[FlightResult | tuple[FlightResult, ...]] | None:
-        """Search for flights using the given FlightSearchFilters.
+        """Search for flights using the given :class:`FlightSearchFilters`.
 
         Args:
-            filters: Full flight search object including airports, dates, and preferences
-            top_n: Number of flights to limit the return flight search to
+            filters: Full search descriptor (airports, dates, preferences).
+            top_n: Number of outbound options to expand when chasing a
+                round-trip or multi-city itinerary.
+            currency: Optional ISO 4217 currency code (``curr`` URL param).
+            language: Optional BCP-47 language code (``hl`` URL param).
+            country: Optional ISO 3166-1 alpha-2 country code (``gl`` URL param).
 
         Returns:
-            List of FlightResult objects (one-way), tuples of FlightResult (round-trip
-            or multi-city), or None if no results
+            For one-way trips, a list of :class:`FlightResult`. For
+            round-trip / multi-city, a list of tuples of
+            :class:`FlightResult` (one per segment, in order). ``None``
+            when no results.
 
         Raises:
-            Exception: If the search fails or returns invalid data
-
-        Note:
-            Multi-city searches (TripType.MULTI_CITY) with distinct city pairs may
-            time out due to limitations of the Google Flights API endpoint.  The
-            endpoint reliably supports one-way and round-trip searches.
+            Exception: HTTP failure or unparseable response.
 
         """
-        encoded_filters = filters.encode()
+        encoded = filters.encode()
+        url = with_locale_params(self.BASE_URL, currency, language, country)
 
-        try:
-            response = self.client.post(
-                url=self.BASE_URL,
-                data=f"f.req={encoded_filters}",
-                impersonate="chrome",
-                allow_redirects=True,
-            )
-            response.raise_for_status()
-
-            parsed = json.loads(response.text.lstrip(")]}'"))[0][2]
-            if not parsed:
-                return None
-
-            encoded_filters = json.loads(parsed)
-            flights_data = [
-                item
-                for i in [2, 3]
-                if isinstance(encoded_filters[i], list)
-                for item in encoded_filters[i][0]
-            ]
-            flights = []
-            for flight in flights_data:
-                try:
-                    flights.append(self._parse_flights_data(flight))
-                except (AttributeError, KeyError, ValueError) as e:
-                    logging.debug("Skipping flight with unparseable data: %s", e)
-                    continue
-
-            if not flights:
-                return None
-
-            if filters.trip_type == TripType.ONE_WAY:
-                return flights
-
-            # For round-trip and multi-city, iteratively select each leg
-            # and fetch the next leg's options with combined pricing.
-            num_segments = len(filters.flight_segments)
-            selected_count = sum(
-                1 for s in filters.flight_segments if s.selected_flight is not None
-            )
-
-            # If all previous segments are selected, we're on the last leg
-            if selected_count >= num_segments - 1:
-                return flights
-
-            # Select each flight option and fetch the next leg
-            flight_combos = []
-            for selected_flight in flights[:top_n]:
-                next_filters = deepcopy(filters)
-                next_filters.flight_segments[selected_count].selected_flight = selected_flight
-                next_results = self.search(next_filters, top_n=top_n)
-                if next_results is not None:
-                    for next_result in next_results:
-                        if isinstance(next_result, tuple):
-                            flight_combos.append((selected_flight,) + next_result)
-                        else:
-                            flight_combos.append((selected_flight, next_result))
-
-            return flight_combos
-
-        except Exception as e:
-            raise Exception(f"Search failed: {str(e)}") from e
-
-    @staticmethod
-    def _parse_flights_data(data: list) -> FlightResult:
-        """Parse raw flight data into a structured FlightResult.
-
-        Args:
-            data: Raw flight data from the API response
-
-        Returns:
-            Structured FlightResult object with all flight details
-
-        """
-        price, currency = SearchFlights._parse_price_info(data)
-        flight = FlightResult(
-            price=price,
-            currency=currency,
-            duration=data[0][9],
-            stops=len(data[0][2]) - 1,
-            legs=[
-                FlightLeg(
-                    airline=SearchFlights._parse_airline(fl[22][0]),
-                    flight_number=fl[22][1],
-                    departure_airport=SearchFlights._parse_airport(fl[3]),
-                    arrival_airport=SearchFlights._parse_airport(fl[6]),
-                    departure_datetime=SearchFlights._parse_datetime(fl[20], fl[8]),
-                    arrival_datetime=SearchFlights._parse_datetime(fl[21], fl[10]),
-                    duration=fl[11],
-                )
-                for fl in data[0][2]
-            ],
+        response = self.client.post(
+            url=url,
+            data=f"f.req={encoded}",
+            impersonate="chrome",
+            allow_redirects=True,
         )
-        return flight
+        response.raise_for_status()
 
-    @staticmethod
-    def _parse_price_info(data: list) -> tuple[float, str | None]:
-        """Extract the numeric price and returned currency from raw flight data."""
-        price_block = SearchFlights._get_price_block(data)
-        price = 0.0
-        currency = None
-        try:
-            if price_block and price_block[0]:
-                price = float(price_block[0][-1])
-        except (IndexError, TypeError):
-            pass
-        try:
-            if price_block and len(price_block) > 1:
-                currency = extract_currency_from_price_token(price_block[1])
-        except (IndexError, TypeError):
-            pass
-        return price, currency
+        inner = parse_first_wrb_payload(response.text)
+        if inner is None:
+            return None
 
-    @staticmethod
-    def _parse_currency(data: list) -> str | None:
-        """Extract the returned currency code from raw flight data."""
-        try:
-            price_block = SearchFlights._get_price_block(data)
-            if price_block and len(price_block) > 1:
-                return extract_currency_from_price_token(price_block[1])
-        except (IndexError, TypeError):
-            pass
-        return None
+        self._capture_session_id(inner)
 
-    @staticmethod
-    def _get_price_block(data: list) -> list | None:
-        """Return the raw price block attached to a flight row."""
         try:
-            if len(data) > 1 and isinstance(data[1], list):
-                return data[1]
-        except TypeError:
-            pass
-        return None
+            flights_raw = [
+                item for i in (2, 3) if isinstance(inner[i], list) for item in inner[i][0]
+            ]
+        except (IndexError, TypeError) as e:
+            raise SearchParseError(
+                f"Shopping response shape changed — no flights array at inner[2]/[3]: {e}"
+            ) from e
 
-    @staticmethod
-    def _parse_datetime(date_arr: list[int], time_arr: list[int]) -> datetime:
-        """Convert date and time arrays to datetime.
+        flights: list[FlightResult] = []
+        failed = 0
+        for row in flights_raw:
+            try:
+                flights.append(parse_flight_row(row))
+            except (AttributeError, KeyError, ValueError, TypeError) as e:
+                failed += 1
+                logger.debug("Skipping flight with unparseable data: %s", e)
+
+        if flights_raw and failed and not flights:
+            # Every row failed to parse — likely a wire-format change.
+            # Don't pretend "no flights"; surface so operators see it.
+            raise SearchParseError(
+                f"Parsed 0/{len(flights_raw)} flight rows — Google response shape may have changed"
+            )
+
+        if not flights:
+            return None
+        if filters.trip_type == TripType.ONE_WAY:
+            return flights
+        return self._expand_multi_leg(
+            flights,
+            filters,
+            top_n=top_n,
+            currency=currency,
+            language=language,
+            country=country,
+        )
+
+    def get_booking_options(
+        self,
+        flight: FlightResult | tuple[FlightResult, ...],
+        filters: FlightSearchFilters,
+        currency: str | None = None,
+        language: str | None = None,
+        country: str | None = None,
+        booking_token: str | None = None,
+        session_id: str | None = None,
+    ) -> list[BookingOption]:
+        """Fetch bookable fare options for a selected itinerary.
+
+        After a :meth:`search` call, the session id from Google's response
+        is cached on the client and used here automatically — no explicit
+        token plumbing is required by callers. The booking-call payload
+        carries the same selected_flight legs the caller used in their
+        round-trip search and a protobuf token constructed from the
+        cached session id + the chosen itinerary's identifiers.
 
         Args:
-            date_arr: List of integers [year, month, day]
-            time_arr: List of integers [hour, minute]
+            flight: A :class:`FlightResult` (one-way) or tuple of results
+                (round-trip / multi-city) from :meth:`search`.
+            filters: The same filters used in the preceding :meth:`search`
+                call. A copy is made internally; caller filters are not
+                mutated.
+            currency: Optional ISO 4217 currency code passed to Google as
+                ``curr=``. Also forms part of the booking token.
+            language: Optional BCP-47 language code (``hl`` URL param).
+            country: Optional ISO 3166-1 alpha-2 country code (``gl`` URL param).
+            booking_token: Explicit override for ``outer[0][1]``.
+                Bypasses the automatic construction; use this when you
+                have a token captured from a browser's ``tfu`` URL.
+            session_id: Explicit override for the session id used to build
+                the token. Defaults to the session captured by the most
+                recent :meth:`search` call on this client.
 
         Returns:
-            Parsed datetime object
+            A list of :class:`BookingOption`. Empty list when Google
+            returns no vendors.
 
         Raises:
-            ValueError: If arrays contain only None values
+            ValueError: No session id available — either pass it
+                explicitly or call :meth:`search` first.
+            Exception: HTTP request failure.
 
         """
-        if not any(x is not None for x in date_arr) or not any(x is not None for x in time_arr):
-            raise ValueError("Date and time arrays must contain at least one non-None value")
+        results: list[FlightResult] = list(flight) if isinstance(flight, tuple) else [flight]
+        if not results:
+            raise ValueError("flight argument must be a FlightResult or non-empty tuple of them")
 
-        return datetime(*(x or 0 for x in date_arr), *(x or 0 for x in time_arr))
+        # Resolve the session id: explicit > cached from prior search.
+        effective_session = session_id or self._last_session_id
+
+        token = booking_token
+        if token is None and effective_session:
+            from fli.search._proto import build_booking_token
+
+            last = results[-1]
+            last_leg = last.legs[-1]
+            token = build_booking_token(
+                session_id=effective_session,
+                airline_code=last_leg.airline.name.removeprefix("_"),
+                flight_number=last_leg.flight_number,
+                leg_index=1,
+                price_cents=int(last.price * 100),
+                currency=last.currency or currency or "USD",
+            )
+
+        if token is None:
+            # The decoder always populates ``booking_token`` (or ``None``) on
+            # FlightResult — accessing the attribute directly fails loudly
+            # if the caller passes a non-FlightResult, which is what we want.
+            token = results[0].booking_token
+        if not token:
+            raise ValueError(
+                "Missing booking token. Call SearchFlights.search(...) before "
+                "get_booking_options(...) so the client can cache the session "
+                "id, or pass `session_id` / `booking_token` explicitly."
+            )
+
+        prepared = deepcopy(filters)
+        segments = prepared.flight_segments
+        if len(results) > len(segments):
+            raise ValueError(f"flight has {len(results)} segments but filters has {len(segments)}")
+        for seg, res in zip(segments, results, strict=False):
+            seg.selected_flight = res
+
+        encoded = self._encode_booking_payload(token, prepared)
+        url = with_locale_params(self.BOOKING_URL, currency, language, country)
+        response = self.client.post(
+            url=url,
+            data=f"f.req={encoded}",
+            impersonate="chrome",
+            allow_redirects=True,
+        )
+        response.raise_for_status()
+
+        options: list[BookingOption] = []
+        for chunk in iter_wrb_chunks(response.text):
+            options.extend(parse_booking_chunk(chunk))
+        return options
+
+    def _capture_session_id(self, inner: list) -> None:
+        """Cache the shopping session id from ``inner[0][4]`` of a search response.
+
+        The session id is used by :meth:`get_booking_options` to derive a
+        booking token automatically. A shape change here means booking
+        calls will fall back to "missing token" errors, so we log a
+        warning rather than silently leaving the cache untouched.
+        """
+        try:
+            session_id = inner[0][4]
+        except (IndexError, TypeError):
+            logger.warning(
+                "Failed to capture shopping session id from search response; "
+                "subsequent get_booking_options() calls without an explicit "
+                "session_id will fail.",
+                exc_info=True,
+            )
+            return
+        if isinstance(session_id, str) and session_id:
+            self._last_session_id = session_id
+        else:
+            logger.warning(
+                "Shopping response inner[0][4] is %r, not a non-empty string; "
+                "session cache unchanged.",
+                session_id,
+            )
+
+    # ------------------------------------------------------------------
+    # Round-trip / multi-city expansion
+    # ------------------------------------------------------------------
+
+    def _expand_multi_leg(
+        self,
+        flights: list[FlightResult],
+        filters: FlightSearchFilters,
+        *,
+        top_n: int,
+        currency: str | None,
+        language: str | None,
+        country: str | None,
+    ) -> list[tuple[FlightResult, ...]] | list[FlightResult]:
+        """Recursively fetch next-leg options for round-trip / multi-city."""
+        num_segments = len(filters.flight_segments)
+        selected_count = sum(1 for s in filters.flight_segments if s.selected_flight is not None)
+        if selected_count >= num_segments - 1:
+            return flights
+
+        combos: list[tuple[FlightResult, ...]] = []
+        for outbound in flights[:top_n]:
+            next_filters = deepcopy(filters)
+            next_filters.flight_segments[selected_count].selected_flight = outbound
+            next_results = self.search(
+                next_filters,
+                top_n=top_n,
+                currency=currency,
+                language=language,
+                country=country,
+            )
+            if next_results is None:
+                continue
+            for nxt in next_results:
+                if isinstance(nxt, tuple):
+                    combos.append((outbound,) + nxt)
+                else:
+                    combos.append((outbound, nxt))
+        return combos
+
+    # ------------------------------------------------------------------
+    # Booking-payload construction
+    # ------------------------------------------------------------------
 
     @staticmethod
-    def _parse_airline(airline_code: str) -> Airline:
-        """Convert airline code to Airline enum.
+    def _encode_booking_payload(token: str, filters: FlightSearchFilters) -> str:
+        """URL-encode the ``f.req`` body for GetBookingResults.
 
-        Args:
-            airline_code: Raw airline code from API
+        Strips the main-filter struct down to the prefix Google's UI sends
+        (ends at position 17 — the trailing constant). Google's
+        GetBookingResults validates the struct shape and rejects requests
+        with the longer 29-element main that GetShoppingResults accepts.
 
-        Returns:
-            Corresponding Airline enum value
+        Raises:
+            ValueError: ``filters.format()`` did not yield a main struct.
+                Sending ``main=null`` produces an opaque 400 from Google,
+                so we fail loudly here instead.
 
         """
-        if airline_code[0].isdigit():
-            airline_code = f"_{airline_code}"
-        return getattr(Airline, airline_code)
+        formatted = filters.format()
+        if len(formatted) < 2 or not isinstance(formatted[1], list):
+            raise ValueError(
+                "filters.format() did not return a main struct at index 1; "
+                "cannot construct a booking payload."
+            )
+        main = formatted[1]
+        # The browser sends only main[0..17]; the longer struct used for
+        # GetShoppingResults is rejected here. Trim the tail.
+        if len(main) > 18:
+            main = main[:18]
+        payload = [
+            [None, token],
+            main,
+            None,
+            0,
+        ]
+        wrapped = [None, json.dumps(payload, separators=(",", ":"))]
+        return urllib.parse.quote(json.dumps(wrapped, separators=(",", ":")))
 
     @staticmethod
-    def _parse_airport(airport_code: str) -> Airport:
-        """Convert airport code to Airport enum.
+    def _parse_booking_chunk(chunk):
+        """Back-compat shim — prefer :func:`fli.search._decoders.parse_booking_chunk`."""
+        return parse_booking_chunk(chunk)
 
-        Args:
-            airport_code: Raw airport code from API
+    # ------------------------------------------------------------------
+    # Back-compat static-method shims for older test fixtures.
+    # The real implementations live in ``fli.search._decoders``.
+    # ------------------------------------------------------------------
 
-        Returns:
-            Corresponding Airport enum value
+    @staticmethod
+    def _parse_flights_data(row):  # noqa: D401  (alias)
+        """Alias for :func:`fli.search._decoders.parse_flight_row`."""
+        return parse_flight_row(row)
 
-        """
-        return getattr(Airport, airport_code)
+    @staticmethod
+    def _parse_price_info(row):  # noqa: D401
+        """Alias for the internal price-block decoder."""
+        from fli.search._decoders import _parse_price_info as _impl
+
+        return _impl(row)
+
+    @staticmethod
+    def _parse_currency(row):  # noqa: D401
+        """Alias returning only the ISO currency code from the price block."""
+        from fli.search._decoders import _parse_price_info as _impl
+
+        return _impl(row)[1]

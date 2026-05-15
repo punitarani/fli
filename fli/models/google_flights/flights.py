@@ -10,6 +10,7 @@ from pydantic import (
 from fli.models.airline import Airline
 from fli.models.airport import Airport
 from fli.models.google_flights.base import (
+    Alliance,
     BagsFilter,
     EmissionsFilter,
     FlightSegment,
@@ -36,6 +37,9 @@ class FlightSearchFilters(BaseModel):
     seat_type: SeatType = SeatType.ECONOMY
     price_limit: PriceLimit | None = None
     airlines: list[Airline] | None = None
+    airlines_exclude: list[Airline] | None = None
+    alliances: list[Alliance] | None = None
+    alliances_exclude: list[Alliance] | None = None
     max_duration: PositiveInt | None = None
     layover_restrictions: LayoverRestrictions | None = None
     sort_by: SortBy = SortBy.BEST
@@ -71,9 +75,17 @@ class FlightSearchFilters(BaseModel):
                 return serialize(obj.dict(exclude_none=True))
             return obj
 
-        # Format flight segments
+        # Format flight segments. Google's UI classifies segments with a
+        # trailing int at position 14:
+        #   - 3 = outbound (first leg, or only leg of a one-way / multi-city)
+        #   - 1 = return (second leg of a round-trip)
+        # Empirically Google's `GetShoppingResults` accepts a uniform `3`
+        # for both segments without errors, but `GetBookingResults`
+        # rejects the request with INVALID_ARGUMENT unless the classifier
+        # matches the UI's pattern (verified May 2026 by diffing the
+        # browser's POST body against our own).
         formatted_segments = []
-        for segment in self.flight_segments:
+        for seg_idx, segment in enumerate(self.flight_segments):
             # Format airport codes with correct nesting
             segment_filters = [
                 [
@@ -101,11 +113,34 @@ class FlightSearchFilters(BaseModel):
             else:
                 time_filters = None
 
-            # Airlines
-            airlines_filters = None
+            # Airlines include — accepts a mix of airline IATA codes and
+            # alliance identifier strings ("ONEWORLD" / "SKYTEAM" /
+            # "STAR_ALLIANCE"). Sort airline codes for deterministic encoding;
+            # append alliance strings after, also sorted, so the request body
+            # is stable across runs (only matters for snapshot tests).
+            airlines_filters: list | None = None
+            include_tokens: list[str] = []
             if self.airlines:
-                sorted_airlines = sorted(self.airlines, key=lambda x: x.value)
-                airlines_filters = [serialize(airline) for airline in sorted_airlines]
+                include_tokens.extend(
+                    serialize(a) for a in sorted(self.airlines, key=lambda x: x.value)
+                )
+            if self.alliances:
+                include_tokens.extend(sorted(a.value for a in self.alliances))
+            if include_tokens:
+                airlines_filters = include_tokens
+
+            # Airlines exclude — same dual-purpose list shape (codes + alliance
+            # names), stored at segment[5]. Empirically discovered May 2026.
+            exclude_filters: list | None = None
+            exclude_tokens: list[str] = []
+            if self.airlines_exclude:
+                exclude_tokens.extend(
+                    serialize(a) for a in sorted(self.airlines_exclude, key=lambda x: x.value)
+                )
+            if self.alliances_exclude:
+                exclude_tokens.extend(sorted(a.value for a in self.alliances_exclude))
+            if exclude_tokens:
+                exclude_filters = exclude_tokens
 
             # Layover restrictions
             layover_airports = (
@@ -113,7 +148,10 @@ class FlightSearchFilters(BaseModel):
                 if self.layover_restrictions and self.layover_restrictions.airports
                 else None
             )
-            layover_duration = (
+            layover_min_duration = (
+                self.layover_restrictions.min_duration if self.layover_restrictions else None
+            )
+            layover_max_duration = (
                 self.layover_restrictions.max_duration if self.layover_restrictions else None
             )
 
@@ -138,22 +176,26 @@ class FlightSearchFilters(BaseModel):
                 [self.emissions.value] if self.emissions != EmissionsFilter.ALL else None
             )
 
+            # Segment classifier: 3 for outbound (or only leg), 1 for return.
+            is_return = self.trip_type == TripType.ROUND_TRIP and seg_idx > 0
+            classifier = 1 if is_return else 3
+
             segment_formatted = [
-                segment_filters[0],  # departure airport
-                segment_filters[1],  # arrival airport
-                time_filters,  # time restrictions
-                serialize(self.stops.value),  # stops
-                airlines_filters,  # airlines
-                None,  # unknown: accepts [] but 400s on scalars; seemingly no effect
-                segment.travel_date,  # travel date
-                [self.max_duration] if self.max_duration else None,  # max duration
-                selected_flights,  # selected flight (to fetch return flights)
-                layover_airports,  # layover airports
-                None,  # unknown: accepts [] but 400s on scalars; seemingly no effect
-                None,  # seemingly no effect: accepts any value (0-3, bool) without changing results
-                layover_duration,  # layover duration
-                emissions_filter,  # emissions filter: [1]=less emissions
-                3,  # seemingly no effect: accepts any value (0-5, None) without changing results
+                segment_filters[0],  # 0: departure airport
+                segment_filters[1],  # 1: arrival airport
+                time_filters,  # 2: time restrictions [edep, ldep, earr, larr]
+                serialize(self.stops.value),  # 3: stops int
+                airlines_filters,  # 4: airline / alliance INCLUDE list
+                exclude_filters,  # 5: airline / alliance EXCLUDE list
+                segment.travel_date,  # 6: travel date
+                [self.max_duration] if self.max_duration else None,  # 7: max duration
+                selected_flights,  # 8: selected flight (next-leg fetch)
+                layover_airports,  # 9: layover airport include list
+                None,  # 10: ? (rejects scalars; no observed effect)
+                layover_min_duration,  # 11: min layover duration (mins)
+                layover_max_duration,  # 12: max layover duration (mins)
+                emissions_filter,  # 13: emissions filter [1]=less emissions
+                classifier,  # 14: classifier (3=outbound, 1=return)
             ]
             formatted_segments.append(segment_formatted)
 

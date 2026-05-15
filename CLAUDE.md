@@ -109,12 +109,15 @@ uv run mkdocs build         # Build static docs
 Search for flights on a specific date.
 
 **Key Parameters:**
-- `origin` / `destination` - Airport IATA codes
+- `origin` / `destination` - Airport IATA codes (comma-separated for multi-airport)
 - `departure_date` / `return_date` - Dates in YYYY-MM-DD format
 - `cabin_class` - ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST
 - `max_stops` - ANY, NON_STOP, ONE_STOP, TWO_PLUS_STOPS
 - `departure_window` - Time range in 'HH-HH' format
-- `airlines` - List of airline IATA codes
+- `airlines` / `exclude_airlines` - Include / exclude airline IATA codes
+- `alliance` / `exclude_alliance` - Include / exclude ONEWORLD / SKYTEAM / STAR_ALLIANCE
+- `min_layover` / `max_layover` - Layover duration bounds in minutes
+- `currency` / `language` / `country` - Google `curr=` / `hl=` / `gl=` URL params
 - `sort_by` - CHEAPEST, DURATION, DEPARTURE_TIME, ARRIVAL_TIME
 
 ### `search_dates`
@@ -126,7 +129,15 @@ Find cheapest travel dates within a range.
 - `trip_duration` - Number of days for round trips
 - `is_round_trip` - Boolean for round-trip search
 - `cabin_class`, `max_stops`, `departure_window`, `airlines` - Same as above
+- `exclude_airlines`, `alliance`, `exclude_alliance`, `min_layover`, `max_layover` - Same as `search_flights`
+- `currency`, `language`, `country` - Same locale knobs as `search_flights`
 - `sort_by_price` - Boolean to sort by price
+
+### Note on emissions
+Both tools accept the `emissions` filter (forwarded to Google's
+"less emissions" toggle as `LESS`), but raw CO₂ figures are intentionally
+**not** returned in CLI output or MCP tool responses. The filter operates
+server-side; the data is not displayed in the current release.
 
 ## Code Style and Standards
 

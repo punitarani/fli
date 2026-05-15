@@ -185,7 +185,7 @@ def serialize_airline(airline: Airline) -> dict[str, str]:
 
 def serialize_flight_leg(leg: Any) -> dict[str, Any]:
     """Serialize a flight leg using Google Flights-style field names."""
-    return {
+    payload: dict[str, Any] = {
         "departure_airport": serialize_airport(leg.departure_airport),
         "arrival_airport": serialize_airport(leg.arrival_airport),
         "departure_time": leg.departure_datetime.isoformat(),
@@ -194,6 +194,20 @@ def serialize_flight_leg(leg: Any) -> dict[str, Any]:
         "airline": serialize_airline(leg.airline),
         "flight_number": leg.flight_number,
     }
+    if getattr(leg, "aircraft", None):
+        payload["aircraft"] = leg.aircraft
+    if getattr(leg, "legroom", None):
+        payload["legroom"] = leg.legroom
+    if getattr(leg, "overnight", False):
+        payload["overnight"] = True
+    if getattr(leg, "operating_airline", None) is not None:
+        payload["operating_airline"] = serialize_airline(leg.operating_airline)
+    amenities = getattr(leg, "amenities", None)
+    if amenities is not None:
+        a = amenities.model_dump(exclude_none=True)
+        if a:
+            payload["amenities"] = a
+    return payload
 
 
 def _serialize_flight_segment_result(
@@ -203,7 +217,7 @@ def _serialize_flight_segment_result(
     default_currency: str = "USD",
 ) -> dict[str, Any]:
     """Serialize a one-direction flight result."""
-    payload = {
+    payload: dict[str, Any] = {
         "duration": flight.duration,
         "stops": flight.stops,
         "legs": [serialize_flight_leg(leg) for leg in flight.legs],
@@ -211,6 +225,28 @@ def _serialize_flight_segment_result(
     if include_price:
         payload["price"] = flight.price
         payload["currency"] = flight.currency or default_currency
+    # Optional rich fields surfaced when populated. Emissions are
+    # intentionally omitted — the ``--emissions LESS`` filter is still
+    # honoured server-side, but CO₂ figures are not rendered in CLI
+    # output.
+    for src in (
+        "self_transfer",
+        "mixed_cabin",
+        "booking_token",
+    ):
+        v = getattr(flight, src, None)
+        if v is not None and v != "":
+            payload[src] = v
+    if getattr(flight, "layovers", None):
+        payload["layovers"] = [
+            {
+                "airport": serialize_airport(lo.airport),
+                "duration": lo.duration,
+                **({"overnight": True} if lo.overnight else {}),
+                **({"change_of_airport": True} if lo.change_of_airport else {}),
+            }
+            for lo in flight.layovers
+        ]
     return payload
 
 
@@ -354,6 +390,12 @@ def display_flight_results(
         total_stops = sum(flight.stops for flight in flight_segments)
         table.add_row("Total Stops", str(total_stops))
 
+        # Self-transfer / mixed-cabin warnings
+        if price_segment.self_transfer:
+            table.add_row("Self transfer", "yes (separate tickets)")
+        if price_segment.mixed_cabin:
+            table.add_row("Mixed cabin", "yes")
+
         # Create segments tables for each direction
         all_segments = []
         for idx, flight in enumerate(flight_segments):
@@ -372,16 +414,31 @@ def display_flight_results(
             segments.add_column("Depart", style="green", no_wrap=True)
             segments.add_column("To", style="yellow")
             segments.add_column("Arrive", style="green", no_wrap=True)
+            segments.add_column("Aircraft", style="magenta")
 
-            for leg in flight.legs:
+            for leg_idx, leg in enumerate(flight.legs):
                 airline_flight = f"{leg.airline.name.lstrip('_')} {leg.flight_number}"
+                arrive_str = leg.arrival_datetime.strftime("%H:%M %d-%b")
+                if leg.overnight:
+                    arrive_str += " +1"
                 segments.add_row(
                     airline_flight,
                     format_airport(leg.departure_airport),
                     leg.departure_datetime.strftime("%H:%M %d-%b"),
                     format_airport(leg.arrival_airport),
-                    leg.arrival_datetime.strftime("%H:%M %d-%b"),
+                    arrive_str,
+                    leg.aircraft or "—",
                 )
+                # Show layover row between legs when populated.
+                if flight.layovers and leg_idx < len(flight.layovers):
+                    lo = flight.layovers[leg_idx]
+                    where = f"{lo.airport.name} ({lo.city})" if lo.city else lo.airport.name
+                    lo_str = f"Layover {format_duration(lo.duration)} at {where}"
+                    if lo.overnight:
+                        lo_str += " (overnight)"
+                    if lo.change_of_airport:
+                        lo_str += " (airport change)"
+                    segments.add_row("", "", "", "", lo_str, "")
             all_segments.extend([segments, Text("")])
 
         # Display in a panel

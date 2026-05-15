@@ -76,6 +76,14 @@ Search for flights between two airports on a specific date.
 | `max_stops` | string | No | ANY | ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS |
 | `departure_window` | string | No | null | Time window in 'HH-HH' format (e.g., '6-20') |
 | `airlines` | list | No | null | Filter by airline codes (e.g., ['BA', 'AA']) |
+| `exclude_airlines` | list | No | null | Airline IATA codes to **exclude** from results |
+| `alliance` | list | No | null | Restrict to ONEWORLD / SKYTEAM / STAR_ALLIANCE |
+| `exclude_alliance` | list | No | null | Alliance(s) to **exclude** from results |
+| `min_layover` | int | No | null | Minimum layover duration (minutes) |
+| `max_layover` | int | No | null | Maximum layover duration (minutes) |
+| `currency` | string | No | null | ISO 4217 code (`curr=`) — e.g. 'EUR', 'JPY' |
+| `language` | string | No | null | BCP-47 language code (`hl=`) — e.g. 'en-GB' |
+| `country` | string | No | null | ISO 3166-1 alpha-2 code (`gl=`) — e.g. 'GB' |
 | `sort_by` | string | No | CHEAPEST | CHEAPEST, DURATION, DEPARTURE_TIME, or ARRIVAL_TIME |
 | `passengers` | int | No | 1 | Number of adult passengers |
 
@@ -124,6 +132,14 @@ Find the cheapest travel dates between two airports within a date range.
 | `max_stops` | string | No | ANY | ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS |
 | `departure_window` | string | No | null | Time window in 'HH-HH' format (e.g., '6-20') |
 | `airlines` | list | No | null | Filter by airline codes (e.g., ['BA', 'AA']) |
+| `exclude_airlines` | list | No | null | Airline IATA codes to **exclude** |
+| `alliance` | list | No | null | Restrict to ONEWORLD / SKYTEAM / STAR_ALLIANCE |
+| `exclude_alliance` | list | No | null | Alliance(s) to **exclude** |
+| `min_layover` | int | No | null | Minimum layover duration (minutes) |
+| `max_layover` | int | No | null | Maximum layover duration (minutes) |
+| `currency` | string | No | null | ISO 4217 currency code (`curr=`) |
+| `language` | string | No | null | BCP-47 language code (`hl=`) |
+| `country` | string | No | null | ISO 3166-1 alpha-2 country (`gl=`) |
 | `sort_by_price` | bool | No | false | Sort results by price (lowest first) |
 | `passengers` | int | No | 1 | Number of adult passengers |
 

@@ -74,10 +74,57 @@ class EmissionsFilter(Enum):
 
 
 class Currency(Enum):
-    """Supported currencies for pricing. Currently only USD."""
+    """ISO 4217 currency codes accepted by Google Flights via `curr=` URL param.
 
+    Google honours the `curr=` URL query parameter on its frontend service
+    endpoints to translate prices into a requested currency. The set below
+    covers the codes Google Flights' UI lets the user pick. Codes not in this
+    list may still work; pass a plain string via :class:`PriceLimit.currency`
+    or the search-level ``currency`` argument when calling
+    :class:`fli.search.SearchFlights`.
+    """
+
+    AED = "AED"
+    ARS = "ARS"
+    AUD = "AUD"
+    BGN = "BGN"
+    BRL = "BRL"
+    CAD = "CAD"
+    CHF = "CHF"
+    CLP = "CLP"
+    CNY = "CNY"
+    COP = "COP"
+    CZK = "CZK"
+    DKK = "DKK"
+    EGP = "EGP"
+    EUR = "EUR"
+    GBP = "GBP"
+    HKD = "HKD"
+    HUF = "HUF"
+    IDR = "IDR"
+    ILS = "ILS"
+    INR = "INR"
+    JPY = "JPY"
+    KRW = "KRW"
+    MXN = "MXN"
+    MYR = "MYR"
+    NOK = "NOK"
+    NZD = "NZD"
+    PEN = "PEN"
+    PHP = "PHP"
+    PLN = "PLN"
+    QAR = "QAR"
+    RON = "RON"
+    SAR = "SAR"
+    SEK = "SEK"
+    SGD = "SGD"
+    THB = "THB"
+    TRY = "TRY"
+    TWD = "TWD"
+    UAH = "UAH"
     USD = "USD"
-    # Placeholder for other currencies
+    VND = "VND"
+    ZAR = "ZAR"
 
 
 class BagsFilter(BaseModel):
@@ -138,11 +185,70 @@ class PriceLimit(BaseModel):
     currency: Currency | None = Currency.USD
 
 
+class Alliance(Enum):
+    """Airline alliances accepted by Google Flights' include/exclude filters.
+
+    Google Flights treats alliance identifiers as drop-in values inside the
+    airline include (segment[4]) or exclude (segment[5]) lists. The string
+    form below matches Google's accepted spelling (note ``STAR_ALLIANCE``
+    requires an underscore — ``"Star Alliance"`` and ``"STAR ALLIANCE"``
+    both return zero results).
+    """
+
+    ONEWORLD = "ONEWORLD"
+    SKYTEAM = "SKYTEAM"
+    STAR_ALLIANCE = "STAR_ALLIANCE"
+
+
 class LayoverRestrictions(BaseModel):
-    """Constraints for layovers in multi-leg flights."""
+    """Constraints for layovers in multi-leg flights.
+
+    ``airports`` is an include list — only the listed airports may be used
+    as layover stops. ``min_duration`` / ``max_duration`` bound the wait
+    time between legs in minutes; either can be set independently.
+    """
 
     airports: list[Airport] | None = None
+    min_duration: PositiveInt | None = None
     max_duration: PositiveInt | None = None
+
+
+class Amenities(BaseModel):
+    """Per-leg amenities reported by Google Flights.
+
+    All fields are tri-state (`True`, `False`, or `None` when Google did not
+    publish that signal for the leg).
+    """
+
+    wifi: bool | None = None
+    power: bool | None = None
+    usb_power: bool | None = None
+    in_seat_video: bool | None = None
+    on_demand_video: bool | None = None
+    legroom_rating: NonNegativeInt | None = None
+
+
+class Layover(BaseModel):
+    """Layover info between two flight legs.
+
+    ``duration`` is the wait time at the layover airport in minutes.
+    ``overnight`` is set when the layover crosses local midnight at the
+    airport. ``change_of_airport`` is set when the next leg departs from a
+    different airport than the previous leg arrived at (rare but supported
+    by Google Flights — e.g. JFK arrival + LGA departure in NYC).
+
+    ``city`` and ``airport_name`` are populated from Google's response when
+    available (``detail[13]``); they are optional because the parser also
+    derives layovers structurally from leg timestamps when the detail block
+    isn't present (e.g. on captured fixtures with old responses).
+    """
+
+    airport: Airport
+    duration: NonNegativeInt
+    overnight: bool = False
+    change_of_airport: bool = False
+    city: str | None = None
+    airport_name: str | None = None
 
 
 class FlightLeg(BaseModel):
@@ -156,6 +262,37 @@ class FlightLeg(BaseModel):
     arrival_datetime: datetime
     duration: PositiveInt  # in minutes
 
+    # Optional richer fields populated when present in Google's response.
+    departure_airport_name: str | None = None
+    arrival_airport_name: str | None = None
+    operating_airline: Airline | None = None
+    operating_flight_number: str | None = None
+    aircraft: str | None = None
+    legroom: str | None = None
+    legroom_short: str | None = None
+    amenities: Amenities | None = None
+    overnight: bool = False
+    co2_emissions_g: NonNegativeInt | None = None
+
+
+class BookingOption(BaseModel):
+    """A single bookable fare exposed by GetBookingResults.
+
+    Google Flights' booking page surfaces a list of vendors (airline direct and
+    OTAs) with per-fare prices and click-through URLs. This model captures one
+    such row.
+    """
+
+    vendor_code: str | None = None
+    vendor_name: str | None = None
+    is_airline_direct: bool = False
+    price: NonNegativeFloat | None = None
+    currency: str | None = None
+    fare_name: str | None = None
+    booking_url: str | None = None
+    google_click_url: str | None = None
+    flights: list[tuple[str, str]] | None = None  # [(airline_code, flight_number), ...]
+
 
 class FlightResult(BaseModel):
     """Complete flight search result with pricing and timing."""
@@ -165,6 +302,18 @@ class FlightResult(BaseModel):
     currency: str | None = None
     duration: PositiveInt  # total duration in minutes
     stops: NonNegativeInt
+
+    # Optional richer fields populated when present in Google's response.
+    layovers: list[Layover] | None = None
+    co2_emissions_g: NonNegativeInt | None = None
+    co2_emissions_typical_g: NonNegativeInt | None = None
+    co2_emissions_delta_pct: int | None = None
+    emissions_tag: str | None = None  # "lower" | "typical" | "higher"
+    self_transfer: bool | None = None
+    mixed_cabin: bool | None = None
+    primary_airline: Airline | None = None
+    primary_airline_name: str | None = None
+    booking_token: str | None = None
 
 
 class FlightSegment(BaseModel):

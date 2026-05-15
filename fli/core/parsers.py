@@ -8,7 +8,16 @@ import re
 from enum import Enum
 from typing import TypeVar
 
-from fli.models import Airline, Airport, EmissionsFilter, MaxStops, SeatType, SortBy
+from fli.models import (
+    Airline,
+    Airport,
+    Alliance,
+    Currency,
+    EmissionsFilter,
+    MaxStops,
+    SeatType,
+    SortBy,
+)
 
 _AIRLINE_SEPARATORS = re.compile(r"[,\s]+")
 
@@ -110,6 +119,47 @@ def parse_airlines(codes: list[str] | None) -> list[Airline] | None:
     return airlines
 
 
+def parse_alliances(codes: list[str] | None) -> list[Alliance] | None:
+    """Parse a list of alliance identifiers into :class:`Alliance` enums.
+
+    Each item may itself contain multiple comma- or whitespace-separated
+    values, so the CLI can accept ``--alliance ONEWORLD,SKYTEAM`` and
+    repeated ``--alliance ONEWORLD --alliance STAR_ALLIANCE`` equally.
+    Case-insensitive; ``"Star Alliance"`` and ``"star_alliance"`` both
+    resolve to :data:`Alliance.STAR_ALLIANCE`.
+
+    Args:
+        codes: List of alliance names (may be combined with commas/spaces).
+
+    Returns:
+        List of :class:`Alliance` enum values, or ``None`` for empty input.
+
+    Raises:
+        ParseError: If any token is not a recognised alliance name.
+
+    """
+    if not codes:
+        return None
+
+    expanded: list[str] = [
+        token.strip().upper().replace(" ", "_").replace("-", "_")
+        for item in codes
+        for token in _AIRLINE_SEPARATORS.split(item)
+        if token.strip()
+    ]
+    if not expanded:
+        raise ParseError(f"No valid alliance names found in: {codes!r}")
+
+    out: list[Alliance] = []
+    for name in expanded:
+        try:
+            out.append(Alliance[name])
+        except KeyError as e:
+            valid = ", ".join(a.name for a in Alliance)
+            raise ParseError(f"Invalid alliance: '{name}'. Valid values: {valid}") from e
+    return out
+
+
 def parse_max_stops(stops: str) -> MaxStops:
     """Parse a stops parameter into a MaxStops enum.
 
@@ -205,6 +255,35 @@ def parse_sort_by(sort_by: str) -> SortBy:
         raise ParseError(
             f"Invalid sort_by value: '{sort_by}'. Valid values: {', '.join(valid_values)}"
         ) from e
+
+
+def parse_currency(currency: str | None) -> str | None:
+    """Validate and normalize a currency code string.
+
+    Accepts any ISO 4217 code; emits a warning-free passthrough for codes
+    listed in :class:`fli.models.Currency`, and uppercases unknown but
+    syntactically-valid 3-letter codes for transparent passthrough.
+
+    Args:
+        currency: ISO 4217 currency code or None.
+
+    Returns:
+        Uppercased currency code, or None if ``currency`` is None/empty.
+
+    Raises:
+        ParseError: If the value is not a valid ISO 4217-style code.
+
+    """
+    if currency is None or currency == "":
+        return None
+    normalized = currency.strip().upper()
+    if len(normalized) != 3 or not normalized.isalpha():
+        raise ParseError(f"Invalid currency code: '{currency}'. Expected a 3-letter ISO 4217 code.")
+    # If recognised, prefer the Currency enum's canonical value.
+    try:
+        return Currency(normalized).value
+    except ValueError:
+        return normalized
 
 
 def parse_emissions(emissions: str) -> EmissionsFilter:

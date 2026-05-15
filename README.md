@@ -53,35 +53,51 @@ The MCP server provides two main tools:
 
 #### `search_flights` Parameters
 
-| Parameter          | Type   | Description                                         |
-|--------------------|--------|-----------------------------------------------------|
-| `origin`           | string | Departure airport IATA code (e.g., 'JFK')           |
-| `destination`      | string | Arrival airport IATA code (e.g., 'LHR')             |
-| `departure_date`   | string | Travel date in YYYY-MM-DD format                    |
-| `return_date`      | string | Return date for round trips (optional)              |
-| `cabin_class`      | string | ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST        |
-| `max_stops`        | string | ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS          |
-| `departure_window` | string | Time window in 'HH-HH' format (e.g., '6-20')        |
-| `airlines`         | list   | Filter by airline codes (e.g., ['BA', 'AA'])        |
-| `sort_by`          | string | CHEAPEST, DURATION, DEPARTURE_TIME, or ARRIVAL_TIME |
-| `passengers`       | int    | Number of adult passengers                          |
+| Parameter           | Type   | Description                                                 |
+|---------------------|--------|-------------------------------------------------------------|
+| `origin`            | string | Departure airport IATA code(s) — comma-separated for multi  |
+| `destination`       | string | Arrival airport IATA code(s) — comma-separated for multi    |
+| `departure_date`    | string | Travel date in YYYY-MM-DD format                            |
+| `return_date`       | string | Return date for round trips (optional)                      |
+| `cabin_class`       | string | ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST                |
+| `max_stops`         | string | ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS                  |
+| `departure_window`  | string | Time window in 'HH-HH' format (e.g., '6-20')                |
+| `airlines`          | list   | Filter by airline codes (e.g., ['BA', 'AA'])                |
+| `exclude_airlines`  | list   | Airline IATA codes to **exclude** (e.g., ['DL', 'B6'])      |
+| `alliance`          | list   | Restrict to alliances: ONEWORLD, SKYTEAM, STAR_ALLIANCE     |
+| `exclude_alliance`  | list   | Alliance names to **exclude** from results                  |
+| `min_layover`       | int    | Minimum layover duration in minutes (multi-stop only)       |
+| `max_layover`       | int    | Maximum layover duration in minutes (multi-stop only)       |
+| `currency`          | string | ISO 4217 code (e.g. 'EUR', 'JPY') — flows to `curr=` param  |
+| `language`          | string | BCP-47 language code (e.g. 'en-GB') — flows to `hl=` param  |
+| `country`           | string | ISO 3166-1 alpha-2 country code (e.g. 'GB') for `gl=` param |
+| `sort_by`           | string | CHEAPEST, DURATION, DEPARTURE_TIME, or ARRIVAL_TIME         |
+| `passengers`        | int    | Number of adult passengers                                  |
 
 #### `search_dates` Parameters
 
-| Parameter          | Type   | Description                                  |
-|--------------------|--------|----------------------------------------------|
-| `origin`           | string | Departure airport IATA code (e.g., 'JFK')    |
-| `destination`      | string | Arrival airport IATA code (e.g., 'LHR')      |
-| `start_date`       | string | Start of date range in YYYY-MM-DD format     |
-| `end_date`         | string | End of date range in YYYY-MM-DD format       |
-| `trip_duration`    | int    | Trip duration in days (for round-trips)      |
-| `is_round_trip`    | bool   | Whether to search for round-trip flights     |
-| `cabin_class`      | string | ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST |
-| `max_stops`        | string | ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS   |
-| `departure_window` | string | Time window in 'HH-HH' format (e.g., '6-20') |
-| `airlines`         | list   | Filter by airline codes (e.g., ['BA', 'AA']) |
-| `sort_by_price`    | bool   | Sort results by price (lowest first)         |
-| `passengers`       | int    | Number of adult passengers                   |
+| Parameter           | Type   | Description                                                 |
+|---------------------|--------|-------------------------------------------------------------|
+| `origin`            | string | Departure airport IATA code(s) — comma-separated for multi  |
+| `destination`       | string | Arrival airport IATA code(s) — comma-separated for multi    |
+| `start_date`        | string | Start of date range in YYYY-MM-DD format                    |
+| `end_date`          | string | End of date range in YYYY-MM-DD format                      |
+| `trip_duration`     | int    | Trip duration in days (for round-trips)                     |
+| `is_round_trip`     | bool   | Whether to search for round-trip flights                    |
+| `cabin_class`       | string | ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST                |
+| `max_stops`         | string | ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS                  |
+| `departure_window`  | string | Time window in 'HH-HH' format (e.g., '6-20')                |
+| `airlines`          | list   | Filter by airline codes (e.g., ['BA', 'AA'])                |
+| `exclude_airlines`  | list   | Airline IATA codes to **exclude**                           |
+| `alliance`          | list   | Restrict to alliances: ONEWORLD, SKYTEAM, STAR_ALLIANCE     |
+| `exclude_alliance`  | list   | Alliance names to **exclude**                               |
+| `min_layover`       | int    | Minimum layover duration in minutes                         |
+| `max_layover`       | int    | Maximum layover duration in minutes                         |
+| `currency`          | string | ISO 4217 currency code (e.g. 'EUR', 'JPY')                  |
+| `language`          | string | BCP-47 language code (e.g. 'en-GB')                         |
+| `country`           | string | ISO 3166-1 alpha-2 country code (e.g. 'GB')                 |
+| `sort_by_price`     | bool   | Sort results by price (lowest first)                        |
+| `passengers`        | int    | Number of adult passengers                                  |
 
 ## Quick Start
 
@@ -143,6 +159,14 @@ fli flights JFK LHR 2026-10-25 \
     --class BUSINESS \        # Cabin class
     --stops NON_STOP \        # Non-stop flights only
     --sort DURATION           # Sort by duration
+
+# Alliance + exclude + locale (May-2026 filter additions)
+fli flights JFK LHR 2026-10-25 \
+    --alliance ONEWORLD \
+    --exclude-airlines AA \
+    --min-layover 90 \
+    --max-layover 360 \
+    --currency EUR --language en-GB --country GB
 ```
 
 > ⚠️ **Experimental**
@@ -193,31 +217,47 @@ fli multi \
 
 #### Flights Command (`fli flights`)
 
-| Option           | Description           | Example                |
-|------------------|-----------------------|------------------------|
-| `--return, -r`   | Return date           | `2026-10-30`           |
-| `--time, -t`     | Departure time window | `6-20`                 |
-| `--airlines, -a` | Airline IATA codes    | `BA,KL`                |
-| `--class, -c`    | Cabin class           | `ECONOMY`, `BUSINESS`  |
-| `--stops, -s`    | Maximum stops         | `NON_STOP`, `ONE_STOP` |
-| `--sort, -o`     | Sort results by       | `CHEAPEST`, `DURATION` |
-| `--format`       | Output format         | `text`, `json`         |
+| Option                  | Description                                | Example                          |
+|-------------------------|--------------------------------------------|----------------------------------|
+| `--return, -r`          | Return date                                | `2026-10-30`                     |
+| `--time, -t`            | Departure time window                      | `6-20`                           |
+| `--airlines, -a`        | Airline IATA codes                         | `BA,KL`                          |
+| `--exclude-airlines, -A` | Airline IATA codes to **exclude**         | `DL,B6`                          |
+| `--alliance`            | Restrict to alliance(s)                    | `ONEWORLD`, `SKYTEAM`            |
+| `--exclude-alliance`    | Alliance(s) to **exclude**                 | `STAR_ALLIANCE`                  |
+| `--min-layover`         | Minimum layover (minutes)                  | `90`                             |
+| `--max-layover`         | Maximum layover (minutes)                  | `360`                            |
+| `--currency`            | ISO 4217 currency code                     | `EUR`, `JPY`                     |
+| `--language`            | BCP-47 language code (Google `hl=`)        | `en-GB`                          |
+| `--country`             | ISO 3166-1 alpha-2 country (`gl=`)         | `GB`                             |
+| `--class, -c`           | Cabin class                                | `ECONOMY`, `BUSINESS`            |
+| `--stops, -s`           | Maximum stops                              | `NON_STOP`, `ONE_STOP`           |
+| `--sort, -o`            | Sort results by                            | `CHEAPEST`, `DURATION`           |
+| `--format`              | Output format                              | `text`, `json`                   |
 
 #### Dates Command (`fli dates`)
 
-| Option             | Description            | Example                |
-|--------------------|------------------------|------------------------|
-| `--from`           | Start date             | `2026-01-01`           |
-| `--to`             | End date               | `2026-02-01`           |
-| `--duration, -d`   | Trip duration in days  | `3`                    |
-| `--round, -R`      | Round-trip search      | (flag)                 |
-| `--airlines, -a`   | Airline IATA codes     | `BA,KL`                |
-| `--class, -c`      | Cabin class            | `ECONOMY`, `BUSINESS`  |
-| `--stops, -s`      | Maximum stops          | `NON_STOP`, `ONE_STOP` |
-| `--time`           | Departure time window  | `6-20`                 |
-| `--sort`           | Sort by price          | (flag)                 |
-| `--[day]`          | Day filters            | `--monday`, `--friday` |
-| `--format`         | Output format          | `text`, `json`         |
+| Option                  | Description                                | Example                  |
+|-------------------------|--------------------------------------------|--------------------------|
+| `--from`                | Start date                                 | `2026-01-01`             |
+| `--to`                  | End date                                   | `2026-02-01`             |
+| `--duration, -d`        | Trip duration in days                      | `3`                      |
+| `--round, -R`           | Round-trip search                          | (flag)                   |
+| `--airlines, -a`        | Airline IATA codes                         | `BA,KL`                  |
+| `--exclude-airlines, -A`| Airline IATA codes to **exclude**          | `DL,B6`                  |
+| `--alliance`            | Restrict to alliance(s)                    | `ONEWORLD`               |
+| `--exclude-alliance`    | Alliance(s) to **exclude**                 | `STAR_ALLIANCE`          |
+| `--min-layover`         | Minimum layover (minutes)                  | `90`                     |
+| `--max-layover`         | Maximum layover (minutes)                  | `360`                    |
+| `--currency`            | ISO 4217 currency code                     | `EUR`, `JPY`             |
+| `--language`            | BCP-47 language code                       | `en-GB`                  |
+| `--country`             | ISO 3166-1 alpha-2 country                 | `GB`                     |
+| `--class, -c`           | Cabin class                                | `ECONOMY`, `BUSINESS`    |
+| `--stops, -s`           | Maximum stops                              | `NON_STOP`, `ONE_STOP`   |
+| `--time`                | Departure time window                      | `6-20`                   |
+| `--sort`                | Sort by price                              | (flag)                   |
+| `--[day]`               | Day filters                                | `--monday`, `--friday`   |
+| `--format`              | Output format                              | `text`, `json`           |
 
 #### Multi Command (`fli multi`)
 

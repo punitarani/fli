@@ -15,7 +15,9 @@ from .builders import (
 from .currency import extract_currency_from_price_token, format_price, format_price_axis_label
 from .parsers import (
     parse_airlines,
+    parse_alliances,
     parse_cabin_class,
+    parse_currency,
     parse_emissions,
     parse_max_stops,
     parse_sort_by,
@@ -27,7 +29,9 @@ from .parsers import (
 __all__ = [
     # Parsers
     "parse_airlines",
+    "parse_alliances",
     "parse_cabin_class",
+    "parse_currency",
     "parse_emissions",
     "parse_max_stops",
     "parse_sort_by",
