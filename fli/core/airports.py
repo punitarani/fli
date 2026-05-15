@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from fli.models import Airport
+from fli.models.airport import AIRPORT_NAMES
 
 # Curated mapping of city names and common abbreviations to IATA codes.
 # Provides multi-airport groupings (e.g., "new york" -> JFK, LGA, EWR) and
@@ -66,7 +67,7 @@ CITY_AIRPORTS: dict[str, list[str]] = {
 
 for _city, _codes in CITY_AIRPORTS.items():
     for _code in _codes:
-        if _code not in Airport.__members__:
+        if _code not in AIRPORT_NAMES:
             raise RuntimeError(f"CITY_AIRPORTS[{_city!r}] references unknown IATA code {_code!r}")
 
 MatchType = Literal["iata_exact", "iata_prefix", "city", "name"]
@@ -146,33 +147,39 @@ def search_airports(query: str, limit: int = 10) -> list[AirportMatch]:
                         )
                         seen_codes.add(code)
 
-    # Priority 4: Airport name substring match
-    for airport in Airport:
-        if airport.name in seen_codes:
+    # Priority 4: Airport name substring match.
+    # Iterate the raw dict instead of the Enum — skips Enum-member
+    # attribute access (``.value``, ``.name``) on each of ~7,900 entries,
+    # which is the dominant cost when no other priority matched first.
+    for code, airport_name in AIRPORT_NAMES.items():
+        if code in seen_codes:
             continue
-        airport_name_lower = airport.value.lower()
+        airport_name_lower = airport_name.lower()
         if query_lower in airport_name_lower:
             # 0.1-per-position weight keeps name matches (max ~70) below
             # city matches (80) regardless of where the substring lands.
             pos = airport_name_lower.find(query_lower)
             score = 70.0 - (pos * 0.1)
             results.append(
-                AirportMatch(code=airport, name=airport.value, match_type="name", score=score)
+                AirportMatch(code=Airport[code], name=airport_name, match_type="name", score=score)
             )
-            seen_codes.add(airport.name)
+            seen_codes.add(code)
 
-    # Priority 5: IATA code prefix match (handles "SF" matching "SFO")
+    # Priority 5: IATA code prefix match (handles "SF" matching "SFO").
     if len(query_upper) <= 3:
-        for airport in Airport:
-            if airport.name in seen_codes:
+        for code, airport_name in AIRPORT_NAMES.items():
+            if code in seen_codes:
                 continue
-            if airport.name.startswith(query_upper):
+            if code.startswith(query_upper):
                 results.append(
                     AirportMatch(
-                        code=airport, name=airport.value, match_type="iata_prefix", score=60.0
+                        code=Airport[code],
+                        name=airport_name,
+                        match_type="iata_prefix",
+                        score=60.0,
                     )
                 )
-                seen_codes.add(airport.name)
+                seen_codes.add(code)
 
     # Sort by score descending, then by IATA code alphabetically.
     results.sort(key=lambda m: (-m.score, m.code.name))

@@ -257,11 +257,22 @@ def _parse_datetime(date_arr: list[int], time_arr: list[int]) -> datetime:
     return datetime(*(x or 0 for x in date_arr), *(x or 0 for x in time_arr))
 
 
+# Airline / Airport enums are immutable so each code maps to a single
+# member instance — cache the ``getattr`` walk so the parse hot path
+# turns into a dict lookup. ``__members__`` is itself a dict, but going
+# through ``getattr`` adds attribute-protocol overhead we don't need.
+_AIRLINE_BY_CODE: dict[str, Airline] = {m.name: m for m in Airline}
+_AIRPORT_BY_CODE: dict[str, Airport] = {m.name: m for m in Airport}
+
+
 def _parse_airline(code: str) -> Airline:
     """Convert an airline IATA code into an :class:`Airline` enum value."""
     if code and code[0].isdigit():
         code = f"_{code}"
-    return getattr(Airline, code)
+    try:
+        return _AIRLINE_BY_CODE[code]
+    except KeyError as e:
+        raise AttributeError(code) from e
 
 
 def _safe_airline(code: Any) -> Airline | None:
@@ -301,13 +312,13 @@ def _parse_airport(code: str) -> Airport:
     rather than vanishing silently from search results.
     """
     try:
-        return getattr(Airport, code)
-    except AttributeError:
+        return _AIRPORT_BY_CODE[code]
+    except KeyError as e:
         logger.warning(
             "Unknown airport IATA code %r — add to fli.models.Airport enum",
             code,
         )
-        raise
+        raise AttributeError(code) from e
 
 
 # ---------------------------------------------------------------------------

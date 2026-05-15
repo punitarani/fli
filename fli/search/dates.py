@@ -6,6 +6,7 @@ It is intended to be used for finding the cheapest dates to fly, not the cheapes
 """
 
 import logging
+from copy import deepcopy
 from datetime import datetime, timedelta
 
 from pydantic import BaseModel
@@ -13,6 +14,7 @@ from pydantic import BaseModel
 from fli.core import extract_currency_from_price_token
 from fli.models import DateSearchFilters
 from fli.models.google_flights.base import TripType
+from fli.search._concurrency import parallel_map
 from fli.search._urls import with_locale_params
 from fli.search._wire import parse_first_wrb_payload
 from fli.search.client import get_client
@@ -80,47 +82,72 @@ class SearchDates:
                 filters, currency=currency, language=language, country=country
             )
 
-        # Split into chunks of MAX_DAYS_PER_SEARCH
-        all_results = []
+        # Build every chunk descriptor up front so the per-chunk requests
+        # share no mutable state. This both enables parallel execution and
+        # fixes a latent bug in the previous sequential version: each chunk
+        # rewrote ``filters.flight_segments[*].travel_date`` in place, so
+        # the second-and-later chunks had segment dates that no longer
+        # matched ``current_from``.
+        chunk_filters = self._build_chunk_filters(filters, from_date, to_date)
+
+        chunk_results = parallel_map(
+            lambda cf: self._search_chunk(
+                cf, currency=currency, language=language, country=country
+            ),
+            chunk_filters,
+        )
+
+        all_results: list[DatePrice] = []
+        for r in chunk_results:
+            if r:
+                all_results.extend(r)
+        return all_results if all_results else None
+
+    def _build_chunk_filters(
+        self,
+        filters: DateSearchFilters,
+        from_date: datetime,
+        to_date: datetime,
+    ) -> list[DateSearchFilters]:
+        """Split ``filters``' date range into independent per-chunk filter copies.
+
+        The flight segments are deep-copied per chunk and their
+        ``travel_date`` advanced by the chunk offset so each chunk
+        represents a distinct, self-contained search.
+        """
+        chunks: list[DateSearchFilters] = []
         current_from = from_date
+        chunk_index = 0
         while current_from <= to_date:
             current_to = min(current_from + timedelta(days=self.MAX_DAYS_PER_SEARCH - 1), to_date)
-
-            # Update the travel date for the flight segments
-            if current_from > from_date:
-                for segment in filters.flight_segments:
+            segments = deepcopy(filters.flight_segments)
+            if chunk_index > 0:
+                shift = self.MAX_DAYS_PER_SEARCH * chunk_index
+                for segment in segments:
                     segment.travel_date = (
-                        datetime.strptime(segment.travel_date, "%Y-%m-%d")
-                        + timedelta(days=self.MAX_DAYS_PER_SEARCH)
+                        datetime.strptime(segment.travel_date, "%Y-%m-%d") + timedelta(days=shift)
                     ).strftime("%Y-%m-%d")
-
-            # Create new filters for this chunk
-            chunk_filters = DateSearchFilters(
-                trip_type=filters.trip_type,
-                passenger_info=filters.passenger_info,
-                flight_segments=filters.flight_segments,
-                stops=filters.stops,
-                seat_type=filters.seat_type,
-                price_limit=filters.price_limit,
-                airlines=filters.airlines,
-                max_duration=filters.max_duration,
-                layover_restrictions=filters.layover_restrictions,
-                emissions=filters.emissions,
-                bags=filters.bags,
-                from_date=current_from.strftime("%Y-%m-%d"),
-                to_date=current_to.strftime("%Y-%m-%d"),
-                duration=filters.duration,
+            chunks.append(
+                DateSearchFilters(
+                    trip_type=filters.trip_type,
+                    passenger_info=filters.passenger_info,
+                    flight_segments=segments,
+                    stops=filters.stops,
+                    seat_type=filters.seat_type,
+                    price_limit=filters.price_limit,
+                    airlines=filters.airlines,
+                    max_duration=filters.max_duration,
+                    layover_restrictions=filters.layover_restrictions,
+                    emissions=filters.emissions,
+                    bags=filters.bags,
+                    from_date=current_from.strftime("%Y-%m-%d"),
+                    to_date=current_to.strftime("%Y-%m-%d"),
+                    duration=filters.duration,
+                )
             )
-
-            chunk_results = self._search_chunk(
-                chunk_filters, currency=currency, language=language, country=country
-            )
-            if chunk_results:
-                all_results.extend(chunk_results)
-
             current_from = current_to + timedelta(days=1)
-
-        return all_results if all_results else None
+            chunk_index += 1
+        return chunks
 
     def _search_chunk(
         self,
