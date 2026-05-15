@@ -161,9 +161,7 @@ def search_airports(query: str, limit: int = 10) -> list[AirportMatch]:
             pos = airport_name_lower.find(query_lower)
             score = 70.0 - (pos * 0.1)
             results.append(
-                AirportMatch(
-                    code=Airport[code], name=airport_name, match_type="name", score=score
-                )
+                AirportMatch(code=Airport[code], name=airport_name, match_type="name", score=score)
             )
             seen_codes.add(code)
 

@@ -98,8 +98,7 @@ def _write_enum_module(
             fh.write(f"    {sanitized!r}: {name!r},\n")
         fh.write("}\n\n")
         fh.write(
-            f"{enum_name} = Enum({enum_name!r}, {map_name})\n"
-            f'{enum_name}.__doc__ = """{doc}"""\n'
+            f'{enum_name} = Enum({enum_name!r}, {map_name})\n{enum_name}.__doc__ = """{doc}"""\n'
         )
 
 

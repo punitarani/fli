@@ -33,14 +33,20 @@ from fli.search._concurrency import TokenBucketRateLimiter
 # without paying the import cost at runtime.
 if TYPE_CHECKING:
     from curl_cffi import requests as _curl_requests
+
     Response = _curl_requests.Response
     Session = _curl_requests.Session
 else:
     Response = "Any"
     Session = "Any"
 
-# Module-level singleton client (back-compat for ``get_client()``).
+# Module-level singleton client + lock guarding its lazy initialisation.
+# ``get_client()`` uses double-checked locking so concurrent first callers
+# can't each construct an independent ``Client`` (each with its own
+# ``TokenBucketRateLimiter`` — that would silently double the global
+# request budget).
 client: Client | None = None
+_client_lock = threading.Lock()
 
 # Google's published ceiling.
 DEFAULT_CALLS_PER_SECOND = 10
@@ -125,7 +131,14 @@ def get_client() -> Client:
         Singleton instance of the HTTP client
 
     """
+    # Double-checked locking: the fast path is a single read (no lock
+    # taken once the client is initialised). Only the first concurrent
+    # callers serialise through ``_client_lock`` to ensure exactly one
+    # ``Client`` (and therefore one ``TokenBucketRateLimiter``) ever
+    # exists per process.
     global client
     if client is None:
-        client = Client()
+        with _client_lock:
+            if client is None:
+                client = Client()
     return client
