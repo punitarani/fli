@@ -78,8 +78,8 @@ def analyze_results_basic(results: list[FlightResult]):
     print("=== Basic Flight Analysis ===")
     print(f"Total flights: {len(results)}")
 
-    # Price analysis
-    prices = [flight.price for flight in results]
+    # Price analysis (skip flights without a shoppable price)
+    prices = [flight.price for flight in results if flight.price is not None]
     if prices:
         print(f"Price range: ${min(prices):.2f} - ${max(prices):.2f}")
         print(f"Average price: ${sum(prices) / len(prices):.2f}")

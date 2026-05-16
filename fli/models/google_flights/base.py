@@ -298,7 +298,11 @@ class FlightResult(BaseModel):
     """Complete flight search result with pricing and timing."""
 
     legs: list[FlightLeg]
-    price: NonNegativeFloat  # in specified currency
+    # ``None`` when Google Flights returned the flight with no shoppable
+    # price (common for some LCCs and direct-only carriers — Eastar Jet,
+    # Aero K, China Eastern, Hong Kong Airlines, etc.). Distinguishes
+    # "price unknown" from "actually free."
+    price: NonNegativeFloat | None = None
     currency: str | None = None
     duration: PositiveInt  # total duration in minutes
     stops: NonNegativeInt
