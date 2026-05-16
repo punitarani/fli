@@ -15,26 +15,23 @@ on:
 
 jobs:
   style:
-    name: brew style + audit
+    name: brew style
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
 
       - name: Set up Homebrew
-        id: setup
         uses: Homebrew/actions/setup-homebrew@master
 
-      - name: Symlink formula into a temporary tap
-        run: |
-          tap="$(brew --repository)/Library/Taps/local/homebrew-fli"
-          mkdir -p "$tap/Formula"
-          ln -sf "$GITHUB_WORKSPACE/Formula/flights.rb" "$tap/Formula/flights.rb"
-
       - name: brew style
-        run: brew style --formula local/fli/flights
+        run: brew style "$GITHUB_WORKSPACE/Formula/flights.rb"
 
-      - name: brew audit (strict, new-formula)
-        run: brew audit --strict --new --formula local/fli/flights
+      - name: brew audit
+        # `--new` is intentionally omitted: it enforces homebrew-core admission
+        # rules (notability, no duplicate names, etc.) that don't apply to a
+        # tap formula. `--strict` gives us the substantive content checks
+        # without network dependency.
+        run: brew audit --strict "$GITHUB_WORKSPACE/Formula/flights.rb"
 
   install:
     name: brew install + test
@@ -46,17 +43,11 @@ jobs:
       - name: Set up Homebrew
         uses: Homebrew/actions/setup-homebrew@master
 
-      - name: Symlink formula into a temporary tap
-        run: |
-          tap="$(brew --repository)/Library/Taps/local/homebrew-fli"
-          mkdir -p "$tap/Formula"
-          ln -sf "$GITHUB_WORKSPACE/Formula/flights.rb" "$tap/Formula/flights.rb"
-
       - name: brew install --build-from-source
-        run: brew install --build-from-source --verbose local/fli/flights
+        run: brew install --build-from-source --verbose "$GITHUB_WORKSPACE/Formula/flights.rb"
 
       - name: brew test
-        run: brew test --verbose local/fli/flights
+        run: brew test --verbose flights
 
       - name: Verify CLI entry points
         run: |
