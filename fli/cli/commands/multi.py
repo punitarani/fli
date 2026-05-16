@@ -5,6 +5,7 @@ from typing import Annotated
 
 import typer
 
+from fli.cli.errors import report_cli_error
 from fli.cli.utils import display_flight_results, validate_time_range
 from fli.core import (
     build_multi_city_segments,
@@ -21,7 +22,7 @@ from fli.models import (
     PassengerInfo,
     TimeRestrictions,
 )
-from fli.search import SearchFlights
+from fli.search import SearchClientError, SearchFlights
 
 LEG_PATTERN = re.compile(r"^([A-Za-z]{3}),([A-Za-z]{3}),(\d{4}-\d{1,2}-\d{1,2})$")
 
@@ -165,3 +166,7 @@ def multi(
     except (AttributeError, ValueError) as e:
         typer.echo(f"Error: {str(e)}")
         raise typer.Exit(1) from e
+    except SearchClientError as e:
+        raise report_cli_error(e, command="multi") from e
+    except Exception as e:  # noqa: BLE001 — fall back to clean reporting
+        raise report_cli_error(e, command="multi") from e

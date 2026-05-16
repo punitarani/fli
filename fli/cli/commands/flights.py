@@ -5,6 +5,7 @@ from typing import Annotated, Any
 import typer
 
 from fli.cli.enums import OutputFormat
+from fli.cli.errors import json_error_payload, report_cli_error
 from fli.cli.utils import (
     build_json_error_response,
     build_json_success_response,
@@ -32,7 +33,7 @@ from fli.models import (
     LayoverRestrictions,
     PassengerInfo,
 )
-from fli.search import SearchFlights
+from fli.search import SearchClientError, SearchFlights
 
 
 def _search_flights_core(
@@ -231,6 +232,32 @@ def _search_flights_core(
 
         typer.echo(f"Error: {str(e)}")
         raise typer.Exit(1) from e
+    except SearchClientError as e:
+        if output_format == OutputFormat.JSON:
+            message, error_type, log_path = json_error_payload(e, command="flights")
+            payload = build_json_error_response(
+                search_type="flights",
+                message=message,
+                error_type=error_type,
+                query=query,
+            )
+            payload["error"]["log_path"] = str(log_path)
+            emit_json(payload)
+            raise typer.Exit(1) from e
+        raise report_cli_error(e, command="flights") from e
+    except Exception as e:  # noqa: BLE001 — fall back to clean reporting
+        if output_format == OutputFormat.JSON:
+            message, error_type, log_path = json_error_payload(e, command="flights")
+            payload = build_json_error_response(
+                search_type="flights",
+                message=message,
+                error_type=error_type,
+                query=query,
+            )
+            payload["error"]["log_path"] = str(log_path)
+            emit_json(payload)
+            raise typer.Exit(1) from e
+        raise report_cli_error(e, command="flights") from e
 
 
 def flights(
