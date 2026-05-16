@@ -208,31 +208,42 @@ def _derive_layovers(
     return layovers
 
 
-def _parse_price_info(row: list) -> tuple[float, str | None]:
+def _parse_price_info(row: list) -> tuple[float | None, str | None]:
     """Extract numeric price + ISO currency code from the price block.
 
-    Raises ``ValueError`` when the price block is present but malformed
-    (non-numeric, wrong shape). Callers in :func:`parse_flight_row` will
-    catch this and skip the row rather than ship a misleading ``$0.00``
-    flight. Truly missing price blocks (sponsor placements with no
-    ``row[1]``) yield ``0.0`` and an empty currency — these rows are
-    filtered out at the model layer by ``FlightResult``'s
-    ``NonNegativeFloat`` constraint plus the existing skip path.
+    Returns ``(None, currency_or_None)`` when Google's response carries no
+    shoppable price for the flight (missing ``row[1]``, empty inner price
+    list, or ``None`` price head). This is common for LCCs and direct-only
+    carriers without partner inventory (Eastar Jet, Aero K, China Eastern,
+    Hong Kong Airlines, Vietnam Airlines, and parts of KE/OZ/BR). The flight
+    stays in results with ``price=None`` so the carrier remains visible to
+    consumers instead of being silently dropped.
+
+    Raises ``ValueError`` when the price block is present and structurally
+    valid but the price value itself is corrupt (non-numeric). Callers in
+    :func:`parse_flight_row` propagate that so the row is skipped rather
+    than shipping a meaningless number.
     """
     price_block = _get_price_block(row)
     if price_block is None:
-        raise ValueError("price block missing — skip row")
+        return None, None
 
     try:
-        head = price_block[0]
-        if not (isinstance(head, list) and head):
-            raise ValueError("price head is not a non-empty list")
-        raw_price = head[-1]
-        if isinstance(raw_price, bool) or not isinstance(raw_price, int | float):
+        head = price_block[0] if price_block else None
+    except (IndexError, TypeError):
+        head = None
+    price: float | None = None
+    if isinstance(head, list) and head:
+        try:
+            raw_price = head[-1]
+        except (IndexError, TypeError) as e:
+            raise ValueError(f"malformed price block: {e}") from e
+        if raw_price is None:
+            price = None
+        elif isinstance(raw_price, bool) or not isinstance(raw_price, int | float):
             raise ValueError(f"price field is not numeric: {raw_price!r}")
-        price = float(raw_price)
-    except (IndexError, TypeError) as e:
-        raise ValueError(f"malformed price block: {e}") from e
+        else:
+            price = float(raw_price)
 
     currency: str | None = None
     if len(price_block) > 1:
