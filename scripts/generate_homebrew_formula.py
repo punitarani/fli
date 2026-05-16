@@ -60,7 +60,7 @@ def resolve_closure(version: str) -> list[tuple[str, str]]:
             "3.13",
             "-",
         ],
-        input=f"flights=={version}\n",
+        input=f"flights[all]=={version}\n",
         check=True,
         capture_output=True,
         text=True,
@@ -83,7 +83,7 @@ def fetch_sdist(name: str, version: str) -> tuple[str, str]:
     """Return the ``(url, sha256)`` of the sdist for ``name==version`` on PyPI."""
     url = f"https://pypi.org/pypi/{name}/{version}/json"
     req = urllib.request.Request(url, headers={"User-Agent": "fli-homebrew-gen"})
-    with urllib.request.urlopen(req) as resp:
+    with urllib.request.urlopen(req, timeout=30) as resp:
         data = json.load(resp)
     sdist = next((u for u in data["urls"] if u["packagetype"] == "sdist"), None)
     if sdist is None:
@@ -113,6 +113,10 @@ class Flights < Formula
   test do
     assert_match "Usage", shell_output("#{{bin}}/fli --help")
     assert_match "flights", shell_output("#{{bin}}/fli --help")
+    assert_predicate bin/"fli-mcp", :exist?
+    # Confirm the MCP optional deps actually landed in the venv so that
+    # ``fli-mcp`` doesn't ``ModuleNotFoundError`` on first run.
+    system libexec/"bin/python", "-c", "import fastmcp, fastapi"
   end
 end
 """
