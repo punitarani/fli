@@ -26,9 +26,10 @@ import json
 import re
 import subprocess
 import sys
-import tomllib
 import urllib.request
 from pathlib import Path
+
+import tomllib
 
 ROOT = Path(__file__).resolve().parent.parent
 FORMULA_PATH = ROOT / "Formula" / "flights.rb"
@@ -41,6 +42,7 @@ def normalize(name: str) -> str:
 
 
 def project_version() -> str:
+    """Return the ``flights`` version declared in ``pyproject.toml``."""
     return tomllib.loads(PYPROJECT.read_text())["project"]["version"]
 
 
@@ -78,6 +80,7 @@ def resolve_closure(version: str) -> list[tuple[str, str]]:
 
 
 def fetch_sdist(name: str, version: str) -> tuple[str, str]:
+    """Return the ``(url, sha256)`` of the sdist for ``name==version`` on PyPI."""
     url = f"https://pypi.org/pypi/{name}/{version}/json"
     req = urllib.request.Request(url, headers={"User-Agent": "fli-homebrew-gen"})
     with urllib.request.urlopen(req) as resp:
@@ -116,6 +119,7 @@ end
 
 
 def build_resource_block(name: str, version: str) -> str:
+    """Render a single Homebrew ``resource ... do ... end`` stanza."""
     url, sha = fetch_sdist(name, version)
     return (
         f'  resource "{normalize(name)}" do\n'
@@ -126,6 +130,7 @@ def build_resource_block(name: str, version: str) -> str:
 
 
 def main(argv: list[str]) -> int:
+    """Write ``Formula/flights.rb`` for the requested ``flights`` version."""
     version = argv[1] if len(argv) > 1 else project_version()
     flights_url, flights_sha = fetch_sdist("flights", version)
 
