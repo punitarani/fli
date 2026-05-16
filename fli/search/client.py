@@ -137,6 +137,12 @@ def _wrap_request_error(method: str, url: str, exc: BaseException) -> SearchClie
     underlying traceback to a log file, so the message here should read
     well on its own.
     """
+    # If a typed error somehow escapes the request body (e.g. a future
+    # change in ``_session()``), keep its original type instead of
+    # downgrading it to the generic fallback below.
+    if isinstance(exc, SearchClientError):
+        return exc
+
     # Imported lazily — ``curl_cffi.requests.exceptions`` triggers the
     # full curl-cffi load, which we otherwise defer until first request.
     from curl_cffi.requests import exceptions as curl_exc

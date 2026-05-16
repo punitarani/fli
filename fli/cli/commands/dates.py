@@ -444,7 +444,7 @@ def dates(
         raise typer.Exit(1) from e
     except SearchClientError as e:
         if output_format == OutputFormat.JSON:
-            message, error_type, log_path = json_error_payload(e)
+            message, error_type, log_path = json_error_payload(e, command="dates")
             payload = build_json_error_response(
                 search_type="dates",
                 message=message,
@@ -499,7 +499,7 @@ def dates(
         raise typer.Exit(1) from e
     except Exception as e:  # noqa: BLE001 — fall back to clean reporting
         if output_format == OutputFormat.JSON:
-            message, error_type, log_path = json_error_payload(e)
+            message, error_type, log_path = json_error_payload(e, command="dates")
             payload = build_json_error_response(
                 search_type="dates",
                 message=message,

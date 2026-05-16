@@ -234,7 +234,7 @@ def _search_flights_core(
         raise typer.Exit(1) from e
     except SearchClientError as e:
         if output_format == OutputFormat.JSON:
-            message, error_type, log_path = json_error_payload(e)
+            message, error_type, log_path = json_error_payload(e, command="flights")
             payload = build_json_error_response(
                 search_type="flights",
                 message=message,
@@ -247,7 +247,7 @@ def _search_flights_core(
         raise report_cli_error(e, command="flights") from e
     except Exception as e:  # noqa: BLE001 — fall back to clean reporting
         if output_format == OutputFormat.JSON:
-            message, error_type, log_path = json_error_payload(e)
+            message, error_type, log_path = json_error_payload(e, command="flights")
             payload = build_json_error_response(
                 search_type="flights",
                 message=message,

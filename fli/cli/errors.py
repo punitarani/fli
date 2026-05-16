@@ -45,7 +45,9 @@ def _write_log(exc: BaseException, *, command: str | None = None) -> Path:
     """Write the full traceback for ``exc`` to a tmp log file and return the path."""
     log_dir = Path(tempfile.gettempdir()) / _LOG_DIR_NAME
     log_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    # Microsecond precision so rapid-fire errors (e.g. tests, parallel
+    # legs) don't collide on the same filename and silently overwrite.
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     log_path = log_dir / f"fli-error-{timestamp}.log"
 
     lines: list[str] = []
@@ -87,9 +89,9 @@ def report_cli_error(
     return typer.Exit(exit_code)
 
 
-def json_error_payload(exc: BaseException) -> tuple[str, str, Path]:
+def json_error_payload(exc: BaseException, *, command: str | None = None) -> tuple[str, str, Path]:
     """Return ``(message, error_type, log_path)`` for JSON-mode error output."""
-    log_path = _write_log(exc)
+    log_path = _write_log(exc, command=command)
     if isinstance(exc, SearchTimeoutError):
         return str(exc), "timeout", log_path
     if isinstance(exc, SearchConnectionError):
