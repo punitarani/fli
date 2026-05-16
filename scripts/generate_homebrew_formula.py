@@ -119,6 +119,7 @@ class Flights < Formula
   end
 
   depends_on "rust" => :build
+  depends_on "libyaml"
   depends_on "python@{python_version}"
 
 {resources}
@@ -130,7 +131,7 @@ class Flights < Formula
   test do
     assert_match "Usage", shell_output("#{{bin}}/fli --help")
     assert_match "flights", shell_output("#{{bin}}/fli --help")
-    assert_predicate bin/"fli-mcp", :exist?
+    assert_path_exists bin/"fli-mcp"
     # Confirm the MCP optional deps actually landed in the venv so that
     # ``fli-mcp`` doesn't ``ModuleNotFoundError`` on first run.
     system libexec/"bin/python", "-c", "import fastmcp, fastapi"
