@@ -20,6 +20,7 @@ callers cooperate cleanly under Google's 10 req/sec ceiling.
 
 from __future__ import annotations
 
+import os
 import threading
 from typing import TYPE_CHECKING, Any
 
@@ -50,6 +51,11 @@ _client_lock = threading.Lock()
 
 # Google's published ceiling.
 DEFAULT_CALLS_PER_SECOND = 10
+
+# Request timeout in seconds.  Override with the FLI_TIMEOUT env var.
+DEFAULT_TIMEOUT = 60
+_env_timeout = os.environ.get("FLI_TIMEOUT")
+REQUEST_TIMEOUT: float = float(_env_timeout) if _env_timeout else DEFAULT_TIMEOUT
 
 
 class Client:
@@ -105,6 +111,7 @@ class Client:
     def get(self, url: str, **kwargs: Any) -> Response:
         """Make a rate-limited GET request with automatic retries."""
         self._rate_limiter.acquire()
+        kwargs.setdefault("timeout", REQUEST_TIMEOUT)
         try:
             response = self._session().get(url, **kwargs)
             response.raise_for_status()
@@ -116,6 +123,7 @@ class Client:
     def post(self, url: str, **kwargs: Any) -> Response:
         """Make a rate-limited POST request with automatic retries."""
         self._rate_limiter.acquire()
+        kwargs.setdefault("timeout", REQUEST_TIMEOUT)
         try:
             response = self._session().post(url, **kwargs)
             response.raise_for_status()
