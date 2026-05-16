@@ -53,9 +53,18 @@ _client_lock = threading.Lock()
 DEFAULT_CALLS_PER_SECOND = 10
 
 # Request timeout in seconds.  Override with the FLI_TIMEOUT env var.
-DEFAULT_TIMEOUT = 60
+DEFAULT_TIMEOUT: float = 60.0
 _env_timeout = os.environ.get("FLI_TIMEOUT")
-REQUEST_TIMEOUT: float = float(_env_timeout) if _env_timeout else DEFAULT_TIMEOUT
+if _env_timeout is not None:
+    try:
+        REQUEST_TIMEOUT: float = float(_env_timeout)
+    except ValueError:
+        msg = f"FLI_TIMEOUT must be a number of seconds, got: {_env_timeout!r}"
+        raise ValueError(msg) from None
+    if REQUEST_TIMEOUT <= 0:
+        raise ValueError(f"FLI_TIMEOUT must be a positive number, got: {_env_timeout!r}")
+else:
+    REQUEST_TIMEOUT = DEFAULT_TIMEOUT
 
 
 class Client:
