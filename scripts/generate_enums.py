@@ -28,9 +28,31 @@ iteration) is identical to the previous form.
 """
 
 import csv
+from collections import Counter
 from pathlib import Path
 
 PROJECT_DIR = Path(__file__).parents[1].resolve()
+
+
+def _disambiguate_names(entries: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Append IATA codes to duplicate names so every Enum value is unique.
+
+    Python's ``Enum`` treats members with the same value as aliases — the
+    second silently becomes an alias for the first.  This function detects
+    duplicate human-readable names and appends `` (CODE)`` to *all*
+    members of each duplicate group (including the first) so every entry
+    gets its own distinct Enum member.
+
+    Entries with unique names are left untouched.
+    """
+    name_counts = Counter(name for _, name in entries)
+    duplicates = {name for name, count in name_counts.items() if count > 1}
+    if not duplicates:
+        return entries
+    return [
+        (code, f"{name} ({code})" if name in duplicates else name)
+        for code, name in entries
+    ]
 
 
 def _sanitize_code(code: str, allow_digit_prefix: bool = False) -> str:
@@ -116,6 +138,7 @@ def generate_airport_enum() -> None:
     except (KeyError, csv.Error) as e:
         raise ValueError(f"Error reading CSV file: {e}") from e
 
+    entries = _disambiguate_names(entries)
     _write_enum_module(
         out_path,
         enum_name="Airport",
@@ -159,6 +182,7 @@ def generate_airline_enum() -> None:
         ]
     )
 
+    entries = _disambiguate_names(entries)
     _write_enum_module(
         out_path,
         enum_name="Airline",
