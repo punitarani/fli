@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 from fli.cli.errors import _write_log, json_error_payload, report_cli_error
 from fli.cli.main import app
 from fli.search.exceptions import (
+    SearchCertificateError,
     SearchClientError,
     SearchConnectionError,
     SearchHTTPError,
@@ -48,6 +49,7 @@ def test_json_error_payload_maps_error_types():
     """Each SearchClientError subclass should map to a distinct error_type string."""
     cases = [
         (SearchTimeoutError("timed out"), "timeout"),
+        (SearchCertificateError("bad cert"), "certificate_error"),
         (SearchConnectionError("dns"), "connection_error"),
         (SearchHTTPError("403", status_code=403), "http_error"),
         (SearchClientError("generic"), "search_error"),
