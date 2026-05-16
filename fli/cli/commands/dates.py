@@ -6,6 +6,7 @@ from typing import Annotated
 import typer
 
 from fli.cli.enums import DayOfWeek, OutputFormat
+from fli.cli.errors import json_error_payload, report_cli_error
 from fli.cli.utils import (
     build_json_error_response,
     build_json_success_response,
@@ -32,7 +33,7 @@ from fli.models import (
     TimeRestrictions,
     TripType,
 )
-from fli.search import SearchDates
+from fli.search import SearchClientError, SearchDates
 
 
 def _build_selected_days(
@@ -441,6 +442,18 @@ def dates(
             raise typer.Exit(1) from e
         typer.echo(f"Error: {str(e)}")
         raise typer.Exit(1) from e
+    except SearchClientError as e:
+        if output_format == OutputFormat.JSON:
+            message, error_type, log_path = json_error_payload(e)
+            payload = build_json_error_response(
+                search_type="dates",
+                message=message,
+                error_type=error_type,
+            )
+            payload["error"]["log_path"] = str(log_path)
+            emit_json(payload)
+            raise typer.Exit(1) from e
+        raise report_cli_error(e, command="dates") from e
     except (AttributeError, ValueError) as e:
         if "module 'fli.search' has no attribute 'SearchDates'" in str(e):
             raise
@@ -484,3 +497,15 @@ def dates(
             raise typer.Exit(1) from e
         typer.echo(f"Error: {str(e)}")
         raise typer.Exit(1) from e
+    except Exception as e:  # noqa: BLE001 — fall back to clean reporting
+        if output_format == OutputFormat.JSON:
+            message, error_type, log_path = json_error_payload(e)
+            payload = build_json_error_response(
+                search_type="dates",
+                message=message,
+                error_type=error_type,
+            )
+            payload["error"]["log_path"] = str(log_path)
+            emit_json(payload)
+            raise typer.Exit(1) from e
+        raise report_cli_error(e, command="dates") from e

@@ -26,6 +26,12 @@ from typing import TYPE_CHECKING, Any
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from fli.search._concurrency import TokenBucketRateLimiter
+from fli.search.exceptions import (
+    SearchClientError,
+    SearchConnectionError,
+    SearchHTTPError,
+    SearchTimeoutError,
+)
 
 # ``curl_cffi`` adds ~100ms to import time on first load — we only need
 # it once an HTTP request actually fires, so import lazily on first use.
@@ -110,7 +116,7 @@ class Client:
             response.raise_for_status()
             return response
         except Exception as e:
-            raise Exception(f"GET request failed: {str(e)}") from e
+            raise _wrap_request_error("GET", url, e) from e
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(), reraise=True)
     def post(self, url: str, **kwargs: Any) -> Response:
@@ -121,7 +127,55 @@ class Client:
             response.raise_for_status()
             return response
         except Exception as e:
-            raise Exception(f"POST request failed: {str(e)}") from e
+            raise _wrap_request_error("POST", url, e) from e
+
+
+def _wrap_request_error(method: str, url: str, exc: BaseException) -> SearchClientError:
+    """Map curl-cffi / network errors into our typed ``SearchClientError`` family.
+
+    The CLI surfaces these as short user-facing messages and writes the
+    underlying traceback to a log file, so the message here should read
+    well on its own.
+    """
+    # Imported lazily — ``curl_cffi.requests.exceptions`` triggers the
+    # full curl-cffi load, which we otherwise defer until first request.
+    from curl_cffi.requests import exceptions as curl_exc
+
+    host = _host_from_url(url)
+    if isinstance(exc, curl_exc.Timeout):
+        return SearchTimeoutError(
+            f"Timed out talking to Google Flights ({host}). "
+            "The service may be slow or unreachable from your network — "
+            "check your connection and try again."
+        )
+    if isinstance(exc, curl_exc.ConnectionError):
+        return SearchConnectionError(
+            f"Could not reach Google Flights ({host}). "
+            "Check your internet connection or DNS and try again."
+        )
+    if isinstance(exc, curl_exc.HTTPError):
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        suffix = f" (HTTP {status})" if status else ""
+        return SearchHTTPError(
+            f"Google Flights returned an error response{suffix}. "
+            "The request may be malformed, rate-limited, or blocked.",
+            status_code=status,
+        )
+    # Anything else (including bare CurlError) — keep a clean message but
+    # preserve the original via ``__cause__`` so logs still show details.
+    return SearchClientError(
+        f"{method} request to Google Flights ({host}) failed: {exc.__class__.__name__}"
+    )
+
+
+def _host_from_url(url: str) -> str:
+    """Best-effort host extraction for error messages."""
+    try:
+        from urllib.parse import urlparse
+
+        return urlparse(url).hostname or url
+    except Exception:  # noqa: BLE001 — never let logging fail the request path
+        return url
 
 
 def get_client() -> Client:
