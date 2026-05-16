@@ -1,0 +1,65 @@
+name: Homebrew Formula
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'Formula/**'
+      - '.github/workflows/homebrew.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'Formula/**'
+      - '.github/workflows/homebrew.yml'
+  workflow_dispatch:
+
+jobs:
+  style:
+    name: brew style + audit
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Homebrew
+        id: setup
+        uses: Homebrew/actions/setup-homebrew@master
+
+      - name: Symlink formula into a temporary tap
+        run: |
+          tap="$(brew --repository)/Library/Taps/local/homebrew-fli"
+          mkdir -p "$tap/Formula"
+          ln -sf "$GITHUB_WORKSPACE/Formula/flights.rb" "$tap/Formula/flights.rb"
+
+      - name: brew style
+        run: brew style --formula local/fli/flights
+
+      - name: brew audit (strict, new-formula)
+        run: brew audit --strict --new --formula local/fli/flights
+
+  install:
+    name: brew install + test
+    runs-on: macos-latest
+    needs: style
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@master
+
+      - name: Symlink formula into a temporary tap
+        run: |
+          tap="$(brew --repository)/Library/Taps/local/homebrew-fli"
+          mkdir -p "$tap/Formula"
+          ln -sf "$GITHUB_WORKSPACE/Formula/flights.rb" "$tap/Formula/flights.rb"
+
+      - name: brew install --build-from-source
+        run: brew install --build-from-source --verbose local/fli/flights
+
+      - name: brew test
+        run: brew test --verbose local/fli/flights
+
+      - name: Verify CLI entry points
+        run: |
+          fli --help
+          test -x "$(brew --prefix)/bin/fli-mcp"
+          test -x "$(brew --prefix)/bin/fli-mcp-http"

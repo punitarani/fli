@@ -7,6 +7,11 @@ class Flights < Formula
   sha256 "fed27974af8320b64529fd5a2fc87f809c42e820e538a1b1ed55e4afd0b73528"
   license "MIT"
 
+  livecheck do
+    url :stable
+    strategy :pypi
+  end
+
   depends_on "rust" => :build
   depends_on "python@3.13"
 

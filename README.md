@@ -119,12 +119,19 @@ fli --help
 brew install punitarani/fli/flights
 ```
 
-This taps the formula in this repo and installs the `fli` and `fli-mcp` CLIs
-into a self-contained virtualenv, no system Python required. To upgrade later:
+The formula name is `flights` (matching the PyPI package); the installed CLI
+is `fli` (with `fli-mcp` and `fli-mcp-http` alongside it). The whole thing
+runs in a self-contained virtualenv — no system Python required.
+
+To upgrade later:
 
 ```bash
 brew upgrade punitarani/fli/flights
 ```
+
+> A single-token `brew install flights` would require landing the formula in
+> `Homebrew/homebrew-core`. The formula in this repo is ready for that
+> submission; until then, use the tap path above.
 
 ![CLI Demo](https://github.com/punitarani/fli/blob/main/data/cli-demo.png)
 

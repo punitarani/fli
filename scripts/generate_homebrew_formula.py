@@ -35,6 +35,9 @@ ROOT = Path(__file__).resolve().parent.parent
 FORMULA_PATH = ROOT / "Formula" / "flights.rb"
 PYPROJECT = ROOT / "pyproject.toml"
 
+# Bump in lockstep with the `depends_on "python@..."` line in the template.
+PYTHON_VERSION = "3.13"
+
 
 def normalize(name: str) -> str:
     """Return the PEP 503 normalized form of a distribution name."""
@@ -57,7 +60,7 @@ def resolve_closure(version: str) -> list[tuple[str, str]]:
             "--no-header",
             "--no-annotate",
             "--python-version",
-            "3.13",
+            PYTHON_VERSION,
             "-",
         ],
         input=f"flights[all]=={version}\n",
@@ -76,6 +79,15 @@ def resolve_closure(version: str) -> list[tuple[str, str]]:
         name, ver = line.split("==", 1)
         ver = ver.split()[0].split(";")[0].strip()
         pkgs.append((name.strip(), ver))
+
+    # `flights[all]` has ~80 transitive deps; anything dramatically smaller
+    # means we silently dropped most of the parser output and would ship a
+    # broken formula.
+    if len(pkgs) < 10:
+        raise RuntimeError(
+            f"Resolved closure has only {len(pkgs)} packages; expected >= 10. "
+            f"`uv pip compile` output may have changed format. Raw output:\n{out}"
+        )
     return pkgs
 
 
@@ -101,8 +113,13 @@ class Flights < Formula
   sha256 "{sha}"
   license "MIT"
 
+  livecheck do
+    url :stable
+    strategy :pypi
+  end
+
   depends_on "rust" => :build
-  depends_on "python@3.13"
+  depends_on "python@{python_version}"
 
 {resources}
 
@@ -139,7 +156,12 @@ def main(argv: list[str]) -> int:
 
     resources = "\n\n".join(build_resource_block(n, v) for n, v in deps)
     FORMULA_PATH.write_text(
-        FORMULA_TEMPLATE.format(url=flights_url, sha=flights_sha, resources=resources)
+        FORMULA_TEMPLATE.format(
+            url=flights_url,
+            sha=flights_sha,
+            resources=resources,
+            python_version=PYTHON_VERSION,
+        )
     )
     print(f"Wrote {FORMULA_PATH.relative_to(ROOT)} for flights=={version}")
     return 0
