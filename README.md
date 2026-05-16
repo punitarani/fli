@@ -1,5 +1,7 @@
 # 🛫 Fli - Flight Search MCP Server and Library
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/punitarani/fli)
+
 A powerful Python library that provides programmatic access to Google Flights data with an elegant CLI interface. Search
 flights, find the best deals, and filter results with ease.
 
