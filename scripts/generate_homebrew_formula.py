@@ -121,12 +121,7 @@ end
 def build_resource_block(name: str, version: str) -> str:
     """Render a single Homebrew ``resource ... do ... end`` stanza."""
     url, sha = fetch_sdist(name, version)
-    return (
-        f'  resource "{normalize(name)}" do\n'
-        f'    url "{url}"\n'
-        f'    sha256 "{sha}"\n'
-        f"  end"
-    )
+    return f'  resource "{normalize(name)}" do\n    url "{url}"\n    sha256 "{sha}"\n  end'
 
 
 def main(argv: list[str]) -> int:
