@@ -113,6 +113,19 @@ pipx install flights
 fli --help
 ```
 
+### Homebrew (macOS / Linux)
+
+```bash
+brew install punitarani/fli/flights
+```
+
+This taps the formula in this repo and installs the `fli` and `fli-mcp` CLIs
+into a self-contained virtualenv, no system Python required. To upgrade later:
+
+```bash
+brew upgrade punitarani/fli/flights
+```
+
 ![CLI Demo](https://github.com/punitarani/fli/blob/main/data/cli-demo.png)
 
 ## Features
