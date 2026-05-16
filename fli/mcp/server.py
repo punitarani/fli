@@ -530,7 +530,7 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
     except ParseError as e:
         return _error_response(e, "flights")
     except SearchClientError as e:
-        return _error_response(e, "flights", message=f"Search failed: {e}")
+        return _error_response(e, "flights")
     except Exception as e:
         error_msg = str(e)
         if "validation error" in error_msg.lower():
@@ -631,7 +631,7 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
     except ParseError as e:
         return _error_response(e, "dates")
     except SearchClientError as e:
-        return _error_response(e, "dates", message=f"Search failed: {e}")
+        return _error_response(e, "dates")
     except Exception as e:
         return _error_response(e, "dates", message=f"Search failed: {e}")
 
