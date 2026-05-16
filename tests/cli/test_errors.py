@@ -25,8 +25,8 @@ def runner() -> CliRunner:
 
 @pytest.fixture(autouse=True)
 def _isolated_tmp_log_dir(monkeypatch, tmp_path):
-    """Redirect tempfile.gettempdir() so log files land under tmp_path."""
-    monkeypatch.setattr("fli.cli.errors.tempfile.gettempdir", lambda: str(tmp_path))
+    """Redirect _LOG_DIR so log files land under tmp_path instead of ~/.fli/logs/."""
+    monkeypatch.setattr("fli.cli.errors._LOG_DIR", tmp_path / "fli-logs")
 
 
 def test_write_log_creates_file_with_traceback(tmp_path):
