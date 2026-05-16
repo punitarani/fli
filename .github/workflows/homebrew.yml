@@ -15,7 +15,7 @@ on:
 
 jobs:
   style:
-    name: brew style
+    name: brew style + audit
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
@@ -23,15 +23,23 @@ jobs:
       - name: Set up Homebrew
         uses: Homebrew/actions/setup-homebrew@main
 
+      - name: Tap the formula
+        # `brew audit` only accepts formula *names*, not file paths. Make the
+        # repo's formula visible to brew by copying it into a synthetic tap.
+        run: |
+          tap_dir="$(brew --repository)/Library/Taps/punitarani/homebrew-fli"
+          mkdir -p "$tap_dir/Formula"
+          cp "$GITHUB_WORKSPACE/Formula/flights.rb" "$tap_dir/Formula/flights.rb"
+
       - name: brew style
-        run: brew style "$GITHUB_WORKSPACE/Formula/flights.rb"
+        run: brew style punitarani/fli/flights
 
       - name: brew audit
         # `--new` is intentionally omitted: it enforces homebrew-core admission
         # rules (notability, no duplicate names, etc.) that don't apply to a
         # tap formula. `--strict` gives us the substantive content checks
         # without network dependency.
-        run: brew audit --strict "$GITHUB_WORKSPACE/Formula/flights.rb"
+        run: brew audit --strict punitarani/fli/flights
 
   install:
     name: brew install + test
@@ -43,11 +51,17 @@ jobs:
       - name: Set up Homebrew
         uses: Homebrew/actions/setup-homebrew@main
 
+      - name: Tap the formula
+        run: |
+          tap_dir="$(brew --repository)/Library/Taps/punitarani/homebrew-fli"
+          mkdir -p "$tap_dir/Formula"
+          cp "$GITHUB_WORKSPACE/Formula/flights.rb" "$tap_dir/Formula/flights.rb"
+
       - name: brew install --build-from-source
-        run: brew install --build-from-source --verbose "$GITHUB_WORKSPACE/Formula/flights.rb"
+        run: brew install --build-from-source --verbose punitarani/fli/flights
 
       - name: brew test
-        run: brew test --verbose flights
+        run: brew test --verbose punitarani/fli/flights
 
       - name: Verify CLI entry points
         run: |
