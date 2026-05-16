@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
 
 from fastmcp import FastMCP
+from mcp.types import Icon
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -79,7 +80,15 @@ CONFIG = FlightSearchConfig()
 CONFIG_SCHEMA = FlightSearchConfig.model_json_schema()
 
 
-mcp = FastMCP("Flight Search MCP Server")
+mcp = FastMCP(
+    "Flight Search MCP Server",
+    icons=[
+        Icon(
+            src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48dGV4dCB5PSIuOWVtIiBmb250LXNpemU9IjkwIj7inIjvuI88L3RleHQ+PC9zdmc+",
+            mimeType="image/svg+xml",
+        )
+    ],
+)
 
 
 # =============================================================================
