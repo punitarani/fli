@@ -80,6 +80,11 @@ def _ca_bundle_from_env() -> str | None:
     for name in _CA_BUNDLE_ENV_VARS:
         value = os.environ.get(name)
         if value:
+            if not os.path.isfile(value) or not os.access(value, os.R_OK):
+                raise SearchCertificateError(
+                    f"{name} points to a CA bundle path that does not exist or "
+                    f"is not readable: {value!r}"
+                )
             return value
     return None
 
