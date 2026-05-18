@@ -44,21 +44,23 @@ def test_write_log_creates_file_with_traceback(tmp_path):
     assert "traceback:" in contents
 
 
-def test_json_error_payload_maps_error_types():
-    """Each SearchClientError subclass should map to a distinct error_type string."""
-    cases = [
+@pytest.mark.parametrize(
+    "exc, expected_type",
+    [
         (SearchTimeoutError("timed out"), "timeout"),
         (SearchConnectionError("dns"), "connection_error"),
         (SearchHTTPError("403", status_code=403), "http_error"),
         (SearchClientError("generic"), "search_error"),
         (RuntimeError("boom"), "unexpected_error"),
-    ]
-    for exc, expected_type in cases:
-        message, error_type, log_path = json_error_payload(exc)
-        assert error_type == expected_type
-        assert isinstance(log_path, Path)
-        assert log_path.exists()
-        assert message  # non-empty
+    ],
+)
+def test_json_error_payload_maps_error_types(exc, expected_type):
+    """Each SearchClientError subclass should map to a distinct error_type string."""
+    message, error_type, log_path = json_error_payload(exc)
+    assert error_type == expected_type
+    assert isinstance(log_path, Path)
+    assert log_path.exists()
+    assert message  # non-empty
 
 
 def test_report_cli_error_returns_typer_exit_and_writes_log(tmp_path, capsys):
@@ -106,6 +108,88 @@ def test_multi_command_handles_timeout_cleanly(runner, monkeypatch, tmp_path):
 
     log_files = list((tmp_path / "fli-logs").glob("fli-error-*.log"))
     assert len(log_files) >= 1
+
+
+@pytest.mark.parametrize(
+    "exc, expected_msg",
+    [
+        (SearchTimeoutError("slow"), "Request timed out. slow"),
+        (SearchConnectionError("dns"), "Network error. dns"),
+        (SearchHTTPError("403", status_code=403), "Google Flights error. 403"),
+        (SearchClientError("generic failure"), "Search failed. generic failure"),
+        (ValueError("bad input"), "Unexpected error: ValueError: bad input"),
+    ],
+)
+def test_friendly_message(exc, expected_msg):
+    """_friendly_message must dispatch to the correct user-facing message per error type."""
+    from fli.cli.errors import _friendly_message
+
+    assert _friendly_message(exc) == expected_msg
+
+
+class TestWriteLogDetails:
+    def test_no_command_omits_command_line(self):
+        try:
+            raise SearchTimeoutError("slow backend")
+        except SearchTimeoutError as exc:
+            log_path = _write_log(exc, command=None)
+        contents = log_path.read_text()
+        assert "command:" not in contents
+
+    def test_argv_written_to_log(self):
+        import sys
+
+        try:
+            raise SearchConnectionError("no route")
+        except SearchConnectionError as exc:
+            log_path = _write_log(exc)
+        contents = log_path.read_text()
+        assert "argv:" in contents
+        assert str(sys.argv) in contents
+
+    def test_qualified_error_type_in_log(self):
+        try:
+            raise SearchTimeoutError("timeout")
+        except SearchTimeoutError as exc:
+            log_path = _write_log(exc)
+        contents = log_path.read_text()
+        assert "fli.search.exceptions.SearchTimeoutError" in contents
+
+    def test_timestamp_present_in_log(self):
+        try:
+            raise SearchClientError("x")
+        except SearchClientError as exc:
+            log_path = _write_log(exc)
+        assert "timestamp:" in log_path.read_text()
+
+
+class TestJsonErrorPayloadMessages:
+    def test_message_is_str_of_exception(self):
+        exc = SearchTimeoutError("timed out waiting for response")
+        message, _, _ = json_error_payload(exc)
+        assert message == str(exc) == "timed out waiting for response"
+
+    def test_unexpected_error_message_format(self):
+        exc = RuntimeError("bad input")
+        message, error_type, _ = json_error_payload(exc)
+        assert message == "RuntimeError: bad input"
+        assert error_type == "unexpected_error"
+
+    def test_log_path_is_a_real_file(self):
+        exc = SearchConnectionError("dns failure")
+        _, _, log_path = json_error_payload(exc)
+        assert log_path.exists()
+        assert log_path.is_file()
+
+
+class TestReportCliErrorOptions:
+    def test_custom_exit_code_respected(self):
+        import typer
+
+        exc = SearchTimeoutError("hung")
+        result = report_cli_error(exc, exit_code=2)
+        assert isinstance(result, typer.Exit)
+        assert result.exit_code == 2
 
 
 def test_flights_command_json_error_includes_log_path(runner, monkeypatch, tmp_path):

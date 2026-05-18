@@ -72,3 +72,72 @@ class TestParseFirstWrbPayload:
 
     def test_returns_none_when_empty(self):
         assert parse_first_wrb_payload("") is None
+
+
+class TestIterWrbChunksEdgeCases:
+    def test_bytes_input_works(self):
+        body = _single_chunk([1, "hello"])
+        chunks_str = list(iter_wrb_chunks(body))
+        chunks_bytes = list(iter_wrb_chunks(body.encode("utf-8")))
+        assert chunks_str == chunks_bytes
+
+    def test_prefix_only_body_returns_nothing(self):
+        # Body is only the JSONP prefix with no actual chunk data.
+        assert list(iter_wrb_chunks(b")]}'\n\n")) == []
+
+    def test_whitespace_only_body_returns_nothing(self):
+        assert list(iter_wrb_chunks("   \n\n  ")) == []
+
+    def test_malformed_length_header_truncates_stream(self):
+        # A non-numeric length header causes the parser to stop cleanly.
+        body = ")]}'\n\nabc\n[not parsed]"
+        assert list(iter_wrb_chunks(body)) == []
+
+    def test_outer_is_dict_not_list_is_skipped(self):
+        body = ")]}'\n\n" + json.dumps({"key": "value"})
+        assert list(iter_wrb_chunks(body)) == []
+
+    def test_wrb_row_with_none_inner_skipped(self):
+        body = ")]}'\n\n" + json.dumps([["wrb.fr", None, None]])
+        assert list(iter_wrb_chunks(body)) == []
+
+    def test_wrb_row_with_non_string_inner_skipped(self):
+        body = ")]}'\n\n" + json.dumps([["wrb.fr", None, [1, 2, 3]]])
+        assert list(iter_wrb_chunks(body)) == []
+
+    def test_wrb_row_too_short_skipped(self):
+        body = ")]}'\n\n" + json.dumps([["wrb.fr", None]])
+        assert list(iter_wrb_chunks(body)) == []
+
+    def test_non_wrb_rows_between_multi_chunks_ignored(self):
+        parts = [")]}'\n\n"]
+        for payload in [[1, "alpha"], [2, "beta"]]:
+            inner_json = json.dumps(payload, separators=(",", ":"))
+            # Mix wrb.fr row with a di row in each chunk's outer list.
+            outer = [["di", 44], ["wrb.fr", None, inner_json]]
+            outer_json = json.dumps(outer, separators=(",", ":"))
+            byte_len = len(outer_json.encode("utf-8")) + 2
+            parts.append(f"{byte_len}\n{outer_json}\n")
+        body = "".join(parts)
+        chunks = list(iter_wrb_chunks(body))
+        assert chunks == [[1, "alpha"], [2, "beta"]]
+
+    def test_multiple_wrb_chunks_all_yielded_with_mixed_rows(self):
+        # Two separate multi-chunks, each with only wrb.fr rows.
+        body = _multi_chunk([10], [20], [30])
+        chunks = list(iter_wrb_chunks(body))
+        assert chunks == [[10], [20], [30]]
+
+
+class TestParseFirstWrbPayloadEdgeCases:
+    def test_returns_none_for_only_non_wrb_rows(self):
+        body = ")]}'\n\n" + json.dumps([["di", 44], ["af.httprm", 43, "x"]])
+        assert parse_first_wrb_payload(body) is None
+
+    def test_skips_invalid_inner_to_find_second_valid_chunk(self):
+        # First wrb.fr row has an invalid inner JSON; second is valid.
+        bad_inner = "{not valid"
+        good_inner = json.dumps([42])
+        outer = [["wrb.fr", None, bad_inner], ["wrb.fr", None, good_inner]]
+        body = ")]}'\n\n" + json.dumps(outer)
+        assert parse_first_wrb_payload(body) == [42]
