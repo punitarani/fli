@@ -117,6 +117,73 @@ class TestGetBookingOptionsTokenGuard:
             SearchFlights().get_booking_options(flight, filters)
 
 
+class TestGetBookingOptionsPriceless:
+    """Issue #165: ``get_booking_options`` works when ``last.price`` is None.
+
+    Premium-cabin round-trip rows often come back from the shopping
+    endpoint without a per-row price. The booking helper must not crash
+    on ``int(None * 100)`` — instead it should fall through to the
+    per-row ``booking_token`` captured at parse time.
+    """
+
+    def test_falls_back_to_per_row_token_when_price_is_none(self):
+        """Cached session is present, but last.price=None → use row token."""
+        from unittest.mock import patch
+
+        sf = SearchFlights()
+        sf._last_session_id = "FAKE_SESSION_ID_PRICELESS"
+        filters = _round_trip_filters()
+        # Drop both prices to simulate the premium-RT priceless case.
+        # Assign the row-level token onto the return leg's
+        # selected_flight — this is what ``parse_flight_row`` would have
+        # populated from ``row[8]`` on the live response.
+        out = filters.flight_segments[0].selected_flight
+        ret = filters.flight_segments[1].selected_flight
+        out.price = None
+        ret.price = None
+        ret.booking_token = "PER_ROW_TOKEN_FROM_ROW_8"
+
+        captured: dict[str, str] = {}
+
+        def _fake_post(url, data, **kwargs):  # noqa: ANN001
+            captured["data"] = data
+            return type(
+                "R",
+                (),
+                {
+                    "content": b")]}'\n\n4\n[[]]\n",
+                    "text": ")]}'\n\n4\n[[]]\n",
+                    "raise_for_status": lambda self: None,
+                },
+            )()
+
+        with patch.object(sf.client, "post", side_effect=_fake_post):
+            sf.get_booking_options((out, ret), filters, currency="USD")
+
+        body = captured["data"]
+        assert body.startswith("f.req=")
+        decoded_body = urllib.parse.unquote(body[len("f.req=") :])
+        outer = json.loads(decoded_body)
+        payload = json.loads(outer[1])
+        # outer[0] = [None, token]; the token should be the per-row
+        # token, NOT a build_booking_token-generated session blob.
+        assert payload[0] == [None, "PER_ROW_TOKEN_FROM_ROW_8"]
+
+    def test_raises_clear_error_when_priceless_and_no_per_row_token(self):
+        """No price AND no per-row token → user gets the actionable error."""
+        sf = SearchFlights()
+        sf._last_session_id = "FAKE_SESSION_ID"
+        filters = _round_trip_filters()
+        out = filters.flight_segments[0].selected_flight
+        ret = filters.flight_segments[1].selected_flight
+        out.price = None
+        ret.price = None
+        out.booking_token = None
+        ret.booking_token = None
+        with pytest.raises(ValueError, match="Missing booking token"):
+            sf.get_booking_options((out, ret), filters)
+
+
 class TestGetBookingOptionsErrorPaths:
     """Booking-flow failure modes: HTTP error, segment mismatch, malformed body."""
 

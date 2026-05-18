@@ -194,11 +194,7 @@ def test_multiple_searches(search, basic_search_params, complex_search_params):
 
 
 class TestParsePriceInfo:
-    """Tests for _parse_price_info — malformed shapes raise rather than ship $0.00.
-
-    Skipped by ``parse_flight_row``'s outer ``except`` rather than dragging a
-    fake-zero flight into results.
-    """
+    """Distinguish "price unknown" (empty head → ``None``) from "malformed" (raises)."""
 
     def test_parse_price_info_valid_data(self):
         """Valid price data: returns the numeric price."""
@@ -207,11 +203,12 @@ class TestParsePriceInfo:
         assert price == 299.99
         assert currency is None
 
-    def test_parse_price_info_empty_inner_list_raises(self):
-        """An empty inner price list is shape-wrong; raise rather than ship $0.00."""
+    def test_parse_price_info_empty_inner_list_returns_none(self):
+        """Empty head (``[[], ...]``) → ``price=None`` (issue #165: premium-RT)."""
         data = [None, [[]]]
-        with pytest.raises(ValueError):
-            SearchFlights._parse_price_info(data)
+        price, currency = SearchFlights._parse_price_info(data)
+        assert price is None
+        assert currency is None
 
     def test_parse_price_info_empty_outer_list_raises(self):
         """An empty outer price list has no head element; raise."""

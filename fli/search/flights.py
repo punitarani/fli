@@ -188,19 +188,25 @@ class SearchFlights:
             ) from e
 
         flights: list[FlightResult] = []
-        failed = 0
+        failures: list[str] = []
         for row in flights_raw:
             try:
                 flights.append(parse_flight_row(row))
             except (AttributeError, KeyError, ValueError, TypeError) as e:
-                failed += 1
-                logger.debug("Skipping flight with unparseable data: %s", e)
+                reason = f"{type(e).__name__}: {e}"
+                failures.append(reason)
+                logger.debug("Skipping flight with unparseable data: %s", reason)
 
-        if flights_raw and failed and not flights:
+        if flights_raw and failures and not flights:
             # Every row failed to parse — likely a wire-format change.
             # Don't pretend "no flights"; surface so operators see it.
+            # Surface the failure reasons so the error isn't blindly
+            # blamed on "shape change" when the cause is something else
+            # (e.g. all rows were filtered for a known structural reason).
+            sample = "; ".join(dict.fromkeys(failures[:3]))
             raise SearchParseError(
-                f"Parsed 0/{len(flights_raw)} flight rows — Google response shape may have changed"
+                f"Parsed 0/{len(flights_raw)} flight rows — "
+                f"Google response shape may have changed (sample reasons: {sample})"
             )
 
         return flights or None
@@ -259,7 +265,11 @@ class SearchFlights:
         effective_session = session_id or self._last_session_id
 
         token = booking_token
-        if token is None and effective_session:
+        if token is None and effective_session and results[-1].price is not None:
+            # Build a session-anchored token from price + flight info.
+            # Skipped when the last result has no shopping-list price
+            # (premium-cabin round-trips often hit this) — the per-row
+            # token from ``row[8]`` is the correct fallback there.
             from fli.search._proto import build_booking_token
 
             last = results[-1]
@@ -274,10 +284,13 @@ class SearchFlights:
             )
 
         if token is None:
-            # The decoder always populates ``booking_token`` (or ``None``) on
-            # FlightResult — accessing the attribute directly fails loudly
-            # if the caller passes a non-FlightResult, which is what we want.
-            token = results[0].booking_token
+            # Fall back to the per-row token captured at parse time.
+            # Prefer the last leg's token (return for round-trip / final
+            # leg for multi-city) since it identifies the full itinerary
+            # in Google's booking endpoint. Accessing the attribute
+            # directly fails loudly if the caller passes a
+            # non-FlightResult, which is what we want.
+            token = results[-1].booking_token or results[0].booking_token
         if not token:
             raise ValueError(
                 "Missing booking token. Call SearchFlights.search(...) before "

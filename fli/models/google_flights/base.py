@@ -295,10 +295,20 @@ class BookingOption(BaseModel):
 
 
 class FlightResult(BaseModel):
-    """Complete flight search result with pricing and timing."""
+    """Complete flight search result with pricing and timing.
+
+    ``price`` is ``None`` when Google did not surface a per-row aggregate
+    price in the shopping response. This happens predictably for
+    premium-cabin (BUSINESS / FIRST) round-trip itineraries with
+    multi-passenger configs — Google expects the caller to pick a
+    specific outbound+return pair and fetch real fares via
+    :meth:`SearchFlights.get_booking_options`. The per-row
+    ``booking_token`` is still populated in that case, so the booking
+    follow-up has everything it needs.
+    """
 
     legs: list[FlightLeg]
-    price: NonNegativeFloat  # in specified currency
+    price: NonNegativeFloat | None = None  # in specified currency; None when not surfaced
     currency: str | None = None
     duration: PositiveInt  # total duration in minutes
     stops: NonNegativeInt

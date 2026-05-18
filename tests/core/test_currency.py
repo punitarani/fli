@@ -26,6 +26,16 @@ def test_format_price_without_currency():
     assert format_price(118, None) == "118.00"
 
 
+def test_format_price_with_none_amount_and_currency():
+    """A None price renders as ``"<CCY> —"`` (issue #165 premium-RT case)."""
+    assert format_price(None, "USD") == "USD —"
+
+
+def test_format_price_with_none_amount_no_currency():
+    """A None price with no currency code falls back to a bare em dash."""
+    assert format_price(None, None) == "—"
+
+
 def test_format_price_axis_label_uses_single_currency_code():
     """Charts should show the single returned currency code when consistent."""
     assert format_price_axis_label(["EUR", "EUR"]) == "Price (EUR)"

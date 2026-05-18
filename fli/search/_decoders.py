@@ -208,16 +208,26 @@ def _derive_layovers(
     return layovers
 
 
-def _parse_price_info(row: list) -> tuple[float, str | None]:
+def _parse_price_info(row: list) -> tuple[float | None, str | None]:
     """Extract numeric price + ISO currency code from the price block.
 
-    Raises ``ValueError`` when the price block is present but malformed
+    Returns ``(None, currency)`` when the price head is an empty list
+    (``[[], "<token>"]``) — Google's signal that it has not pre-computed
+    a shopping-list price for this row. This happens routinely for
+    premium-cabin round-trip itineraries, especially with multi-passenger
+    configs (e.g. ``adults=2, children=1, seat_type=BUSINESS,
+    trip_type=ROUND_TRIP``): Google declines to surface an aggregate
+    "from $X" price and expects the user to drill into a specific
+    outbound+return pair, then call ``GetBookingResults`` for real fares.
+    The per-row booking token at ``row[8]`` is still populated, so
+    callers can resolve real prices via
+    :meth:`SearchFlights.get_booking_options`.
+
+    Raises ``ValueError`` when the price block is genuinely malformed
     (non-numeric, wrong shape). Callers in :func:`parse_flight_row` will
     catch this and skip the row rather than ship a misleading ``$0.00``
     flight. Truly missing price blocks (sponsor placements with no
-    ``row[1]``) yield ``0.0`` and an empty currency — these rows are
-    filtered out at the model layer by ``FlightResult``'s
-    ``NonNegativeFloat`` constraint plus the existing skip path.
+    ``row[1]``) trigger this too.
     """
     price_block = _get_price_block(row)
     if price_block is None:
@@ -225,12 +235,18 @@ def _parse_price_info(row: list) -> tuple[float, str | None]:
 
     try:
         head = price_block[0]
-        if not (isinstance(head, list) and head):
-            raise ValueError("price head is not a non-empty list")
-        raw_price = head[-1]
-        if isinstance(raw_price, bool) or not isinstance(raw_price, int | float):
-            raise ValueError(f"price field is not numeric: {raw_price!r}")
-        price = float(raw_price)
+        if not isinstance(head, list):
+            raise ValueError("price head is not a list")
+        if not head:
+            # Empty head ([]) is Google's "no shopping-list price"
+            # marker, not a malformed row. Surface the itinerary with
+            # price=None so the caller can drill into GetBookingResults.
+            price: float | None = None
+        else:
+            raw_price = head[-1]
+            if isinstance(raw_price, bool) or not isinstance(raw_price, int | float):
+                raise ValueError(f"price field is not numeric: {raw_price!r}")
+            price = float(raw_price)
     except (IndexError, TypeError) as e:
         raise ValueError(f"malformed price block: {e}") from e
 
