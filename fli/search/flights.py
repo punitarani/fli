@@ -22,6 +22,7 @@ from fli.models.google_flights.base import TripType
 from fli.search._concurrency import parallel_map
 from fli.search._decoders import (
     _try_parse_booking_row,  # noqa: F401 — back-compat re-export for tests
+    _try_parse_flight_pair,
     parse_booking_chunk,
     parse_flight_row,
 )
@@ -121,19 +122,28 @@ class SearchFlights:
             Exception: HTTP failure or unparseable response.
 
         """
-        flights = self._fetch_flights(
+        raw = self._fetch_flights(
             filters,
             currency=currency,
             language=language,
             country=country,
             capture_session=True,
         )
-        if flights is None:
+        if raw is None:
             return None
         if filters.trip_type == TripType.ONE_WAY:
-            return flights
+            return raw  # type: ignore[return-value]
+
+        # Premium-cabin ROUND_TRIP: Google returns pre-paired [outbound, return]
+        # rows in the initial response.  When _fetch_flights detects those, it
+        # emits (FlightResult, FlightResult) tuples.  Return them directly —
+        # there is no second "expansion" request to make since both legs are
+        # already present.
+        if raw and isinstance(raw[0], tuple):
+            return raw  # type: ignore[return-value]
+
         return self._expand_multi_leg(
-            flights,
+            raw,  # type: ignore[arg-type]
             filters,
             top_n=top_n,
             currency=currency,
@@ -149,7 +159,7 @@ class SearchFlights:
         language: str | None,
         country: str | None,
         capture_session: bool,
-    ) -> list[FlightResult] | None:
+    ) -> list[FlightResult | tuple[FlightResult, FlightResult]] | None:
         """Issue one ``GetShoppingResults`` call and decode the flight rows.
 
         ``capture_session`` controls whether the response's session id is
@@ -159,6 +169,15 @@ class SearchFlights:
         not write to that field — both because the writes would race and
         because the user-visible session id should describe the original
         shopping query, not whichever expansion completed last.
+
+        Return value
+        ------------
+        A flat list of :class:`FlightResult` for one-way / economy round-trip
+        responses. For premium-cabin (BUSINESS / FIRST) round-trip initial
+        responses Google packs results as ``[outbound_row, return_row]`` pairs
+        rather than individual outbound rows; those are returned as
+        ``(FlightResult, FlightResult)`` tuples so the caller can surface both
+        legs without issuing redundant expansion requests.
         """
         encoded = filters.encode()
         url = with_locale_params(self.BASE_URL, currency, language, country)
@@ -187,14 +206,25 @@ class SearchFlights:
                 f"Shopping response shape changed — no flights array at inner[2]/[3]: {e}"
             ) from e
 
-        flights: list[FlightResult] = []
+        flights: list[FlightResult | tuple[FlightResult, FlightResult]] = []
         failed = 0
         for row in flights_raw:
             try:
                 flights.append(parse_flight_row(row))
             except (AttributeError, KeyError, ValueError, TypeError) as e:
-                failed += 1
-                logger.debug("Skipping flight with unparseable data: %s", e)
+                # Fallback: try the [outbound_row, return_row] paired format that
+                # Google uses for ROUND_TRIP + premium-cabin (BUSINESS / FIRST)
+                # initial responses.  In that shape item[1] (the return row) is
+                # mistaken for the price block and _parse_price_info raises a
+                # non-numeric ValueError; _try_parse_flight_pair detects the
+                # nested structure and parses both sub-rows correctly.
+                pair = _try_parse_flight_pair(row)
+                if pair is not None:
+                    flights.append(pair)
+                    logger.debug("Parsed paired outbound+return row (premium-cabin RT)")
+                else:
+                    failed += 1
+                    logger.debug("Skipping flight with unparseable data: %s", e)
 
         if flights_raw and failed and not flights:
             # Every row failed to parse — likely a wire-format change.
@@ -349,7 +379,7 @@ class SearchFlights:
 
     def _expand_multi_leg(
         self,
-        flights: list[FlightResult],
+        flights: list[FlightResult | tuple[FlightResult, FlightResult]],
         filters: FlightSearchFilters,
         *,
         top_n: int,

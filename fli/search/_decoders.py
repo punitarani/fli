@@ -78,6 +78,38 @@ def parse_flight_row(row: list) -> FlightResult:
     )
 
 
+def _try_parse_flight_pair(
+    item: Any,
+) -> tuple[FlightResult, FlightResult] | None:
+    """Try to parse a ``[outbound_row, return_row]`` paired item.
+
+    Google Flights returns the *initial* ROUND_TRIP results for premium-cabin
+    searches (BUSINESS / FIRST) as combined pairs rather than individual
+    outbound rows.  Each element of the pair is a standard 11-slot flight row
+    — the same shape ``parse_flight_row`` handles — but because the pair is
+    packed into a 2-element list, the generic parser mistakes ``item[1]``
+    (the return row) for the price block and fails with a non-numeric price.
+
+    Detection:  ``item[0][0]`` is a list (the detail block of the outbound
+    sub-row) rather than a string (the airline-code that sits at
+    ``detail[0]`` in a regular row).
+
+    Returns ``None`` when the item does not match the paired shape or when
+    either sub-row fails to parse.
+    """
+    if not (isinstance(item, list) and len(item) >= 2):
+        return None
+    first = item[0]
+    if not (isinstance(first, list) and first and isinstance(first[0], list)):
+        return None
+    try:
+        outbound = parse_flight_row(item[0])
+        inbound = parse_flight_row(item[1])
+        return outbound, inbound
+    except (AttributeError, KeyError, ValueError, TypeError):
+        return None
+
+
 def _parse_leg(fl: list) -> FlightLeg:
     airline_info = fl[22] or []
     airline = _safe_airline(safe_get(airline_info, 0))
