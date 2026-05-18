@@ -285,6 +285,8 @@ class TestPremiumRoundTripPriceless:
             "Expected every premium-RT row to surface with price=None; "
             "got prices: " + str([f.price for f in lax_lhr_rt_biz_2a1c])
         )
+        # The convenience property mirrors the None check exactly.
+        assert all(f.price_unknown for f in lax_lhr_rt_biz_2a1c)
 
     def test_currency_decode_does_not_raise(self, lax_lhr_rt_biz_2a1c):
         """Empty-head price blocks may omit the currency hint without raising."""

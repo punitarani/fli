@@ -263,3 +263,91 @@ class TestParsePriceInfo:
             ],
         ]
         assert SearchFlights._parse_price_info(data) == (118.0, "USD")
+
+
+class TestSearchParseErrorMessage:
+    """SearchParseError surfaces sample reasons when every row fails."""
+
+    def _client_with_canned_response(self, body: str) -> SearchFlights:
+        from unittest.mock import patch
+
+        sf = SearchFlights()
+
+        def _fake_post(url, data, **kwargs):  # noqa: ANN001
+            return type(
+                "R",
+                (),
+                {
+                    "content": body.encode("utf-8"),
+                    "text": body,
+                    "raise_for_status": lambda self: None,
+                },
+            )()
+
+        patcher = patch.object(sf.client, "post", side_effect=_fake_post)
+        patcher.start()
+        return sf
+
+    def _build_response(self, rows: list) -> str:
+        """Wrap ``rows`` in a minimal but parser-valid wrb.fr response."""
+        import json
+
+        # ``_capture_session_id`` reads ``inner[0][4]`` — give it a
+        # plausible 5-element list. ``_fetch_flights`` reads
+        # ``inner[2]`` and ``inner[3]`` — index 3 must exist (any list
+        # value is fine; we put the rows on index 2).
+        inner = [
+            [None, None, None, None, "FAKE_SESSION"],
+            None,
+            [[*rows]],
+            None,
+        ]
+        outer = [["wrb.fr", None, json.dumps(inner, separators=(",", ":"))]]
+        return ")]}'\n\n" + json.dumps(outer)
+
+    def test_error_includes_sample_failure_reasons(self):
+        """When all rows fail, the error message names what went wrong."""
+        from fli.search.flights import SearchParseError
+
+        # Build a response with three flight rows that all trigger the
+        # "price field is not numeric" branch in _parse_price_info.
+        bad_row = [None, [[None, "not-a-number"]]]
+        body = self._build_response([bad_row, bad_row, bad_row])
+
+        sf = self._client_with_canned_response(body)
+        filters = FlightSearchFilters(
+            passenger_info=PassengerInfo(adults=1),
+            flight_segments=[
+                FlightSegment(
+                    departure_airport=[[Airport.JFK, 0]],
+                    arrival_airport=[[Airport.LAX, 0]],
+                    travel_date=(datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
+                )
+            ],
+        )
+        with pytest.raises(SearchParseError, match="sample reasons:.*not numeric"):
+            sf.search(filters)
+
+    def test_error_dedups_repeated_reasons(self):
+        """Identical failure messages collapse to a single sample."""
+        from fli.search.flights import SearchParseError
+
+        bad_row = [None, [[None, "not-a-number"]]]
+        body = self._build_response([bad_row] * 10)
+        sf = self._client_with_canned_response(body)
+        filters = FlightSearchFilters(
+            passenger_info=PassengerInfo(adults=1),
+            flight_segments=[
+                FlightSegment(
+                    departure_airport=[[Airport.JFK, 0]],
+                    arrival_airport=[[Airport.LAX, 0]],
+                    travel_date=(datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
+                )
+            ],
+        )
+        with pytest.raises(SearchParseError) as excinfo:
+            sf.search(filters)
+        # Only one unique reason — appears once in the message.
+        msg = str(excinfo.value)
+        assert msg.count("not numeric") == 1
+        assert "0/10" in msg

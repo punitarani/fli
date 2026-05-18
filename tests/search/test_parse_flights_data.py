@@ -382,3 +382,14 @@ class TestParseFlightsDataEmptyPriceHead:
         row[1] = ["not-a-list", None]
         with pytest.raises(ValueError, match="not a list"):
             SearchFlights._parse_flights_data(row)
+
+    def test_price_unknown_property_true_when_none(self):
+        """Convenience property returns True when price is None."""
+        flight = SearchFlights._parse_flights_data(self._empty_head_row())
+        assert flight.price_unknown is True
+
+    def test_price_unknown_property_false_when_priced(self):
+        """Convenience property returns False for normally-priced rows."""
+        row = _row(legs=[_leg(dep_iata="JFK", arr_iata="LAX")])
+        flight = SearchFlights._parse_flights_data(row)
+        assert flight.price_unknown is False

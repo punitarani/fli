@@ -36,6 +36,11 @@ def test_format_price_with_none_amount_no_currency():
     assert format_price(None, None) == "—"
 
 
+def test_format_price_with_none_amount_empty_currency():
+    """Empty-string currency is treated as missing (falsy), not uppercased."""
+    assert format_price(None, "") == "—"
+
+
 def test_format_price_axis_label_uses_single_currency_code():
     """Charts should show the single returned currency code when consistent."""
     assert format_price_axis_label(["EUR", "EUR"]) == "Price (EUR)"
