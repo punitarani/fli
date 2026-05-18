@@ -323,3 +323,73 @@ class TestParseFlightsDataDefensive:
         row = _row(legs=[_leg(dep_iata="JFK", arr_iata="LAX")])
         flight = SearchFlights._parse_flights_data(row)
         assert flight.legs[0].operating_airline is None
+
+
+class TestParseFlightsDataEmptyPriceHead:
+    """Issue #165 regression: empty price head ``[[], "<token>"]``.
+
+    Google emits this for some round-trip premium-cabin rows (notably
+    multi-pax BUSINESS / FIRST searches) — the row is fully valid; the
+    aggregate price is simply not pre-computed. The parser should
+    surface the row with ``price=None`` and keep the rest of the fields
+    intact, rather than dropping it as malformed.
+    """
+
+    SHOPPING_TOKEN = (
+        # Real captured token; encodes USD as the currency.
+        "CjRIQktCNmV1UjNqNjhBR043X0FCRy0tLS0tLS0tLS12dGpkN0FBQUFBR25JcWZNS2pGTTBBEgZV"
+        "QTIyMDkaCgjcWxACGgNVU0Q4HHDcWw=="
+    )
+
+    def _empty_head_row(self):
+        row = _row(legs=[_leg(dep_iata="JFK", arr_iata="LAX")])
+        # Replace the default ``[[None, price], token]`` block with the
+        # premium-RT shape Google emits: empty head, token present.
+        row[1] = [[], self.SHOPPING_TOKEN]
+        return row
+
+    def test_parses_with_none_price(self):
+        """Row parses successfully and price is None (not 0.0, not raised)."""
+        flight = SearchFlights._parse_flights_data(self._empty_head_row())
+        assert flight.price is None
+
+    def test_currency_still_decoded(self):
+        """Currency is independent of price head — token decode still runs."""
+        flight = SearchFlights._parse_flights_data(self._empty_head_row())
+        assert flight.currency == "USD"
+
+    def test_other_fields_intact(self):
+        """Routing / duration / booking-token fields unaffected by empty price."""
+        flight = SearchFlights._parse_flights_data(self._empty_head_row())
+        assert len(flight.legs) == 1
+        assert flight.duration > 0
+        assert flight.booking_token == "CAISA1VTRBoDCNR/sample"
+
+    def test_malformed_non_empty_head_still_raises(self):
+        """Empty head is OK; a non-empty head with garbage still fails."""
+        import pytest
+
+        row = _row(legs=[_leg(dep_iata="JFK", arr_iata="LAX")])
+        row[1] = [[None, "not-a-number"], None]
+        with pytest.raises(ValueError, match="not numeric"):
+            SearchFlights._parse_flights_data(row)
+
+    def test_non_list_head_still_raises(self):
+        """Head must be a list — non-list shapes are still malformed."""
+        import pytest
+
+        row = _row(legs=[_leg(dep_iata="JFK", arr_iata="LAX")])
+        row[1] = ["not-a-list", None]
+        with pytest.raises(ValueError, match="not a list"):
+            SearchFlights._parse_flights_data(row)
+
+    def test_price_unknown_property_true_when_none(self):
+        """Convenience property returns True when price is None."""
+        flight = SearchFlights._parse_flights_data(self._empty_head_row())
+        assert flight.price_unknown is True
+
+    def test_price_unknown_property_false_when_priced(self):
+        """Convenience property returns False for normally-priced rows."""
+        row = _row(legs=[_leg(dep_iata="JFK", arr_iata="LAX")])
+        flight = SearchFlights._parse_flights_data(row)
+        assert flight.price_unknown is False

@@ -295,10 +295,25 @@ class BookingOption(BaseModel):
 
 
 class FlightResult(BaseModel):
-    """Complete flight search result with pricing and timing."""
+    """Complete flight search result with pricing and timing.
+
+    ``price`` is ``None`` when Google did not surface a per-row aggregate
+    price in the shopping response. This happens predictably for
+    premium-cabin (BUSINESS / FIRST) round-trip itineraries with
+    multi-passenger configs — Google expects the caller to pick a
+    specific outbound+return pair and fetch real fares via
+    :meth:`SearchFlights.get_booking_options`. The per-row
+    ``booking_token`` is still populated in that case, so the booking
+    follow-up has everything it needs.
+
+    Downstream code that filters or sorts by price should guard against
+    ``None`` — the convenience property :attr:`price_unknown` exists for
+    that purpose (``if flight.price_unknown: ...`` reads more cleanly
+    than ``if flight.price is None: ...``).
+    """
 
     legs: list[FlightLeg]
-    price: NonNegativeFloat  # in specified currency
+    price: NonNegativeFloat | None = None  # in specified currency; None when not surfaced
     currency: str | None = None
     duration: PositiveInt  # total duration in minutes
     stops: NonNegativeInt
@@ -314,6 +329,24 @@ class FlightResult(BaseModel):
     primary_airline: Airline | None = None
     primary_airline_name: str | None = None
     booking_token: str | None = None
+
+    @property
+    def price_unknown(self) -> bool:
+        """``True`` when Google did not surface a price for this row.
+
+        Equivalent to ``self.price is None`` — provided for readability
+        in filtering / sorting code. Use this to skip priceless rows
+        when computing aggregate statistics::
+
+            cheapest = min(
+                (f for f in flights if not f.price_unknown),
+                key=lambda f: f.price,
+                default=None,
+            )
+
+        See :issue:`165` for the wire-format quirk that motivates this.
+        """
+        return self.price is None
 
 
 class FlightSegment(BaseModel):

@@ -35,6 +35,11 @@ Route-specific notes:
   derivation + min-duration enforcement.
 - ``flight_search_jfk_lax_exclude_dl`` — airline exclude enforcement.
 - ``flight_search_jfk_lax_eur`` — currency URL param effective.
+- ``flight_search_lax_lhr_rt_biz_2a1c`` — premium-cabin round-trip with
+  family pax (2 adults + 1 child). Pinned regression for issue #165:
+  Google emits these rows with an empty price head, and the parser must
+  surface them with ``price=None`` rather than dropping the entire
+  result set as malformed.
 """
 
 from __future__ import annotations
@@ -102,6 +107,12 @@ def jfk_lax_eur():
     return _replay("flight_search_jfk_lax_eur.bin")
 
 
+@pytest.fixture(scope="module")
+def lax_lhr_rt_biz_2a1c():
+    """Premium-cabin round-trip with family pax — issue #165 regression."""
+    return _replay("flight_search_lax_lhr_rt_biz_2a1c.bin")
+
+
 # ---------------------------------------------------------------------------
 # Generic parser-health assertions
 # ---------------------------------------------------------------------------
@@ -125,13 +136,27 @@ class TestSnapshotParsing:
     def test_jfk_lax_eur_has_results(self, jfk_lax_eur):
         assert len(jfk_lax_eur) > 0
 
+    def test_premium_rt_family_yields_results(self, lax_lhr_rt_biz_2a1c):
+        """Premium-cabin RT rows must parse even when Google omits prices.
+
+        Issue #165: prior to the fix, every row in this fixture had an
+        empty price head (``[[], "<token>"]``) and the parser raised
+        ``SearchParseError`` for the whole batch. After the fix, rows
+        surface with ``price=None`` and the search returns the routing
+        options. Real fares come from a follow-up ``get_booking_options``
+        call using the per-row ``booking_token``.
+        """
+        assert len(lax_lhr_rt_biz_2a1c) > 0
+
 
 class TestSnapshotFlightShape:
     """Sanity-check that parsed flights have the expected fields populated."""
 
     def test_basic_fields_present(self, jfk_lax_oneway):
         f = jfk_lax_oneway[0]
-        assert f.price > 0
+        # One-way responses always carry a per-row price — None here
+        # would indicate a regression in the price-head parsing.
+        assert f.price is not None and f.price > 0
         assert f.duration > 0
         assert f.stops >= 0
         assert len(f.legs) >= 1
@@ -240,3 +265,46 @@ class TestSnapshotLayoversAndOvernight:
             if any(lo.city for lo in f.layovers):
                 return
         pytest.fail("Expected at least one layover with a city name from detail[13]")
+
+
+class TestPremiumRoundTripPriceless:
+    """Regression coverage for issue #165.
+
+    The fixture captures a Google response where every outbound row has
+    an empty price head — that is, ``row[1] == [[], "<token>"]``. The
+    parser must treat this as "Google declined to surface a price for
+    this row" rather than "malformed row", because the per-row booking
+    token at ``row[8]`` is still valid and resolves to real fares via
+    ``GetBookingResults``.
+    """
+
+    def test_all_rows_have_none_price(self, lax_lhr_rt_biz_2a1c):
+        """Uniformly empty price heads land as ``price=None`` on every row."""
+        assert lax_lhr_rt_biz_2a1c
+        assert all(f.price is None for f in lax_lhr_rt_biz_2a1c), (
+            "Expected every premium-RT row to surface with price=None; "
+            "got prices: " + str([f.price for f in lax_lhr_rt_biz_2a1c])
+        )
+        # The convenience property mirrors the None check exactly.
+        assert all(f.price_unknown for f in lax_lhr_rt_biz_2a1c)
+
+    def test_currency_decode_does_not_raise(self, lax_lhr_rt_biz_2a1c):
+        """Empty-head price blocks may omit the currency hint without raising."""
+        for f in lax_lhr_rt_biz_2a1c:
+            # ``str | None`` — accept either; just confirm no exception.
+            assert f.currency is None or isinstance(f.currency, str)
+
+    def test_booking_tokens_populated(self, lax_lhr_rt_biz_2a1c):
+        """Per-row booking_token (row[8]) is still set on priceless rows."""
+        with_token = [f for f in lax_lhr_rt_biz_2a1c if f.booking_token]
+        assert with_token == lax_lhr_rt_biz_2a1c, (
+            "Every priceless premium-RT row must carry a booking_token"
+        )
+
+    def test_routing_info_populated(self, lax_lhr_rt_biz_2a1c):
+        """Routing fields (legs, airports) populate even when price is unknown."""
+        for f in lax_lhr_rt_biz_2a1c:
+            assert len(f.legs) >= 1
+            assert f.duration > 0
+            assert f.legs[0].departure_airport.name == "LAX"
+            assert f.legs[-1].arrival_airport.name == "LHR"

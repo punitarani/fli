@@ -111,8 +111,17 @@ def _decode_token(token: str) -> str | None:
         return None
 
 
-def format_price(amount: float, currency_code: str | None) -> str:
-    """Format a price using its ISO currency code."""
+def format_price(amount: float | None, currency_code: str | None) -> str:
+    """Format a price using its ISO currency code.
+
+    ``amount`` may be ``None`` when Google did not surface a per-row price
+    (premium-cabin round-trips often hit this — see
+    :class:`fli.models.FlightResult`). The placeholder ``"—"`` (em dash)
+    is returned in that case, matching the convention used elsewhere in
+    the CLI display for unknown structured fields.
+    """
+    if amount is None:
+        return f"{currency_code.upper()} —" if currency_code else "—"
     if not currency_code:
         return f"{amount:,.2f}"
 
