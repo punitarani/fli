@@ -65,8 +65,16 @@ class TestSerializeFlightLeg:
     def test_required_fields_always_present(self):
         leg = self._make_leg()
         result = _serialize_flight_leg(leg)
-        for key in ("departure_airport", "arrival_airport", "departure_time",
-                    "arrival_time", "duration", "airline", "airline_code", "flight_number"):
+        for key in (
+            "departure_airport",
+            "arrival_airport",
+            "departure_time",
+            "arrival_time",
+            "duration",
+            "airline",
+            "airline_code",
+            "flight_number",
+        ):
             assert key in result
 
     def test_none_optional_fields_excluded(self):

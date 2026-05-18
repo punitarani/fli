@@ -242,7 +242,6 @@ class TestExtractBookingTokenFromTfuEdgeCases:
         return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
     def test_wire_type_5_fixed32_in_non_field1_skipped(self):
-
         # field 2, wire 5 (fixed32) = tag 0x15, followed by 4 bytes
         field2 = bytes([0x15]) + bytes([0x00, 0x00, 0x00, 0x01])
         # field 1, wire 2 (length-delim) with ASCII payload
@@ -253,7 +252,6 @@ class TestExtractBookingTokenFromTfuEdgeCases:
         assert result == "testtoken"
 
     def test_wire_type_1_fixed64_in_non_field1_skipped(self):
-
         # field 3, wire 1 (fixed64) = (3 << 3) | 1 = 25 = 0x19, followed by 8 bytes
         field3 = bytes([0x19]) + bytes(8)
         token_bytes = b"mytoken"
