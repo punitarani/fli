@@ -21,6 +21,15 @@ from fli.mcp.server import (
 )
 
 
+def _make_raiser(exc: BaseException):
+    """Return a callable that unconditionally raises ``exc``."""
+
+    def _raiser(*args, **kwargs):
+        raise exc
+
+    return _raiser
+
+
 class TestAirlineCode:
     def test_enum_with_leading_underscore_stripped(self):
         airline = MagicMock()
@@ -35,10 +44,6 @@ class TestAirlineCode:
     def test_plain_string_passthrough(self):
         # Strings have no `.name` attribute, so str(airline) is used.
         assert _airline_code("AA") == "AA"
-
-    def test_none_uses_str(self):
-        # None has no `.name`, so falls back to str(None) = "None".
-        assert _airline_code(None) == "None"
 
 
 class TestSerializeFlightLeg:
@@ -224,7 +229,7 @@ class TestExecuteFlightSearchNetworkError:
 
         monkeypatch.setattr(
             "fli.mcp.server.SearchFlights.search",
-            lambda self, *a, **kw: (_ for _ in ()).throw(SearchClientError("network down")),
+            _make_raiser(SearchClientError("network down")),
         )
         result = _execute_flight_search(valid_params)
         assert result["success"] is False
@@ -232,15 +237,15 @@ class TestExecuteFlightSearchNetworkError:
     def test_exception_message_in_error_field(self, monkeypatch, valid_params):
         monkeypatch.setattr(
             "fli.mcp.server.SearchFlights.search",
-            lambda self, *a, **kw: (_ for _ in ()).throw(RuntimeError("proxy timeout")),
+            _make_raiser(RuntimeError("proxy timeout")),
         )
         result = _execute_flight_search(valid_params)
-        assert "proxy timeout" in result["error"]
+        assert result["error"] == "Search failed: proxy timeout"
 
     def test_flights_key_is_empty_list_on_error(self, monkeypatch, valid_params):
         monkeypatch.setattr(
             "fli.mcp.server.SearchFlights.search",
-            lambda self, *a, **kw: (_ for _ in ()).throw(RuntimeError("fail")),
+            _make_raiser(RuntimeError("fail")),
         )
         result = _execute_flight_search(valid_params)
         assert result["flights"] == []

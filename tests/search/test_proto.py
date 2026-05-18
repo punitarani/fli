@@ -63,17 +63,17 @@ class TestBuildBookingToken:
         assert decoded["field_7"] == 28
         assert decoded["field_14"] == 12345
 
-    def test_different_currencies(self):
-        for code in ("USD", "EUR", "GBP", "JPY", "INR"):
-            token = build_booking_token("S", "DL", "1", 1, 100, code)
-            decoded = decode_booking_token(token)
-            assert decoded["field_3"]["field_3"] == code
+    @pytest.mark.parametrize("code", ["USD", "EUR", "GBP", "JPY", "INR"])
+    def test_different_currencies(self, code):
+        token = build_booking_token("S", "DL", "1", 1, 100, code)
+        decoded = decode_booking_token(token)
+        assert decoded["field_3"]["field_3"] == code
 
-    def test_leg_index_in_field_2(self):
-        for idx in (0, 1, 2, 5, 10):
-            token = build_booking_token("S", "AA", "100", idx, 100, "USD")
-            decoded = decode_booking_token(token)
-            assert decoded["field_2"] == f"AA100#{idx}"
+    @pytest.mark.parametrize("idx", [0, 1, 2, 5, 10])
+    def test_leg_index_in_field_2(self, idx):
+        token = build_booking_token("S", "AA", "100", idx, 100, "USD")
+        decoded = decode_booking_token(token)
+        assert decoded["field_2"] == f"AA100#{idx}"
 
     def test_price_varint_encoding(self):
         # 34680 spans 3 varint bytes: 0xf8 0x8e 0x02. Confirm round-trip.
@@ -114,41 +114,33 @@ class TestVarintEncoding:
         assert decoded["field_1"] == "ABC"
 
 
-class TestBuildBookingTokenValidation:
-    """Reject empty / negative inputs upfront.
+@pytest.mark.parametrize(
+    "session_id, airline_code, flight_number, price_cents, currency, exc_match",
+    [
+        ("S", "AA", "1", -1, "USD", "price_cents must be non-negative"),
+        ("", "AA", "1", 100, "USD", "session_id must be non-empty"),
+        ("S", "", "1", 100, "USD", "airline_code must be non-empty"),
+        ("S", "AA", "", 100, "USD", "flight_number must be non-empty"),
+        ("S", "AA", "1", 100, "", "currency must be non-empty"),
+    ],
+)
+def test_build_booking_token_validation(
+    session_id, airline_code, flight_number, price_cents, currency, exc_match
+):
+    """Reject empty / negative inputs upfront."""
+    with pytest.raises(ValueError, match=exc_match):
+        build_booking_token(session_id, airline_code, flight_number, 1, price_cents, currency)
 
-    Guarantees no live POST is ever sent with a structurally broken token.
-    """
 
-    def test_negative_price_rejected(self):
-        with pytest.raises(ValueError, match="price_cents must be non-negative"):
-            build_booking_token("S", "AA", "1", 1, -1, "USD")
-
-    def test_empty_session_rejected(self):
-        with pytest.raises(ValueError, match="session_id must be non-empty"):
-            build_booking_token("", "AA", "1", 1, 100, "USD")
-
-    def test_empty_airline_rejected(self):
-        with pytest.raises(ValueError, match="airline_code must be non-empty"):
-            build_booking_token("S", "", "1", 1, 100, "USD")
-
-    def test_empty_flight_number_rejected(self):
-        with pytest.raises(ValueError, match="flight_number must be non-empty"):
-            build_booking_token("S", "AA", "", 1, 100, "USD")
-
-    def test_empty_currency_rejected(self):
-        with pytest.raises(ValueError, match="currency must be non-empty"):
-            build_booking_token("S", "AA", "1", 1, 100, "")
-
-    def test_non_ascii_session_id_encodes(self):
-        # If Google ever returns a non-ASCII session id, the builder must
-        # not crash — UTF-8 keeps round-trip equivalence for ASCII data
-        # while accepting arbitrary bytes for the future.
-        token = build_booking_token("Sé", "AA", "1", 1, 100, "USD")
-        decoded = decode_booking_token(token)
-        # decode_booking_token's ascii-decoder will replace the non-ascii
-        # byte, but the call doesn't raise.
-        assert "field_1" in decoded
+def test_non_ascii_session_id_encodes():
+    # If Google ever returns a non-ASCII session id, the builder must
+    # not crash — UTF-8 keeps round-trip equivalence for ASCII data
+    # while accepting arbitrary bytes for the future.
+    token = build_booking_token("Sé", "AA", "1", 1, 100, "USD")
+    decoded = decode_booking_token(token)
+    # decode_booking_token's ascii-decoder will replace the non-ascii
+    # byte, but the call doesn't raise.
+    assert "field_1" in decoded
 
 
 class TestDecodeBookingTokenEdgeCases:
@@ -209,30 +201,25 @@ class TestExtractBookingTokenFromTfu:
             extract_booking_token_from_tfu("!!!!not-valid-base64!!!!")
 
 
-class TestReadVarintBoundary:
-    """Exercise _read_varint at its encoding boundaries."""
+@pytest.mark.parametrize(
+    "data, expected",
+    [
+        (b"\x00", (0, 1)),
+        (b"\x7f", (127, 1)),
+        (b"\x80\x01", (128, 2)),
+    ],
+)
+def test_read_varint(data, expected):
+    from fli.search._proto import _read_varint
 
-    def test_single_byte_zero(self):
-        from fli.search._proto import _read_varint
+    assert _read_varint(data, 0) == expected
 
-        assert _read_varint(b"\x00", 0) == (0, 1)
 
-    def test_max_single_byte(self):
-        from fli.search._proto import _read_varint
+def test_read_varint_truncated_raises():
+    from fli.search._proto import _read_varint
 
-        assert _read_varint(b"\x7f", 0) == (127, 1)
-
-    def test_two_byte_varint(self):
-        from fli.search._proto import _read_varint
-
-        # 128 = 0x80 0x01 in LEB128
-        assert _read_varint(b"\x80\x01", 0) == (128, 2)
-
-    def test_truncated_varint_raises_index_error(self):
-        from fli.search._proto import _read_varint
-
-        with pytest.raises(IndexError):
-            _read_varint(b"\x80", 0)  # MSB set but no continuation byte
+    with pytest.raises(IndexError):
+        _read_varint(b"\x80", 0)  # MSB set but no continuation byte
 
 
 class TestExtractBookingTokenFromTfuEdgeCases:
@@ -241,24 +228,19 @@ class TestExtractBookingTokenFromTfuEdgeCases:
     def _encode_tfu(self, raw: bytes) -> str:
         return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
-    def test_wire_type_5_fixed32_in_non_field1_skipped(self):
-        # field 2, wire 5 (fixed32) = tag 0x15, followed by 4 bytes
-        field2 = bytes([0x15]) + bytes([0x00, 0x00, 0x00, 0x01])
-        # field 1, wire 2 (length-delim) with ASCII payload
-        token_bytes = b"testtoken"
+    @pytest.mark.parametrize(
+        "prefix_bytes, token_bytes",
+        [
+            # field 2, wire 5 (fixed32): tag 0x15, 4 bytes
+            (bytes([0x15]) + bytes([0x00, 0x00, 0x00, 0x01]), b"testtoken"),
+            # field 3, wire 1 (fixed64): (3 << 3) | 1 = 0x19, 8 bytes
+            (bytes([0x19]) + bytes(8), b"mytoken"),
+        ],
+    )
+    def test_non_field1_wire_types_skipped(self, prefix_bytes, token_bytes):
         field1 = bytes([0x0A]) + bytes([len(token_bytes)]) + token_bytes
-        tfu = self._encode_tfu(field2 + field1)
-        result = extract_booking_token_from_tfu(tfu)
-        assert result == "testtoken"
-
-    def test_wire_type_1_fixed64_in_non_field1_skipped(self):
-        # field 3, wire 1 (fixed64) = (3 << 3) | 1 = 25 = 0x19, followed by 8 bytes
-        field3 = bytes([0x19]) + bytes(8)
-        token_bytes = b"mytoken"
-        field1 = bytes([0x0A]) + bytes([len(token_bytes)]) + token_bytes
-        tfu = self._encode_tfu(field3 + field1)
-        result = extract_booking_token_from_tfu(tfu)
-        assert result == "mytoken"
+        tfu = self._encode_tfu(prefix_bytes + field1)
+        assert extract_booking_token_from_tfu(tfu) == token_bytes.decode("ascii")
 
     def test_no_field1_raises_value_error(self):
         from fli.search._proto import _varint_field

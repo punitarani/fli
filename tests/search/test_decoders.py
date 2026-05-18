@@ -93,29 +93,20 @@ class TestParseEmissions:
         assert result["tag"] is None
         assert result["this_g"] is None
 
-    def test_tag_int_1_maps_to_lower(self):
+    @pytest.mark.parametrize(
+        "tag_int, expected_tag",
+        [
+            (1, "lower"),
+            (2, "typical"),
+            (3, "higher"),
+            (4, None),
+        ],
+    )
+    def test_tag_int_mapping(self, tag_int, expected_tag):
         block = [None] * 12
-        block[11] = 1
+        block[11] = tag_int
         result = _parse_emissions(self._detail_with_emissions(block))
-        assert result["tag"] == "lower"
-
-    def test_tag_int_2_maps_to_typical(self):
-        block = [None] * 12
-        block[11] = 2
-        result = _parse_emissions(self._detail_with_emissions(block))
-        assert result["tag"] == "typical"
-
-    def test_tag_int_3_maps_to_higher(self):
-        block = [None] * 12
-        block[11] = 3
-        result = _parse_emissions(self._detail_with_emissions(block))
-        assert result["tag"] == "higher"
-
-    def test_tag_int_out_of_range_returns_none(self):
-        block = [None] * 12
-        block[11] = 4
-        result = _parse_emissions(self._detail_with_emissions(block))
-        assert result["tag"] is None
+        assert result["tag"] == expected_tag
 
     def test_g_values_extracted(self):
         block = [None] * 12
