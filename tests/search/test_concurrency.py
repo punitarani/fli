@@ -249,3 +249,56 @@ class TestParallelMap:
         # the synchronous fallback at max_workers=1 elsewhere.
         # Here we just verify completion + correct count.
         assert peak >= 1
+
+    def test_generator_input_materialised_and_mapped(self):
+        result = parallel_map(lambda x: x * 3, (x for x in range(4)))
+        assert result == [0, 3, 6, 9]
+
+    def test_tuple_input_works(self):
+        result = parallel_map(lambda x: x + 1, (10, 20, 30))
+        assert result == [11, 21, 31]
+
+    def test_exception_in_last_item_propagates(self):
+        def fn(x):
+            if x == 2:
+                raise RuntimeError("last item error")
+            return x
+
+        with pytest.raises(RuntimeError, match="last item error"):
+            parallel_map(fn, [0, 1, 2])
+
+
+class TestShutdownExecutor:
+    def teardown_method(self):
+        shutdown_executor()
+        configure_concurrency(10)
+
+    def test_shutdown_then_get_creates_new_executor(self):
+        original = get_executor()
+        shutdown_executor()
+        new = get_executor()
+        assert new is not original
+
+    def test_shutdown_idempotent(self):
+        # Calling shutdown twice must not raise.
+        shutdown_executor()
+        shutdown_executor()
+
+
+class TestTokenBucketEdgeCases:
+    def test_multi_token_acquire_leaves_correct_remainder(self):
+        limiter = TokenBucketRateLimiter(calls=5, period=1.0)
+        # Acquire 3 from a full 5-token bucket — should succeed immediately.
+        start = time.perf_counter()
+        assert limiter.acquire(tokens=3) is True
+        assert (time.perf_counter() - start) < 0.05
+
+    def test_capacity_property_equals_calls_arg(self):
+        limiter = TokenBucketRateLimiter(calls=7, period=2.0)
+        assert limiter.capacity == 7
+
+    def test_deadline_timeout_returns_false_on_empty_bucket(self):
+        limiter = TokenBucketRateLimiter(calls=1, period=10.0)
+        limiter.acquire()  # drain
+        # With a very short timeout the bucket won't refill in time.
+        assert limiter.acquire(tokens=1, timeout=0.02) is False

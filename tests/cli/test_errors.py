@@ -108,6 +108,107 @@ def test_multi_command_handles_timeout_cleanly(runner, monkeypatch, tmp_path):
     assert len(log_files) >= 1
 
 
+class TestFriendlyMessage:
+    """_friendly_message must dispatch to the correct user-facing prefix per error type."""
+
+    def test_timeout_error_prefix(self):
+        from fli.cli.errors import _friendly_message
+
+        msg = _friendly_message(SearchTimeoutError("slow"))
+        assert msg.startswith("Request timed out.")
+
+    def test_connection_error_prefix(self):
+        from fli.cli.errors import _friendly_message
+
+        msg = _friendly_message(SearchConnectionError("dns"))
+        assert msg.startswith("Network error.")
+
+    def test_http_error_prefix(self):
+        from fli.cli.errors import _friendly_message
+
+        msg = _friendly_message(SearchHTTPError("403", status_code=403))
+        assert msg.startswith("Google Flights error.")
+
+    def test_generic_search_client_error_prefix(self):
+        from fli.cli.errors import _friendly_message
+
+        msg = _friendly_message(SearchClientError("generic failure"))
+        assert msg.startswith("Search failed.")
+
+    def test_unexpected_error_uses_class_name_and_message(self):
+        from fli.cli.errors import _friendly_message
+
+        msg = _friendly_message(ValueError("bad input"))
+        assert "Unexpected error:" in msg
+        assert "ValueError" in msg
+        assert "bad input" in msg
+
+
+class TestWriteLogDetails:
+    def test_no_command_omits_command_line(self, tmp_path):
+        try:
+            raise SearchTimeoutError("slow backend")
+        except SearchTimeoutError as exc:
+            log_path = _write_log(exc, command=None)
+        contents = log_path.read_text()
+        assert "command:" not in contents
+
+    def test_argv_written_to_log(self, tmp_path):
+        import sys
+
+        try:
+            raise SearchConnectionError("no route")
+        except SearchConnectionError as exc:
+            log_path = _write_log(exc)
+        contents = log_path.read_text()
+        assert "argv:" in contents
+        assert str(sys.argv) in contents
+
+    def test_qualified_error_type_in_log(self, tmp_path):
+        try:
+            raise SearchTimeoutError("timeout")
+        except SearchTimeoutError as exc:
+            log_path = _write_log(exc)
+        contents = log_path.read_text()
+        assert "fli.search.exceptions.SearchTimeoutError" in contents
+
+    def test_timestamp_present_in_log(self, tmp_path):
+        try:
+            raise SearchClientError("x")
+        except SearchClientError as exc:
+            log_path = _write_log(exc)
+        assert "timestamp:" in log_path.read_text()
+
+
+class TestJsonErrorPayloadMessages:
+    def test_message_is_str_of_exception(self):
+        exc = SearchTimeoutError("timed out waiting for response")
+        message, _, _ = json_error_payload(exc)
+        assert message == str(exc) == "timed out waiting for response"
+
+    def test_unexpected_error_message_format(self):
+        exc = RuntimeError("bad input")
+        message, error_type, _ = json_error_payload(exc)
+        assert message == "RuntimeError: bad input"
+        assert error_type == "unexpected_error"
+
+    def test_log_path_is_a_real_file(self, tmp_path):
+        exc = SearchConnectionError("dns failure")
+        _, _, log_path = json_error_payload(exc)
+        assert log_path.exists()
+        assert log_path.is_file()
+
+
+class TestReportCliErrorOptions:
+    def test_custom_exit_code_respected(self):
+        import typer
+
+        exc = SearchTimeoutError("hung")
+        result = report_cli_error(exc, exit_code=2)
+        assert isinstance(result, typer.Exit)
+        assert result.exit_code == 2
+
+
 def test_flights_command_json_error_includes_log_path(runner, monkeypatch, tmp_path):
     """JSON-mode errors should include the log path and a typed error_type."""
     import json

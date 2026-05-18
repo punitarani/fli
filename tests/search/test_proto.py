@@ -207,3 +207,90 @@ class TestExtractBookingTokenFromTfu:
         # by which validation step rejects first).
         with pytest.raises(ValueError):
             extract_booking_token_from_tfu("!!!!not-valid-base64!!!!")
+
+
+class TestReadVarintBoundary:
+    """Exercise _read_varint at its encoding boundaries."""
+
+    def test_single_byte_zero(self):
+        from fli.search._proto import _read_varint
+
+        assert _read_varint(b"\x00", 0) == (0, 1)
+
+    def test_max_single_byte(self):
+        from fli.search._proto import _read_varint
+
+        assert _read_varint(b"\x7f", 0) == (127, 1)
+
+    def test_two_byte_varint(self):
+        from fli.search._proto import _read_varint
+
+        # 128 = 0x80 0x01 in LEB128
+        assert _read_varint(b"\x80\x01", 0) == (128, 2)
+
+    def test_truncated_varint_raises_index_error(self):
+        from fli.search._proto import _read_varint
+
+        with pytest.raises(IndexError):
+            _read_varint(b"\x80", 0)  # MSB set but no continuation byte
+
+
+class TestExtractBookingTokenFromTfuEdgeCases:
+    """edge-case wire types that appear before field 1 in the outer tfu protobuf."""
+
+    def _encode_tfu(self, raw: bytes) -> str:
+        return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+    def test_wire_type_5_fixed32_in_non_field1_skipped(self):
+
+        # field 2, wire 5 (fixed32) = tag 0x15, followed by 4 bytes
+        field2 = bytes([0x15]) + bytes([0x00, 0x00, 0x00, 0x01])
+        # field 1, wire 2 (length-delim) with ASCII payload
+        token_bytes = b"testtoken"
+        field1 = bytes([0x0A]) + bytes([len(token_bytes)]) + token_bytes
+        tfu = self._encode_tfu(field2 + field1)
+        result = extract_booking_token_from_tfu(tfu)
+        assert result == "testtoken"
+
+    def test_wire_type_1_fixed64_in_non_field1_skipped(self):
+
+        # field 3, wire 1 (fixed64) = (3 << 3) | 1 = 25 = 0x19, followed by 8 bytes
+        field3 = bytes([0x19]) + bytes(8)
+        token_bytes = b"mytoken"
+        field1 = bytes([0x0A]) + bytes([len(token_bytes)]) + token_bytes
+        tfu = self._encode_tfu(field3 + field1)
+        result = extract_booking_token_from_tfu(tfu)
+        assert result == "mytoken"
+
+    def test_no_field1_raises_value_error(self):
+        from fli.search._proto import _varint_field
+
+        # Only field 2 as a varint — no field 1 present.
+        raw = _varint_field(2, 42)
+        tfu = self._encode_tfu(raw)
+        with pytest.raises(ValueError, match="no field 1"):
+            extract_booking_token_from_tfu(tfu)
+
+    def test_unsupported_wire_type_raises_value_error(self):
+        # Wire type 3 (start group) is not handled.
+        # Tag for field 1, wire 3 = (1 << 3) | 3 = 11
+        raw = bytes([11])
+        tfu = self._encode_tfu(raw)
+        with pytest.raises(ValueError, match="unsupported wire type"):
+            extract_booking_token_from_tfu(tfu)
+
+
+class TestDecodeBookingTokenHexFallback:
+    def test_non_decodable_nested_field_stored_as_hex(self):
+        """A field neither printable ASCII nor a valid nested message.
+
+        Should be stored as a hex string instead of raising.
+        """
+        from fli.search._proto import _length_delim
+
+        # bytes([0x80]) is not valid ASCII and causes IndexError when parsed
+        # as a nested protobuf varint — the decoder should fall back to hex.
+        raw = _length_delim(3, bytes([0x80]))
+        token = base64.b64encode(raw).decode("ascii")
+        decoded = decode_booking_token(token)
+        assert decoded["field_3"] == "80"
