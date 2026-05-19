@@ -29,7 +29,10 @@ import re
 import sys
 from pathlib import Path
 
-import tomllib
+try:
+    import tomllib  # type: ignore[import-not-found]
+except ModuleNotFoundError:  # Python < 3.11
+    import tomli as tomllib  # type: ignore[import-not-found, no-redef]
 
 SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 VERSION_LINE_RE = re.compile(r'(?m)^version\s*=\s*"[^"]+"')
