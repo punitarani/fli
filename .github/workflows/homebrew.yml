@@ -1,0 +1,70 @@
+name: Homebrew Formula
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'Formula/**'
+      - '.github/workflows/homebrew.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'Formula/**'
+      - '.github/workflows/homebrew.yml'
+  workflow_dispatch:
+
+jobs:
+  style:
+    name: brew style + audit
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@main
+
+      - name: Tap the formula
+        # `brew audit` only accepts formula *names*, not file paths. Make the
+        # repo's formula visible to brew by copying it into a synthetic tap.
+        run: |
+          tap_dir="$(brew --repository)/Library/Taps/punitarani/homebrew-fli"
+          mkdir -p "$tap_dir/Formula"
+          cp "$GITHUB_WORKSPACE/Formula/flights.rb" "$tap_dir/Formula/flights.rb"
+
+      - name: brew style
+        run: brew style punitarani/fli/flights
+
+      - name: brew audit
+        # `--new` is intentionally omitted: it enforces homebrew-core admission
+        # rules (notability, no duplicate names, etc.) that don't apply to a
+        # tap formula. `--strict` gives us the substantive content checks
+        # without network dependency.
+        run: brew audit --strict punitarani/fli/flights
+
+  install:
+    name: brew install + test
+    runs-on: macos-latest
+    needs: style
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@main
+
+      - name: Tap the formula
+        run: |
+          tap_dir="$(brew --repository)/Library/Taps/punitarani/homebrew-fli"
+          mkdir -p "$tap_dir/Formula"
+          cp "$GITHUB_WORKSPACE/Formula/flights.rb" "$tap_dir/Formula/flights.rb"
+
+      - name: brew install --build-from-source
+        run: brew install --build-from-source --verbose punitarani/fli/flights
+
+      - name: brew test
+        run: brew test --verbose punitarani/fli/flights
+
+      - name: Verify CLI entry points
+        run: |
+          fli --help
+          test -x "$(brew --prefix)/bin/fli-mcp"
+          test -x "$(brew --prefix)/bin/fli-mcp-http"
