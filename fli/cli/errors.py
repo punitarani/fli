@@ -17,6 +17,7 @@ import typer
 
 from fli.cli.console import console
 from fli.search.exceptions import (
+    SearchCertificateError,
     SearchClientError,
     SearchConnectionError,
     SearchHTTPError,
@@ -31,6 +32,8 @@ def _friendly_message(exc: BaseException) -> str:
     """Return the short, user-facing message for ``exc``."""
     if isinstance(exc, SearchTimeoutError):
         return f"Request timed out. {exc}"
+    if isinstance(exc, SearchCertificateError):
+        return f"TLS certificate error. {exc}"
     if isinstance(exc, SearchConnectionError):
         return f"Network error. {exc}"
     if isinstance(exc, SearchHTTPError):
@@ -92,6 +95,8 @@ def json_error_payload(exc: BaseException, *, command: str | None = None) -> tup
     log_path = _write_log(exc, command=command)
     if isinstance(exc, SearchTimeoutError):
         return str(exc), "timeout", log_path
+    if isinstance(exc, SearchCertificateError):
+        return str(exc), "certificate_error", log_path
     if isinstance(exc, SearchConnectionError):
         return str(exc), "connection_error", log_path
     if isinstance(exc, SearchHTTPError):

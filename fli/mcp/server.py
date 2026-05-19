@@ -39,6 +39,13 @@ from fli.models import (
     TripType,
 )
 from fli.search import SearchDates, SearchFlights
+from fli.search.exceptions import (
+    SearchCertificateError,
+    SearchClientError,
+    SearchConnectionError,
+    SearchHTTPError,
+    SearchTimeoutError,
+)
 
 
 class FlightSearchConfig(BaseSettings):
@@ -394,6 +401,36 @@ def _serialize_date_result(date_result: Any) -> dict[str, Any]:
 # =============================================================================
 
 
+def _error_type(exc: BaseException) -> str:
+    """Map internal exceptions to stable MCP error type strings."""
+    if isinstance(exc, ParseError):
+        return "parse_error"
+    if isinstance(exc, SearchTimeoutError):
+        return "timeout"
+    if isinstance(exc, SearchCertificateError):
+        return "certificate_error"
+    if isinstance(exc, SearchConnectionError):
+        return "connection_error"
+    if isinstance(exc, SearchHTTPError):
+        return "http_error"
+    if isinstance(exc, SearchClientError):
+        return "search_error"
+    return "unexpected_error"
+
+
+def _error_response(
+    exc: BaseException, result_key: str, *, message: str | None = None
+) -> dict[str, Any]:
+    """Return a structured MCP error response while preserving legacy fields."""
+    error_message = message if message is not None else str(exc)
+    return {
+        "success": False,
+        "error": error_message,
+        "error_type": _error_type(exc),
+        result_key: [],
+    }
+
+
 def _resolve_airports(codes: str) -> list[Airport]:
     """Resolve one or more comma-separated airport codes."""
     airports = [resolve_airport(code.strip()) for code in codes.split(",") if code.strip()]
@@ -491,12 +528,14 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
         }
 
     except ParseError as e:
-        return {"success": False, "error": str(e), "flights": []}
+        return _error_response(e, "flights")
+    except SearchClientError as e:
+        return _error_response(e, "flights")
     except Exception as e:
         error_msg = str(e)
         if "validation error" in error_msg.lower():
-            return {"success": False, "error": "Invalid parameter value", "flights": []}
-        return {"success": False, "error": f"Search failed: {error_msg}", "flights": []}
+            return _error_response(e, "flights", message="Invalid parameter value")
+        return _error_response(e, "flights", message=f"Search failed: {error_msg}")
 
 
 def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
@@ -590,9 +629,11 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
         }
 
     except ParseError as e:
-        return {"success": False, "error": str(e), "dates": []}
+        return _error_response(e, "dates")
+    except SearchClientError as e:
+        return _error_response(e, "dates")
     except Exception as e:
-        return {"success": False, "error": f"Search failed: {str(e)}", "dates": []}
+        return _error_response(e, "dates", message=f"Search failed: {e}")
 
 
 # =============================================================================
@@ -1002,6 +1043,14 @@ def configuration_resource() -> str:
                 "FLI_MCP_DEFAULT_SORT_BY": "Set the default result sorting strategy.",
                 "FLI_MCP_DEFAULT_DEPARTURE_WINDOW": "Provide a default departure window (HH-HH).",
                 "FLI_MCP_MAX_RESULTS": "Limit the maximum number of results returned by tools.",
+                "FLI_TIMEOUT": "Set the Google Flights request timeout in seconds.",
+                "FLI_CA_BUNDLE": (
+                    "Path to a PEM CA bundle for networks with custom certificate authorities."
+                ),
+                "CURL_CA_BUNDLE": "Fallback CA bundle path when FLI_CA_BUNDLE is unset.",
+                "REQUESTS_CA_BUNDLE": (
+                    "Fallback CA bundle path when FLI_CA_BUNDLE and CURL_CA_BUNDLE are unset."
+                ),
             },
         },
     }

@@ -21,6 +21,10 @@ class SearchConnectionError(SearchClientError):
     """A network/DNS issue prevented us from reaching Google Flights."""
 
 
+class SearchCertificateError(SearchConnectionError):
+    """TLS certificate verification failed while reaching Google Flights."""
+
+
 class SearchHTTPError(SearchClientError):
     """Google Flights returned a non-2xx HTTP response."""
 

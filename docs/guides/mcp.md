@@ -206,6 +206,18 @@ The MCP server can be configured via environment variables:
 | `FLI_MCP_DEFAULT_DEPARTURE_WINDOW` | Default departure window (HH-HH) | null |
 | `FLI_MCP_MAX_RESULTS` | Maximum results returned | null (no limit) |
 
+The underlying Google Flights HTTP client also honors these variables:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `FLI_TIMEOUT` | Request timeout in seconds | 60 |
+| `FLI_CA_BUNDLE` | Path to a PEM CA bundle for networks with custom certificate authorities | unset |
+| `CURL_CA_BUNDLE` | Fallback CA bundle path, used when `FLI_CA_BUNDLE` is unset | unset |
+| `REQUESTS_CA_BUNDLE` | Fallback CA bundle path, used when the variables above are unset | unset |
+
+If a search fails with `error_type: "certificate_error"`, configure one of the CA bundle
+variables instead of disabling TLS verification.
+
 ## Example Conversations
 
 Once configured with Claude Desktop, you can have natural conversations:

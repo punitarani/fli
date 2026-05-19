@@ -28,6 +28,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from fli.search._concurrency import TokenBucketRateLimiter
 from fli.search.exceptions import (
+    SearchCertificateError,
     SearchClientError,
     SearchConnectionError,
     SearchHTTPError,
@@ -60,6 +61,7 @@ DEFAULT_CALLS_PER_SECOND = 10
 
 # Request timeout in seconds.  Override with the FLI_TIMEOUT env var.
 DEFAULT_TIMEOUT: float = 60.0
+_CA_BUNDLE_ENV_VARS = ("FLI_CA_BUNDLE", "CURL_CA_BUNDLE", "REQUESTS_CA_BUNDLE")
 _env_timeout = os.environ.get("FLI_TIMEOUT")
 if _env_timeout is not None:
     try:
@@ -71,6 +73,20 @@ if _env_timeout is not None:
         raise ValueError(f"FLI_TIMEOUT must be a positive number, got: {_env_timeout!r}")
 else:
     REQUEST_TIMEOUT = DEFAULT_TIMEOUT
+
+
+def _ca_bundle_from_env() -> str | None:
+    """Return the first configured CA bundle path from supported environment variables."""
+    for name in _CA_BUNDLE_ENV_VARS:
+        value = os.environ.get(name)
+        if value:
+            if not os.path.isfile(value) or not os.access(value, os.R_OK):
+                raise SearchCertificateError(
+                    f"{name} points to a CA bundle path that does not exist or "
+                    f"is not readable: {value!r}"
+                )
+            return value
+    return None
 
 
 class Client:
@@ -106,6 +122,9 @@ class Client:
 
             session = _requests.Session()
             session.headers.update(self.DEFAULT_HEADERS)
+            ca_bundle = _ca_bundle_from_env()
+            if ca_bundle:
+                session.verify = ca_bundle
             self._sessions.session = session
         return session
 
@@ -165,6 +184,14 @@ def _wrap_request_error(method: str, url: str, exc: BaseException) -> SearchClie
     from curl_cffi.requests import exceptions as curl_exc
 
     host = _host_from_url(url)
+    certificate_error = getattr(curl_exc, "CertificateVerifyError", ())
+    if certificate_error and isinstance(exc, certificate_error):
+        env_vars = ", ".join(_CA_BUNDLE_ENV_VARS)
+        return SearchCertificateError(
+            f"TLS certificate verification failed for Google Flights ({host}). "
+            f"If your network uses a custom certificate authority, set one of "
+            f"{env_vars} to a CA bundle path and try again."
+        )
     if isinstance(exc, curl_exc.Timeout):
         return SearchTimeoutError(
             f"Timed out talking to Google Flights ({host}). "

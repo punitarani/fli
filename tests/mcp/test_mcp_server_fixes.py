@@ -10,7 +10,14 @@ from unittest.mock import MagicMock
 import pytest
 from fastmcp import FastMCP
 
-from fli.mcp.server import _serialize_flight_result, mcp
+from fli.mcp.server import DateSearchParams, FlightSearchParams, _serialize_flight_result, mcp
+from fli.mcp.server import (
+    _search_dates_from_params as search_dates_fn,
+)
+from fli.mcp.server import (
+    _search_flights_from_params as search_flights_fn,
+)
+from fli.search.exceptions import SearchCertificateError
 
 # ---------------------------------------------------------------------------
 # Bug 1: list_tools — FastMCP 3.x compatibility
@@ -77,7 +84,61 @@ class TestPrompts:
 
 
 # ---------------------------------------------------------------------------
-# Bug 2: Round-trip price doubling
+# Bug 2: Structured MCP search errors
+# ---------------------------------------------------------------------------
+
+
+class TestStructuredMcpErrors:
+    """MCP tools should preserve machine-readable search error types."""
+
+    def test_search_flights_reports_certificate_error_type(self, monkeypatch):
+        """A TLS certificate failure should be visible to MCP clients."""
+
+        class FakeSearchFlights:
+            def search(self, *args, **kwargs):
+                raise SearchCertificateError("TLS certificate verification failed")
+
+        monkeypatch.setattr("fli.mcp.server.SearchFlights", FakeSearchFlights)
+
+        result = search_flights_fn(
+            FlightSearchParams(
+                origin="JFK",
+                destination="LHR",
+                departure_date="2026-10-25",
+            )
+        )
+
+        assert result["success"] is False
+        assert result["error_type"] == "certificate_error"
+        assert "TLS certificate verification failed" in result["error"]
+        assert result["flights"] == []
+
+    def test_search_dates_reports_certificate_error_type(self, monkeypatch):
+        """Date-search errors should use the same structured shape as flight-search errors."""
+
+        class FakeSearchDates:
+            def search(self, *args, **kwargs):
+                raise SearchCertificateError("TLS certificate verification failed")
+
+        monkeypatch.setattr("fli.mcp.server.SearchDates", FakeSearchDates)
+
+        result = search_dates_fn(
+            DateSearchParams(
+                origin="JFK",
+                destination="LHR",
+                start_date="2026-10-01",
+                end_date="2026-10-31",
+            )
+        )
+
+        assert result["success"] is False
+        assert result["error_type"] == "certificate_error"
+        assert "TLS certificate verification failed" in result["error"]
+        assert result["dates"] == []
+
+
+# ---------------------------------------------------------------------------
+# Bug 3: Round-trip price doubling
 # ---------------------------------------------------------------------------
 
 
