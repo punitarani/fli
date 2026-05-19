@@ -66,6 +66,30 @@ devcontainer:
 # Generate the requirements.txt file
 requirements:
 	uv export --format requirements-txt --no-hashes > requirements.txt
+
+# Preview next versions for each bump kind (does not modify files)
+bump-preview:
+	@python scripts/bump_version.py --bump patch
+	@echo "---"
+	@python scripts/bump_version.py --bump minor
+	@echo "---"
+	@python scripts/bump_version.py --bump major
+
+# Preview release notes since the last tag (or last "Bump version" commit)
+release-notes:
+	@prev=$$(git tag --list 'v*' --sort=-v:refname | head -n1); \
+	if [ -z "$$prev" ]; then \
+		prev=$$(git log --grep='^Bump version' -n1 --format='%H'); \
+	fi; \
+	if [ -z "$$prev" ]; then \
+		echo "(no previous tag found, showing full history)"; \
+		git log --pretty=format:'- %s (%h)' HEAD; \
+	else \
+		echo "Commits since $$prev:"; \
+		git log --pretty=format:'- %s (%h)' "$$prev..HEAD"; \
+	fi
+	@echo
+
 # Display help message by default
 .DEFAULT_GOAL := help
 help:
@@ -86,5 +110,7 @@ help:
 	@echo "  make ci-docker   - Run CI in Docker container"
 	@echo "  make devcontainer - Build dev container image"
 	@echo "  make requirements - Generate the requirements.txt file"
+	@echo "  make bump-preview - Preview next version (patch/minor/major)"
+	@echo "  make release-notes - Preview release notes since last tag"
 # Declare the targets as phony
-.PHONY: help install install-dev install-all mcp mcp-http docs format lint lint-fix test test-mcp test-fuzz test-all ci ci-docker devcontainer requirements
+.PHONY: help install install-dev install-all mcp mcp-http docs format lint lint-fix test test-mcp test-fuzz test-all ci ci-docker devcontainer requirements bump-preview release-notes

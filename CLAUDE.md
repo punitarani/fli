@@ -139,6 +139,17 @@ Both tools accept the `emissions` filter (forwarded to Google's
 **not** returned in CLI output or MCP tool responses. The filter operates
 server-side; the data is not displayed in the current release.
 
+## Releasing
+
+Releases are cut manually via `.github/workflows/release.yml`
+(Actions → Release → Run workflow on `main`). Choose
+`bump=patch|minor|major|explicit`; the workflow bumps `pyproject.toml`,
+refreshes `uv.lock`, commits + tags + creates a GitHub Release, then calls
+`publish.yml` to upload to PyPI via Trusted Publishing. Always run with
+`dry_run=true` first to preview the version and release notes. The
+version-bump logic lives in `scripts/bump_version.py` (testable; covered
+by `tests/scripts/test_bump_version.py`). Full process: `docs/guides/release.md`.
+
 ## Code Style and Standards
 
 - **Linting**: Uses Ruff with pycodestyle, pyflakes, isort, flake8-bugbear, and pydocstyle

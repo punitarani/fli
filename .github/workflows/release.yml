@@ -62,54 +62,16 @@ jobs:
 
       - name: Compute next version
         id: version
-        env:
-          BUMP: ${{ inputs.bump }}
-          EXPLICIT_VERSION: ${{ inputs.version }}
         run: |
-          python - <<'PY'
-          import os
-          import re
-          import sys
-          import tomllib
-          from pathlib import Path
-
-          bump = os.environ["BUMP"]
-          explicit = os.environ.get("EXPLICIT_VERSION", "").strip()
-
-          data = tomllib.loads(Path("pyproject.toml").read_text())
-          current = data["project"]["version"]
-          m = re.match(r"^(\d+)\.(\d+)\.(\d+)$", current)
-          if not m:
-              sys.exit(f"Cannot parse current version: {current!r}")
-          major, minor, patch = map(int, m.groups())
-
-          if bump == "patch":
-              patch += 1
-          elif bump == "minor":
-              minor += 1
-              patch = 0
-          elif bump == "major":
-              major += 1
-              minor = 0
-              patch = 0
-          elif bump == "explicit":
-              if not re.match(r"^\d+\.\d+\.\d+$", explicit):
-                  sys.exit(f"Invalid explicit version: {explicit!r}")
-              new = explicit
-              with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
-                  fh.write(f"current={current}\n")
-                  fh.write(f"new={new}\n")
-                  fh.write(f"tag=v{new}\n")
-              sys.exit(0)
-          else:
-              sys.exit(f"Unknown bump: {bump}")
-
-          new = f"{major}.{minor}.{patch}"
-          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
-              fh.write(f"current={current}\n")
-              fh.write(f"new={new}\n")
-              fh.write(f"tag=v{new}\n")
-          PY
+          if [ "${{ inputs.bump }}" = "explicit" ]; then
+            if [ -z "${{ inputs.version }}" ]; then
+              echo "::error::bump=explicit requires a 'version' input"
+              exit 1
+            fi
+            python scripts/bump_version.py --explicit "${{ inputs.version }}" --github-output
+          else
+            python scripts/bump_version.py --bump "${{ inputs.bump }}" --github-output
+          fi
 
       - name: Verify tag doesn't already exist
         run: |
@@ -144,7 +106,6 @@ jobs:
           echo "Using range: ${range}"
 
       - name: Generate release notes
-        id: notes
         env:
           RANGE: ${{ steps.range.outputs.range }}
           NEW_VERSION: ${{ steps.version.outputs.new }}
@@ -164,47 +125,26 @@ jobs:
               echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...v${NEW_VERSION}"
             fi
           } > release_notes.md
-          {
-            echo "notes<<EOF_NOTES"
-            cat release_notes.md
-            echo "EOF_NOTES"
-          } >> "$GITHUB_OUTPUT"
           echo "----- release_notes.md -----"
           cat release_notes.md
           echo "----------------------------"
 
       - name: Update pyproject.toml version
         if: ${{ !inputs.dry_run }}
-        env:
-          NEW_VERSION: ${{ steps.version.outputs.new }}
         run: |
-          python - <<'PY'
-          import os
-          import re
-          from pathlib import Path
-
-          new = os.environ["NEW_VERSION"]
-          p = Path("pyproject.toml")
-          text = p.read_text()
-          updated, n = re.subn(
-              r'(?m)^version\s*=\s*"[^"]+"',
-              f'version = "{new}"',
-              text,
-              count=1,
-          )
-          if n != 1:
-              raise SystemExit("Failed to update version in pyproject.toml")
-          p.write_text(updated)
-          PY
+          if [ "${{ inputs.bump }}" = "explicit" ]; then
+            python scripts/bump_version.py --explicit "${{ inputs.version }}" --write
+          else
+            python scripts/bump_version.py --bump "${{ inputs.bump }}" --write
+          fi
 
       - name: Refresh uv.lock
         if: ${{ !inputs.dry_run }}
         run: uv lock
 
-      - name: Commit, tag and push
+      - name: Commit and tag
         if: ${{ !inputs.dry_run }}
         env:
-          NEW_VERSION: ${{ steps.version.outputs.new }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           git add pyproject.toml uv.lock
@@ -214,13 +154,35 @@ jobs:
           fi
           git commit -m "chore(release): ${TAG}"
           git tag -a "${TAG}" -m "Release ${TAG}"
-          # Push commit first, then tag. Retry up to 4 times with exponential backoff.
+
+      - name: Push commit to main
+        if: ${{ !inputs.dry_run }}
+        run: |
           for attempt in 1 2 3 4; do
-            if git push origin "HEAD:main" && git push origin "${TAG}"; then
-              break
+            if git push origin "HEAD:main"; then
+              exit 0
             fi
             if [ "$attempt" -eq 4 ]; then
-              echo "::error::git push failed after 4 attempts"
+              echo "::error::git push of release commit failed after 4 attempts; nothing was pushed"
+              exit 1
+            fi
+            sleep $((2 ** attempt))
+          done
+
+      - name: Push tag
+        if: ${{ !inputs.dry_run }}
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          for attempt in 1 2 3 4; do
+            if git push origin "${TAG}"; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 4 ]; then
+              echo "::error::Tag push failed after 4 attempts."
+              echo "::error::The release commit was already pushed to main; recover by running:"
+              echo "::error::  git fetch origin && git push origin ${TAG}"
+              echo "::error::then create the GitHub Release for ${TAG} manually (publish.yml will fire)."
               exit 1
             fi
             sleep $((2 ** attempt))

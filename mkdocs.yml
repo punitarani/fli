@@ -104,4 +104,6 @@ nav:
     - MCP Server: guides/mcp.md
   - API Reference:
     - Models: api/models.md
-    - Search: api/search.md 
+    - Search: api/search.md
+  - Contributing:
+    - Releasing: guides/release.md 
