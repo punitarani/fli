@@ -1,0 +1,276 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - explicit
+      version:
+        description: 'Explicit version when bump=explicit (e.g. 0.9.0)'
+        required: false
+        type: string
+      dry_run:
+        description: 'Dry run: compute version + notes without committing/tagging/releasing'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      new: ${{ steps.version.outputs.new }}
+      did_release: ${{ steps.mark.outputs.did_release }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Compute next version
+        id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+          EXPLICIT_VERSION: ${{ inputs.version }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          import sys
+          import tomllib
+          from pathlib import Path
+
+          bump = os.environ["BUMP"]
+          explicit = os.environ.get("EXPLICIT_VERSION", "").strip()
+
+          data = tomllib.loads(Path("pyproject.toml").read_text())
+          current = data["project"]["version"]
+          m = re.match(r"^(\d+)\.(\d+)\.(\d+)$", current)
+          if not m:
+              sys.exit(f"Cannot parse current version: {current!r}")
+          major, minor, patch = map(int, m.groups())
+
+          if bump == "patch":
+              patch += 1
+          elif bump == "minor":
+              minor += 1
+              patch = 0
+          elif bump == "major":
+              major += 1
+              minor = 0
+              patch = 0
+          elif bump == "explicit":
+              if not re.match(r"^\d+\.\d+\.\d+$", explicit):
+                  sys.exit(f"Invalid explicit version: {explicit!r}")
+              new = explicit
+              with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+                  fh.write(f"current={current}\n")
+                  fh.write(f"new={new}\n")
+                  fh.write(f"tag=v{new}\n")
+              sys.exit(0)
+          else:
+              sys.exit(f"Unknown bump: {bump}")
+
+          new = f"{major}.{minor}.{patch}"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              fh.write(f"current={current}\n")
+              fh.write(f"new={new}\n")
+              fh.write(f"tag=v{new}\n")
+          PY
+
+      - name: Verify tag doesn't already exist
+        run: |
+          tag="${{ steps.version.outputs.tag }}"
+          if git rev-parse "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "::error::Tag ${tag} already exists"
+            exit 1
+          fi
+          if git ls-remote --tags --exit-code origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "::error::Tag ${tag} already exists on origin"
+            exit 1
+          fi
+
+      - name: Determine commit range for release notes
+        id: range
+        run: |
+          prev_tag=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+          if [ -n "$prev_tag" ]; then
+            range="${prev_tag}..HEAD"
+            echo "prev_tag=${prev_tag}" >> "$GITHUB_OUTPUT"
+          else
+            # First release with this workflow: walk back to the last manual "Bump version" commit
+            prev=$(git log --grep='^Bump version' -n1 --format='%H' || true)
+            if [ -n "$prev" ]; then
+              range="${prev}..HEAD"
+              echo "prev_commit=${prev}" >> "$GITHUB_OUTPUT"
+            else
+              range="HEAD"
+            fi
+          fi
+          echo "range=${range}" >> "$GITHUB_OUTPUT"
+          echo "Using range: ${range}"
+
+      - name: Generate release notes
+        id: notes
+        env:
+          RANGE: ${{ steps.range.outputs.range }}
+          NEW_VERSION: ${{ steps.version.outputs.new }}
+          PREV_TAG: ${{ steps.range.outputs.prev_tag }}
+        run: |
+          {
+            echo "## What's Changed"
+            echo
+            if [ "$RANGE" = "HEAD" ]; then
+              git log --pretty=format:'- %s (%h)' HEAD
+            else
+              git log --pretty=format:'- %s (%h)' "$RANGE"
+            fi
+            echo
+            echo
+            if [ -n "$PREV_TAG" ]; then
+              echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...v${NEW_VERSION}"
+            fi
+          } > release_notes.md
+          {
+            echo "notes<<EOF_NOTES"
+            cat release_notes.md
+            echo "EOF_NOTES"
+          } >> "$GITHUB_OUTPUT"
+          echo "----- release_notes.md -----"
+          cat release_notes.md
+          echo "----------------------------"
+
+      - name: Update pyproject.toml version
+        if: ${{ !inputs.dry_run }}
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          new = os.environ["NEW_VERSION"]
+          p = Path("pyproject.toml")
+          text = p.read_text()
+          updated, n = re.subn(
+              r'(?m)^version\s*=\s*"[^"]+"',
+              f'version = "{new}"',
+              text,
+              count=1,
+          )
+          if n != 1:
+              raise SystemExit("Failed to update version in pyproject.toml")
+          p.write_text(updated)
+          PY
+
+      - name: Refresh uv.lock
+        if: ${{ !inputs.dry_run }}
+        run: uv lock
+
+      - name: Commit, tag and push
+        if: ${{ !inputs.dry_run }}
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git add pyproject.toml uv.lock
+          if git diff --cached --quiet; then
+            echo "::error::No version changes staged; aborting."
+            exit 1
+          fi
+          git commit -m "chore(release): ${TAG}"
+          git tag -a "${TAG}" -m "Release ${TAG}"
+          # Push commit first, then tag. Retry up to 4 times with exponential backoff.
+          for attempt in 1 2 3 4; do
+            if git push origin "HEAD:main" && git push origin "${TAG}"; then
+              break
+            fi
+            if [ "$attempt" -eq 4 ]; then
+              echo "::error::git push failed after 4 attempts"
+              exit 1
+            fi
+            sleep $((2 ** attempt))
+          done
+
+      - name: Create GitHub Release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "${TAG}" \
+            --title "${TAG}" \
+            --notes-file release_notes.md \
+            --target main
+
+      - name: Mark release created
+        id: mark
+        if: ${{ !inputs.dry_run }}
+        run: echo "did_release=true" >> "$GITHUB_OUTPUT"
+
+      - name: Dry run summary
+        if: ${{ inputs.dry_run }}
+        env:
+          CURRENT: ${{ steps.version.outputs.current }}
+          NEW_VERSION: ${{ steps.version.outputs.new }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          {
+            echo "### Dry run"
+            echo
+            echo "- Current version: \`${CURRENT}\`"
+            echo "- Next version: \`${NEW_VERSION}\`"
+            echo "- Tag to create: \`${TAG}\`"
+            echo
+            echo "### Release notes preview"
+            echo
+            cat release_notes.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    needs: release
+    if: ${{ needs.release.outputs.did_release == 'true' }}
+    uses: ./.github/workflows/publish.yml
+    with:
+      environment: pypi
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+      id-token: write
+    secrets: inherit
+
