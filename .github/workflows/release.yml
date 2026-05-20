@@ -62,15 +62,18 @@ jobs:
 
       - name: Compute next version
         id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+          EXPLICIT_VERSION: ${{ inputs.version }}
         run: |
-          if [ "${{ inputs.bump }}" = "explicit" ]; then
-            if [ -z "${{ inputs.version }}" ]; then
+          if [ "$BUMP" = "explicit" ]; then
+            if [ -z "$EXPLICIT_VERSION" ]; then
               echo "::error::bump=explicit requires a 'version' input"
               exit 1
             fi
-            python scripts/bump_version.py --explicit "${{ inputs.version }}" --github-output
+            python scripts/bump_version.py --explicit "$EXPLICIT_VERSION" --github-output
           else
-            python scripts/bump_version.py --bump "${{ inputs.bump }}" --github-output
+            python scripts/bump_version.py --bump "$BUMP" --github-output
           fi
 
       - name: Verify tag doesn't already exist
@@ -131,11 +134,14 @@ jobs:
 
       - name: Update pyproject.toml version
         if: ${{ !inputs.dry_run }}
+        env:
+          BUMP: ${{ inputs.bump }}
+          EXPLICIT_VERSION: ${{ inputs.version }}
         run: |
-          if [ "${{ inputs.bump }}" = "explicit" ]; then
-            python scripts/bump_version.py --explicit "${{ inputs.version }}" --write
+          if [ "$BUMP" = "explicit" ]; then
+            python scripts/bump_version.py --explicit "$EXPLICIT_VERSION" --write
           else
-            python scripts/bump_version.py --bump "${{ inputs.bump }}" --write
+            python scripts/bump_version.py --bump "$BUMP" --write
           fi
 
       - name: Refresh uv.lock
