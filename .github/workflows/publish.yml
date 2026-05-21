@@ -28,7 +28,7 @@ permissions:
 
 jobs:
   test:
-    uses: ./.github/workflows/test.yml
+    uses: ./.github/workflows/ci.yml
 
   release-build:
     needs: [ test ]
