@@ -235,6 +235,11 @@ jobs:
     uses: ./.github/workflows/publish.yml
     with:
       environment: pypi
+      # Build from the new tag, not the caller-event SHA. workflow_call
+      # inherits the parent's github.sha (the SHA at release-dispatch time,
+      # before the bump commit lands), so without this the publish job would
+      # rebuild the previous version and PyPI would reject it as duplicate.
+      ref: ${{ needs.release.outputs.tag }}
     permissions:
       contents: read
       checks: write

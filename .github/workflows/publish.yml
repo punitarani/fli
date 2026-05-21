@@ -20,6 +20,10 @@ on:
         required: false
         default: 'pypi'
         type: string
+      ref:
+        description: 'Git ref (tag/branch/SHA) to build from. Required when called from release.yml so the build picks up the bump commit, not the caller-event SHA.'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -29,6 +33,8 @@ permissions:
 jobs:
   test:
     uses: ./.github/workflows/test.yml
+    with:
+      ref: ${{ inputs.ref }}
 
   release-build:
     needs: [ test ]
@@ -36,6 +42,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
