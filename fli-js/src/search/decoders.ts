@@ -40,9 +40,17 @@ function parseDateTime(dateArr: unknown, timeArr: unknown): Date {
   if (!dateArr.some((x) => x != null) || !timeArr.some((x) => x != null)) {
     throw new Error("Date and time arrays must contain at least one non-null value");
   }
-  const y = (dateArr[0] as number | null) ?? 0;
-  const m = (dateArr[1] as number | null) ?? 0;
-  const d = (dateArr[2] as number | null) ?? 0;
+  const y = dateArr[0] as number | null;
+  const m = dateArr[1] as number | null;
+  const d = dateArr[2] as number | null;
+  // Python's `datetime(y, m, d, ...)` rejects month=0 / day=0, so a partial
+  // like `[2026, null, null]` raises there. JS `new Date(2026, -1, 0, ...)`
+  // silently returns a valid-but-wrong Date (Nov 30 2025), so we enforce
+  // the same strictness up front. Time components default to 0 to match
+  // Python's `or 0` for the time tuple.
+  if (y == null || m == null || d == null || m < 1 || m > 12 || d < 1 || d > 31) {
+    throw new Error(`Invalid date components: y=${y}, m=${m}, d=${d}`);
+  }
   const h = (timeArr[0] as number | null) ?? 0;
   const min = (timeArr[1] as number | null) ?? 0;
   // Use local-time constructor (mirrors Python's naive datetime).

@@ -64,6 +64,15 @@ describe("_parseDateTime", () => {
     const d = _parseDateTime([2026, 7, 15], [10, null]);
     expect(d.getMinutes()).toBe(0);
   });
+
+  test("partial-null date raises rather than producing a silently-shifted Date", () => {
+    // Python's `datetime(2026, 0, 0)` raises ValueError. JS `new Date(2026, -1, 0)`
+    // returns "Nov 30 2025" silently — guard against that drift.
+    expect(() => _parseDateTime([2026, null, null], [10, 0])).toThrow();
+    expect(() => _parseDateTime([2026, 6, null], [10, 0])).toThrow();
+    expect(() => _parseDateTime([2026, 13, 1], [10, 0])).toThrow();
+    expect(() => _parseDateTime([2026, 6, 32], [10, 0])).toThrow();
+  });
 });
 
 describe("_parseEmissions", () => {

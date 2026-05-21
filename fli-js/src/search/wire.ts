@@ -85,6 +85,10 @@ export function* iterWrbChunks(body: string | Uint8Array): Generator<unknown> {
     const end = indexOfByte(raw, 0x0a, cursor);
     if (end === -1) break;
     const headerText = decoder.decode(raw.subarray(cursor, end));
+    // Python's `int(...)` raises on `"12abc"`; `Number.parseInt` returns 12,
+    // which would slip the parser into garbage chunk offsets. Require a pure
+    // decimal header to keep wire-format strictness in sync.
+    if (!/^[0-9]+$/.test(headerText)) break;
     const length = Number.parseInt(headerText, 10);
     if (!Number.isFinite(length)) break;
     cursor = end + 1;
