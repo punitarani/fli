@@ -28,6 +28,9 @@ permissions:
 
 jobs:
   test:
+    # Skip when a release for the JS package (tag fli-js-v*) fires this
+    # workflow — that's publish-npm.yml's job.
+    if: ${{ github.event_name != 'release' || !startsWith(github.event.release.tag_name, 'fli-js-v') }}
     uses: ./.github/workflows/ci.yml
 
   release-build:
@@ -72,7 +75,9 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - release-build
-    if: ${{ github.event_name == 'release' || inputs.environment == 'pypi' }}
+    if: |
+      (github.event_name == 'release' && !startsWith(github.event.release.tag_name, 'fli-js-v'))
+      || inputs.environment == 'pypi'
     permissions:
       id-token: write
 

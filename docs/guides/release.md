@@ -1,7 +1,12 @@
-# Releasing
+# Releasing (PyPI)
 
-Releases are driven by a manual GitHub Actions workflow. There is no auto-publish
-on push to `main`; cutting a release is always an explicit, one-click action.
+Releases of the Python package `flights` are driven by a manual GitHub
+Actions workflow. There is no auto-publish on push to `main`; cutting a
+release is always an explicit, one-click action.
+
+For the TypeScript / JavaScript package (`fli` on npm), see
+[`release-npm.md`](release-npm.md) — the same shape, different manifest,
+different tag prefix (`fli-js-vX.Y.Z`).
 
 ## Overview
 

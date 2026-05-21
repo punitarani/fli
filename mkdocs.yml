@@ -106,4 +106,5 @@ nav:
     - Models: api/models.md
     - Search: api/search.md
   - Contributing:
-    - Releasing: guides/release.md 
+    - Releasing (PyPI): guides/release.md
+    - Releasing (npm): guides/release-npm.md

@@ -1,0 +1,254 @@
+name: Release npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - explicit
+      version:
+        description: 'Explicit version when bump=explicit (e.g. 0.2.0)'
+        required: false
+        type: string
+      dry_run:
+        description: 'Dry run: compute version + notes without committing/tagging/releasing'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-npm
+  cancel-in-progress: false
+
+jobs:
+  release:
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      new: ${{ steps.version.outputs.new }}
+      did_release: ${{ steps.mark.outputs.did_release }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Compute next version
+        id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+          EXPLICIT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$BUMP" = "explicit" ]; then
+            if [ -z "$EXPLICIT_VERSION" ]; then
+              echo "::error::bump=explicit requires a 'version' input"
+              exit 1
+            fi
+            python scripts/bump_version.py \
+              --package-json fli-js/package.json \
+              --explicit "$EXPLICIT_VERSION" \
+              --tag-prefix fli-js-v \
+              --github-output
+          else
+            python scripts/bump_version.py \
+              --package-json fli-js/package.json \
+              --bump "$BUMP" \
+              --tag-prefix fli-js-v \
+              --github-output
+          fi
+
+      - name: Verify tag doesn't already exist
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "::error::Tag ${TAG} already exists"
+            exit 1
+          fi
+          if git ls-remote --tags --exit-code origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "::error::Tag ${TAG} already exists on origin"
+            exit 1
+          fi
+
+      - name: Determine commit range for release notes
+        id: range
+        run: |
+          prev_tag=$(git tag --list 'fli-js-v*' --sort=-v:refname | head -n1)
+          if [ -n "$prev_tag" ]; then
+            range="${prev_tag}..HEAD"
+            echo "prev_tag=${prev_tag}" >> "$GITHUB_OUTPUT"
+          else
+            # First fli-js release: scope notes to the commits that ever
+            # touched the JS package or its shared data dir.
+            range="HEAD"
+          fi
+          echo "range=${range}" >> "$GITHUB_OUTPUT"
+          echo "Using range: ${range}"
+
+      - name: Generate release notes
+        env:
+          RANGE: ${{ steps.range.outputs.range }}
+          NEW_VERSION: ${{ steps.version.outputs.new }}
+          PREV_TAG: ${{ steps.range.outputs.prev_tag }}
+        run: |
+          {
+            echo "## What's Changed (fli-js)"
+            echo
+            if [ "$RANGE" = "HEAD" ]; then
+              git log --pretty=format:'- %s (%h)' HEAD -- fli-js data
+            else
+              git log --pretty=format:'- %s (%h)' "$RANGE" -- fli-js data
+            fi
+            echo
+            echo
+            if [ -n "$PREV_TAG" ]; then
+              echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...fli-js-v${NEW_VERSION}"
+            fi
+          } > release_notes.md
+          echo "----- release_notes.md -----"
+          cat release_notes.md
+          echo "----------------------------"
+
+      - name: Update fli-js/package.json version
+        if: ${{ !inputs.dry_run }}
+        env:
+          BUMP: ${{ inputs.bump }}
+          EXPLICIT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$BUMP" = "explicit" ]; then
+            python scripts/bump_version.py \
+              --package-json fli-js/package.json \
+              --explicit "$EXPLICIT_VERSION" \
+              --tag-prefix fli-js-v \
+              --write
+          else
+            python scripts/bump_version.py \
+              --package-json fli-js/package.json \
+              --bump "$BUMP" \
+              --tag-prefix fli-js-v \
+              --write
+          fi
+
+      - name: Refresh bun.lock
+        if: ${{ !inputs.dry_run }}
+        working-directory: fli-js
+        run: bun install
+
+      - name: Commit and tag
+        if: ${{ !inputs.dry_run }}
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git add fli-js/package.json fli-js/bun.lock
+          if git diff --cached --quiet; then
+            echo "::error::No version changes staged; aborting."
+            exit 1
+          fi
+          git commit -m "chore(release): ${TAG}"
+          git tag -a "${TAG}" -m "Release ${TAG}"
+
+      - name: Push commit to main
+        if: ${{ !inputs.dry_run }}
+        run: |
+          for attempt in 1 2 3 4; do
+            if git push origin "HEAD:main"; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 4 ]; then
+              echo "::error::git push of release commit failed after 4 attempts; nothing was pushed"
+              exit 1
+            fi
+            sleep $((2 ** attempt))
+          done
+
+      - name: Push tag
+        if: ${{ !inputs.dry_run }}
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          for attempt in 1 2 3 4; do
+            if git push origin "${TAG}"; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 4 ]; then
+              echo "::error::Tag push failed after 4 attempts."
+              echo "::error::The release commit was already pushed to main; recover by running:"
+              echo "::error::  git fetch origin && git push origin ${TAG}"
+              echo "::error::then create the GitHub Release for ${TAG} manually (publish-npm.yml will fire)."
+              exit 1
+            fi
+            sleep $((2 ** attempt))
+          done
+
+      - name: Create GitHub Release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "${TAG}" \
+            --title "${TAG}" \
+            --notes-file release_notes.md \
+            --target main
+
+      - name: Mark release created
+        id: mark
+        if: ${{ !inputs.dry_run }}
+        run: echo "did_release=true" >> "$GITHUB_OUTPUT"
+
+      - name: Dry run summary
+        if: ${{ inputs.dry_run }}
+        env:
+          CURRENT: ${{ steps.version.outputs.current }}
+          NEW_VERSION: ${{ steps.version.outputs.new }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          {
+            echo "### Dry run (fli-js / npm)"
+            echo
+            echo "- Current version: \`${CURRENT}\`"
+            echo "- Next version: \`${NEW_VERSION}\`"
+            echo "- Tag to create: \`${TAG}\`"
+            echo
+            echo "### Release notes preview"
+            echo
+            cat release_notes.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    needs: release
+    if: ${{ needs.release.outputs.did_release == 'true' }}
+    uses: ./.github/workflows/publish-npm.yml
+    with:
+      environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    secrets: inherit
