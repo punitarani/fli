@@ -15,17 +15,61 @@ const repoRoot = join(__dirname, "..", "..");
 const dataDir = join(repoRoot, "data");
 const outDir = join(__dirname, "..", "src", "models");
 
+/**
+ * Minimal RFC4180-compatible CSV parser. Mirrors Python's `csv.DictReader`
+ * for the fields we actually use: it understands quoted values, embedded
+ * commas, and `""` as an escaped double-quote (e.g. `PAQ,"Warren ""Bud""
+ * Woods Palmer Municipal Airport"`). Returns `[code, name]` pairs from the
+ * first two columns, skipping the header row.
+ */
 function parseCsv(path: string): Array<[string, string]> {
   const text = readFileSync(path, "utf8");
-  const lines = text.split(/\r?\n/);
+  const records: string[][] = [];
+  let field = "";
+  let row: string[] = [];
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += ch;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ",") {
+      row.push(field);
+      field = "";
+    } else if (ch === "\n" || ch === "\r") {
+      // CRLF: consume the LF that follows the CR.
+      if (ch === "\r" && text[i + 1] === "\n") i++;
+      row.push(field);
+      records.push(row);
+      field = "";
+      row = [];
+    } else {
+      field += ch;
+    }
+  }
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    records.push(row);
+  }
+
   const out: Array<[string, string]> = [];
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line) continue;
-    const commaIdx = line.indexOf(",");
-    if (commaIdx === -1) continue;
-    const code = line.slice(0, commaIdx).trim();
-    const name = line.slice(commaIdx + 1).trim();
+  for (let i = 1; i < records.length; i++) {
+    const r = records[i];
+    if (!r || r.length < 2) continue;
+    const code = (r[0] ?? "").trim();
+    const name = (r[1] ?? "").trim();
     if (code) out.push([code, name]);
   }
   return out;

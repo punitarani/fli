@@ -169,10 +169,13 @@ export class Client {
       await this.rateLimiter.acquire();
       const controller = new AbortController();
       const externalSignal = options.signal;
+      let abortListener: (() => void) | undefined;
       if (externalSignal) {
         if (externalSignal.aborted) controller.abort(externalSignal.reason);
-        else
-          externalSignal.addEventListener("abort", () => controller.abort(externalSignal.reason));
+        else {
+          abortListener = () => controller.abort(externalSignal.reason);
+          externalSignal.addEventListener("abort", abortListener);
+        }
       }
       const timer = setTimeout(() => controller.abort(), this.timeoutMs);
       try {
@@ -188,11 +191,10 @@ export class Client {
         if (this.proxy) init.proxy = this.proxy;
         const response = await this.fetchImpl(url, init);
         if (!response.ok) {
-          const text = await response.text().catch(() => "");
-          // For 4xx/5xx don't retry on non-network errors after the first
-          // attempt — match the Python "raise_for_status" semantics.
+          // Match the Python `raise_for_status` semantics — surface non-2xx
+          // as a typed error and let the retry loop decide whether to back off.
           throw new SearchHTTPError(
-            `Google Flights returned an error response (HTTP ${response.status}). The request may be malformed, rate-limited, or blocked.${text ? "" : ""}`,
+            `Google Flights returned an error response (HTTP ${response.status}). The request may be malformed, rate-limited, or blocked.`,
             response.status,
           );
         }
@@ -217,6 +219,9 @@ export class Client {
         break;
       } finally {
         clearTimeout(timer);
+        if (abortListener && externalSignal) {
+          externalSignal.removeEventListener("abort", abortListener);
+        }
       }
     }
     throw lastError ?? new SearchClientError("Unknown request failure");

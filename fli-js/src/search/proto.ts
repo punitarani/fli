@@ -227,8 +227,8 @@ export function extractBookingTokenFromTfu(tfu: string): string {
     let parsed: URL;
     try {
       parsed = new URL(value);
-    } catch {
-      throw new Error("URL has no `tfu` query parameter");
+    } catch (e) {
+      throw new Error(`tfu input is not a parseable URL: ${(e as Error).message}`);
     }
     const fromUrl = parsed.searchParams.get("tfu");
     if (!fromUrl) throw new Error("URL has no `tfu` query parameter");

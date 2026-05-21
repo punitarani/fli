@@ -18,8 +18,10 @@ import { asBool, asInt, asNonNegativeInt, asStr, safeGet } from "./helpers.ts";
 // Pseudo-codes Google emits in place of a real IATA carrier identifier.
 const AIRLINE_SENTINELS = new Set(["multi"]);
 
-// Pre-compute code lookup tables (Airline/Airport keys are stripped of the
-// leading "_" prefix used to make digit-prefixed codes valid identifiers).
+// Pre-compute the bare-IATA-code → enum-key lookup table. Digit-prefixed
+// IATA codes (e.g. "2B") are stored in the enum under a "_2B" key because
+// "2B" is not a valid JavaScript identifier; we strip the leading "_" so
+// callers can look up by the wire-format code Google emits.
 const AIRLINE_BY_CODE: Record<string, Airline> = {};
 for (const key of Object.keys(AIRLINE_NAMES)) {
   const code = key.startsWith("_") ? key.slice(1) : key;
@@ -57,9 +59,6 @@ function parseAirport(code: unknown): Airport {
 function safeAirline(code: unknown): Airline | null {
   if (typeof code !== "string" || code.length === 0) return null;
   if (AIRLINE_SENTINELS.has(code)) return null;
-  const lookup = /^[0-9]/.test(code) ? `_${code}` : code;
-  if (lookup in AIRLINE_BY_CODE) return AIRLINE_BY_CODE[lookup] as Airline;
-  // Fallback — Python also allows raw key match.
   if (code in AIRLINE_BY_CODE) return AIRLINE_BY_CODE[code] as Airline;
   return null;
 }

@@ -31,8 +31,17 @@ export interface DateSearchOptions {
 }
 
 function parseIsoDate(s: string): Date {
-  const [y, m, d] = s.split("-").map((p) => Number.parseInt(p, 10));
-  if (y == null || m == null || d == null) throw new Error(`Invalid date: ${s}`);
+  const parts = s.split("-");
+  if (parts.length < 3) throw new Error(`Invalid date: ${s}`);
+  const y = Number.parseInt(parts[0] as string, 10);
+  const m = Number.parseInt(parts[1] as string, 10);
+  const d = Number.parseInt(parts[2] as string, 10);
+  // `Number.parseInt("abc", 10)` returns NaN, and `NaN == null` is false, so
+  // a nullish-only guard would let malformed dates produce an Invalid Date
+  // that silently propagates as NaN-valued `getTime()` downstream.
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) {
+    throw new Error(`Invalid date: ${s}`);
+  }
   return new Date(Date.UTC(y, m - 1, d));
 }
 

@@ -50,6 +50,26 @@ describe("Airline enum", () => {
     expect(AIRLINE_NAMES.AA).toBe("American Airlines");
     expect(AIRLINE_NAMES.BA).toBe("British Airways");
   });
+  test("CSV-quoted names with embedded commas are unquoted", () => {
+    // These three rows in data/airlines.csv use RFC4180 quoting because the
+    // name contains a comma. The CSV parser must strip the surrounding "..."
+    // — naive split-on-first-comma leaves literal quote chars in the value.
+    expect(AIRLINE_NAMES.Y2).toBe("Air Century, S.A.");
+    expect(AIRLINE_NAMES._2D).toBe("Eastern Airlines, LLC");
+    expect(AIRLINE_NAMES._2W).toBe("World 2 Fly, S.L");
+  });
+});
+
+describe("Airport CSV quoting", () => {
+  test("names with embedded commas are unquoted", () => {
+    expect(AIRPORT_NAMES.BTR).toBe("Baton Rouge Metro, Ryan Field");
+    expect(AIRPORT_NAMES.KQH).toBe("Kishangarh Airport, Ajmer");
+    expect(AIRPORT_NAMES.USC).toBe("Union County, Troy Shelton Field");
+  });
+  test('RFC4180 escaped quotes (`""`) decode to a single `"`', () => {
+    // data/airports.csv: PAQ,"Warren ""Bud"" Woods Palmer Municipal Airport"
+    expect(AIRPORT_NAMES.PAQ).toBe('Warren "Bud" Woods Palmer Municipal Airport');
+  });
 });
 
 describe("Google Flights enums", () => {
