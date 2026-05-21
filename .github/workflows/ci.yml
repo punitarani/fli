@@ -129,8 +129,22 @@ jobs:
             exit 1
           fi
 
-      - name: Run tests
-        run: bun test tests/models tests/core tests/search tests/integration
+      - name: Run tests with coverage
+        run: bun run test:ci
+
+      - name: Upload fli-js test results
+        if: always() && !env.ACT
+        uses: actions/upload-artifact@v7
+        with:
+          name: Test Results (fli-js)
+          path: fli-js/junit.xml
+
+      - name: Upload fli-js coverage
+        if: always() && !env.ACT
+        uses: actions/upload-artifact@v7
+        with:
+          name: Coverage (fli-js)
+          path: fli-js/coverage/
 
   railway-build:
     name: Railway build validation
@@ -240,9 +254,9 @@ jobs:
 
   publish-test-results:
     name: Publish Test Results
-    needs: [ test ]
+    needs: [ test, fli-js-test ]
     runs-on: ubuntu-latest
-    if: always() && needs.test.result != 'skipped'
+    if: always() && (needs.test.result != 'skipped' || needs.fli-js-test.result != 'skipped')
     permissions:
       checks: write
       pull-requests: write

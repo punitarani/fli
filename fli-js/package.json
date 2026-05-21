@@ -39,6 +39,8 @@
     "test:all": "bun test",
     "test:e2e": "FLI_E2E=1 bun test tests/e2e",
     "test:watch": "bun test --watch tests/models tests/core tests/search tests/integration",
+    "test:coverage": "bun test --coverage tests/models tests/core tests/search tests/integration",
+    "test:ci": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov --reporter=junit --reporter-outfile=./junit.xml tests/models tests/core tests/search tests/integration",
     "generate:enums": "bun run scripts/generate-enums.ts",
     "ci": "bun run format:check && bun run lint && bun run typecheck && bun run test"
   },
