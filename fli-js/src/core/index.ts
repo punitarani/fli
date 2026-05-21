@@ -11,6 +11,7 @@ export {
   buildTimeRestrictions,
   normalizeDate,
 } from "./builders.ts";
+export { formatIsoDate, ISO_DATE_RE, parseIsoDate } from "./dates.ts";
 export {
   _clearCurrencyCache,
   extractCurrencyFromPriceToken,

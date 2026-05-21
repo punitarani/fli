@@ -49,7 +49,6 @@ SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 VERSION_LINE_RE = re.compile(r'(?m)^version\s*=\s*"[^"]+"')
 PROJECT_TABLE_RE = re.compile(r"(?m)^\[project\]\s*$")
 TABLE_HEADER_RE = re.compile(r"(?m)^\[[^\]]+\]\s*$")
-JSON_VERSION_RE = re.compile(r'(?m)^(?P<indent>\s*)"version"\s*:\s*"[^"]+"')
 
 
 def read_current_version(pyproject: Path) -> str:
@@ -119,22 +118,80 @@ def write_new_version(pyproject: Path, new_version: str) -> None:
     pyproject.write_text(text[:section_start] + updated_section + text[section_end:])
 
 
+def _find_top_level_string_value_span(text: str, key: str) -> tuple[int, int] | None:
+    """Find the byte span of the quoted value for a top-level JSON key.
+
+    Walks ``text`` character-by-character, tracking object/array nesting depth
+    and string literal boundaries (with backslash escapes). Returns
+    ``(start, end)`` such that ``text[start:end]`` is the value's quoted string
+    literal (including the surrounding quotes) when ``key`` is found at the
+    top level of the root object. Returns ``None`` if no matching top-level
+    key exists. Raises ``RuntimeError`` on malformed JSON (unterminated string).
+
+    Crucially, a key with the same name nested inside an inner object — e.g.
+    a dependency literally named ``"version"`` — is never matched.
+    """
+    depth = 0
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c == '"':
+            # Scan to the end of this string literal, respecting backslash escapes.
+            j = i + 1
+            while j < n:
+                if text[j] == "\\" and j + 1 < n:
+                    j += 2
+                    continue
+                if text[j] == '"':
+                    break
+                j += 1
+            else:
+                raise RuntimeError("unterminated JSON string literal")
+            if depth == 1 and text[i + 1 : j] == key:
+                # Expect ``: "..."`` immediately after; if not, this was a
+                # value string rather than a key — keep scanning.
+                k = j + 1
+                while k < n and text[k] in " \t\n\r":
+                    k += 1
+                if k < n and text[k] == ":":
+                    k += 1
+                    while k < n and text[k] in " \t\n\r":
+                        k += 1
+                    if k < n and text[k] == '"':
+                        v_end = k + 1
+                        while v_end < n:
+                            if text[v_end] == "\\" and v_end + 1 < n:
+                                v_end += 2
+                                continue
+                            if text[v_end] == '"':
+                                return (k, v_end + 1)
+                            v_end += 1
+                        raise RuntimeError("unterminated JSON string value")
+            i = j + 1
+            continue
+        if c in "{[":
+            depth += 1
+        elif c in "}]":
+            depth -= 1
+        i += 1
+    return None
+
+
 def write_new_version_package_json(package_json: Path, new_version: str) -> None:
     """Replace the top-level ``version`` field in a ``package.json``.
 
-    Uses a regex on the raw text rather than ``json.dumps`` so existing
-    formatting (indentation, key order, trailing newline) is preserved
-    exactly — minimising lockfile churn and diff noise.
+    Walks the JSON to locate the *top-level* ``"version"`` key (depth-tracked
+    so a nested key with the same name — e.g. inside ``dependencies`` — is
+    never matched) and rewrites only its value. All other bytes of the file
+    are preserved exactly, minimising lockfile churn and diff noise.
     """
     text = package_json.read_text()
-    # Match only the FIRST occurrence of "version" so nested values inside
-    # ``dependencies`` / ``devDependencies`` are never touched.
-    m = JSON_VERSION_RE.search(text)
-    if not m:
+    span = _find_top_level_string_value_span(text, "version")
+    if span is None:
         raise RuntimeError(f"No top-level 'version' field found in {package_json}")
-    replacement = f'{m.group("indent")}"version": "{new_version}"'
-    updated = text[: m.start()] + replacement + text[m.end() :]
-    package_json.write_text(updated)
+    start, end = span
+    package_json.write_text(text[:start] + f'"{new_version}"' + text[end:])
 
 
 def main(argv: list[str] | None = None) -> int:

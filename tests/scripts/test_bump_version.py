@@ -270,6 +270,51 @@ class TestPackageJson:
         with pytest.raises(RuntimeError):
             bump_version.write_new_version_package_json(p, "0.2.0")
 
+    def test_write_ignores_nested_version_key_before_top_level(self, tmp_path: Path) -> None:
+        # A nested "version" key that appears textually BEFORE the top-level
+        # one must not be mistaken for it (this was the failure mode of the
+        # earlier regex-based implementation).
+        content = (
+            "{\n"
+            '  "name": "fli",\n'
+            '  "overrides": {\n'
+            '    "version": "9.9.9"\n'
+            "  },\n"
+            '  "version": "0.1.0"\n'
+            "}\n"
+        )
+        p = tmp_path / "package.json"
+        p.write_text(content)
+        bump_version.write_new_version_package_json(p, "0.2.0")
+        parsed = json.loads(p.read_text())
+        assert parsed["version"] == "0.2.0"
+        # Nested same-named key must remain untouched.
+        assert parsed["overrides"]["version"] == "9.9.9"
+
+    def test_write_ignores_nested_version_inside_inline_object(self, tmp_path: Path) -> None:
+        # Same as above but with an inline-object value so the nested
+        # "version" key sits on the same line as the outer key.
+        content = '{\n  "overrides": {"version": "9.9.9"},\n  "version": "0.1.0"\n}\n'
+        p = tmp_path / "package.json"
+        p.write_text(content)
+        bump_version.write_new_version_package_json(p, "0.2.0")
+        parsed = json.loads(p.read_text())
+        assert parsed["version"] == "0.2.0"
+        assert parsed["overrides"]["version"] == "9.9.9"
+
+    def test_write_ignores_version_substring_in_other_value(self, tmp_path: Path) -> None:
+        # A string value containing the substring "version" must not be
+        # mistaken for the version field.
+        content = (
+            '{\n  "description": "release v1.0 with new version layout",\n  "version": "0.1.0"\n}\n'
+        )
+        p = tmp_path / "package.json"
+        p.write_text(content)
+        bump_version.write_new_version_package_json(p, "0.2.0")
+        parsed = json.loads(p.read_text())
+        assert parsed["version"] == "0.2.0"
+        assert parsed["description"] == "release v1.0 with new version layout"
+
 
 class TestPackageJsonCLI:
     """End-to-end CLI behaviour for ``--package-json`` + ``--tag-prefix``."""

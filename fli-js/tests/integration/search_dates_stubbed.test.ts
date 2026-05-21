@@ -128,10 +128,15 @@ describe("SearchDates static parsers", () => {
     expect(parsed[0]).toBeInstanceOf(Date);
   });
   test("_parseDate rejects non-numeric date components", () => {
-    // `Number.parseInt("XX", 10)` → NaN, and `NaN == null` is false — without
-    // an explicit `Number.isFinite` guard, this slips past nullish-only checks
-    // and produces an Invalid Date whose `.getTime()` returns NaN downstream.
-    expect(() => SearchDates._parseDate(["2026-XX-15"], TripType.ONE_WAY)).toThrow(/Invalid date/);
-    expect(() => SearchDates._parseDate(["bad"], TripType.ONE_WAY)).toThrow(/Invalid date/);
+    // The canonical `parseIsoDate` in `core/dates.ts` checks the YYYY-MM-DD
+    // shape with a regex first and rejects format errors with
+    // `Expected YYYY-MM-DD`; out-of-range calendar dates produce
+    // `Invalid date`. Either error is a valid rejection here.
+    expect(() => SearchDates._parseDate(["2026-XX-15"], TripType.ONE_WAY)).toThrow(
+      /Expected YYYY-MM-DD|Invalid date/,
+    );
+    expect(() => SearchDates._parseDate(["bad"], TripType.ONE_WAY)).toThrow(
+      /Expected YYYY-MM-DD|Invalid date/,
+    );
   });
 });

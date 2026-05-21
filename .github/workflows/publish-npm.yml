@@ -125,7 +125,7 @@ jobs:
         run: npm pack
 
       - name: Upload tarball
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v8
         with:
           name: npm-tarball
           path: fli-js/*.tgz
