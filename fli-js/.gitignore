@@ -6,3 +6,4 @@ dist/
 .env.local
 bun.lockb
 coverage/
+junit.xml
