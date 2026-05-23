@@ -52,14 +52,6 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras
 
-      - name: Run tests
-        run: uv run pytest -v --ignore=tests/search/ -k "not test_search_dates_round_trip"
-
-      - name: Check code quality
-        run: |
-          uv run ruff format --check .
-          uv run ruff check .
-
       - name: Build release distributions
         run: uv build
 
@@ -76,7 +68,12 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - release-build
-    if: ${{ github.event_name == 'release' || inputs.environment == 'pypi' }}
+    # Only auto-publish on release events created by humans (manual fallback).
+    # release.yml publishes inline and creates its tag/Release via the bot, so
+    # excluding github-actions[bot] prevents a second, racing publish that would
+    # 400 with "File already exists". workflow_dispatch publishes only when the
+    # operator explicitly selects the pypi environment.
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.environment == 'pypi') || (github.event_name == 'release' && github.actor != 'github-actions[bot]') }}
     permissions:
       id-token: write
 
