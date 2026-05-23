@@ -7,6 +7,11 @@ on:
     branches: [ main ]
   workflow_dispatch:
   workflow_call:
+    inputs:
+      ref:
+        description: 'Git ref (tag/branch/SHA) to check out. Defaults to the caller ref.'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -151,6 +156,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -224,6 +231,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7

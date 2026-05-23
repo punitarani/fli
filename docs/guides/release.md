@@ -10,20 +10,34 @@ different tag prefix (`fli-js-vX.Y.Z`).
 
 ## Overview
 
-The release pipeline is two workflows:
+The release pipeline is two independent workflows:
 
 | Workflow | File | Trigger |
 | --- | --- | --- |
 | **Release** | `.github/workflows/release.yml` | `workflow_dispatch` only |
-| **Upload Python Package** | `.github/workflows/publish.yml` | `release: published`, `workflow_dispatch`, `workflow_call` |
+| **Upload Python Package** | `.github/workflows/publish.yml` | `release: published`, `workflow_dispatch` |
 
-`release.yml` bumps the version in `pyproject.toml`, refreshes `uv.lock`,
-commits to `main`, creates an annotated tag and GitHub Release, then calls
-`publish.yml` to build and upload to PyPI via Trusted Publishing.
+`release.yml` is the end-to-end release pipeline: it bumps the version in
+`pyproject.toml`, refreshes `uv.lock`, commits to `main`, creates an annotated
+tag and GitHub Release, runs the full test matrix against the new tag, and
+builds + uploads to PyPI via Trusted Publishing — all inline, no chained
+workflow.
 
-`publish.yml` can also be triggered independently — by publishing a GitHub
-Release manually, or via `workflow_dispatch` (defaults to TestPyPI for
-safe smoke tests).
+`publish.yml` is a standalone publish workflow used for:
+- **Manual recovery** — if `release.yml`'s publish step ever fails, dispatch
+  `publish.yml` on the failed tag (`environment: pypi`) to ship it.
+- **Manual GitHub Release** — if you create a release in the UI from an
+  existing tag, the `release: published` trigger picks it up and publishes.
+- **TestPyPI smoke tests** — `workflow_dispatch` with `environment: testpypi`.
+
+> **Why two workflows instead of one reusable?** PyPI's Trusted Publishing
+> attestations are incompatible with reusable workflow chains
+> ([pypa/gh-action-pypi-publish#166](https://github.com/pypa/gh-action-pypi-publish/issues/166)).
+> When `release.yml` calls `publish.yml` via `workflow_call`, the OIDC token's
+> `job_workflow_ref` points at `publish.yml` while the Sigstore cert's
+> `Build Config URI` points at `release.yml`; PyPI ties both to the same
+> publisher and rejects the attestation. Inlining the publish step into
+> `release.yml` sidesteps this entirely.
 
 ## Cutting a release
 
@@ -70,14 +84,21 @@ modify `pyproject.toml`.
 
 These need to be in place once on the GitHub side:
 
-* **PyPI Trusted Publisher** for the `flights` project, bound to this repo
-  and the `pypi` environment. `publish.yml` requests an OIDC token via
-  `id-token: write` and uses `pypa/gh-action-pypi-publish`.
+* **PyPI Trusted Publishers** for the `flights` project, both bound to this
+  repo and the `pypi` environment:
+  * `release.yml` — used by the automated end-to-end release flow
+  * `publish.yml` — used by manual recovery, `release: published`, and
+    TestPyPI dispatch
+  
+  Configure both at
+  [pypi.org/manage/project/flights/settings/publishing/](https://pypi.org/manage/project/flights/settings/publishing/).
+  Set Environment name to `pypi` on both.
 * **Branch protection on `main`** must permit pushes from `github-actions[bot]`.
   If protection blocks the bot, the release workflow's push will fail; switch
   the checkout step's `token:` to a PAT secret instead.
 * **Workflow permissions**: `release.yml` requires `contents: write` (already
-  declared at the workflow level).
+  declared at the workflow level) and `id-token: write` on the `publish`
+  job for OIDC.
 
 ## Troubleshooting
 
@@ -93,10 +114,26 @@ These need to be in place once on the GitHub side:
 * **Release notes look wrong on first run** — the workflow walks back to the
   last commit whose subject starts with `Bump version`. If you've changed
   that convention, edit `release.yml`'s "Determine commit range" step.
+* **PyPI returns 400 "Invalid attestations supplied"** with cert URI mismatch
+  — the publish job is running via a `workflow_call` chain (the original
+  bug). Make sure the publish job is defined inline in `release.yml`, not
+  invoked via `uses: ./.github/workflows/publish.yml`. As a one-time recovery
+  for the failed tag, dispatch `publish.yml` standalone on that tag.
 
 ## Manual fallback
 
-If the workflow is broken and a release is urgent, you can still:
+If `release.yml`'s publish step fails after the tag and GitHub Release have
+already been created (e.g. transient PyPI outage), recover with:
+
+1. Actions → **Upload Python Package** → Run workflow
+2. **Branch dropdown**: switch to the failed tag (e.g. `vX.Y.Z`)
+3. `environment`: `pypi`
+4. Run
+
+This dispatches `publish.yml` standalone and uploads the same tag's artifact.
+
+If the entire `release.yml` workflow is broken and a release is urgent, you
+can also:
 
 1. Bump the version in `pyproject.toml` and `uv.lock` on a branch, merge to
    `main`.

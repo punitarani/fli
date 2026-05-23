@@ -229,16 +229,58 @@ jobs:
             cat release_notes.md
           } >> "$GITHUB_STEP_SUMMARY"
 
-  publish:
+  # Run the standard test suite against the new tag before publishing.
+  # Called via workflow_call (not publish), so no OIDC/attestation concerns.
+  test:
     needs: release
     if: ${{ needs.release.outputs.did_release == 'true' }}
-    uses: ./.github/workflows/publish.yml
+    uses: ./.github/workflows/ci.yml
     with:
-      environment: pypi
+      ref: ${{ needs.release.outputs.tag }}
+
+  publish:
+    needs: [ release, test ]
+    if: ${{ needs.release.outputs.did_release == 'true' }}
+    runs-on: ubuntu-latest
     permissions:
       contents: read
-      checks: write
-      pull-requests: write
       id-token: write
-    secrets: inherit
+    environment:
+      name: pypi
+      url: https://pypi.org/p/flights
+    steps:
+      # IMPORTANT: build and publish steps live here (inline) rather than
+      # invoking publish.yml via workflow_call. PyPI's Trusted Publishing
+      # attestations are incompatible with reusable workflow chains -- the
+      # OIDC token's job_workflow_ref points at the called workflow while
+      # the Sigstore cert's Build Config URI points at the top-level
+      # workflow. PyPI ties both to the same publisher, so chained
+      # publishes always fail attestation verification.
+      # See https://docs.pypi.org/trusted-publishers/troubleshooting/#reusable-workflows-on-github
+      - name: Checkout release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Build release distributions
+        run: uv build
+
+      - name: Check package
+        run: uv run twine check dist/*
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
 
