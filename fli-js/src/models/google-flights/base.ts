@@ -7,6 +7,7 @@
  */
 
 import { z } from "zod";
+import { parseIsoDate } from "../../core/dates.ts";
 import type { Airline } from "../airline.ts";
 import type { Airport } from "../airport.ts";
 
@@ -268,26 +269,6 @@ export interface FlightSegmentInput {
   travel_date: string;
   time_restrictions?: TimeRestrictions | null;
   selected_flight?: FlightResult | null;
-}
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-function parseIsoDate(s: string): Date {
-  if (!ISO_DATE.test(s)) {
-    throw new TypeError(`Expected YYYY-MM-DD date, got: ${s}`);
-  }
-  const parts = s.split("-").map((p) => Number.parseInt(p, 10));
-  const year = parts[0];
-  const month = parts[1];
-  const day = parts[2];
-  if (year == null || month == null || day == null) {
-    throw new TypeError(`Expected YYYY-MM-DD date, got: ${s}`);
-  }
-  const d = new Date(Date.UTC(year, month - 1, day));
-  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) {
-    throw new TypeError(`Invalid date: ${s}`);
-  }
-  return d;
 }
 
 function todayUtc(): Date {

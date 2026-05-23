@@ -207,6 +207,15 @@ export class Client {
           ok: response.ok,
         };
       } catch (err) {
+        // Distinguish external cancellation from internal timeout: if the
+        // caller's AbortSignal triggered the abort, propagate the original
+        // error without retry and without relabelling it as a timeout. A
+        // consumer catching SearchTimeoutError to decide whether to retry
+        // would otherwise retry on a deliberate cancellation, and the
+        // "Google was slow" message would be misleading.
+        if (isAbortError(err) && externalSignal?.aborted) {
+          throw externalSignal.reason ?? err;
+        }
         lastError = wrapRequestError(method, url, err);
         // For HTTP errors we still respect the retry budget (matches the
         // Python tenacity retry decorator behavior, which retries on any

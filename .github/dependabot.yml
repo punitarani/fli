@@ -40,3 +40,26 @@ updates:
     commit-message:
       prefix: "ci"
       include: "scope"
+
+  # Enable version updates for the fli-js (npm) package
+  - package-ecosystem: "npm"
+    directory: "/fli-js"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "punitarani"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    groups:
+      js-dev-dependencies:
+        patterns:
+          - "@biomejs/*"
+          - "@types/*"
+          - "oxlint"
+          - "typescript"
+      js-production-dependencies:
+        patterns:
+          - "zod"

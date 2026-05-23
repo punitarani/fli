@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -30,11 +31,33 @@ version = "{version}"
 description = "test"
 """
 
+PACKAGE_JSON_TEMPLATE = """\
+{{
+  "name": "fli",
+  "version": "{version}",
+  "description": "test",
+  "type": "module",
+  "dependencies": {{
+    "zod": "^3.23.8"
+  }},
+  "devDependencies": {{
+    "typescript": "^5.7.2"
+  }}
+}}
+"""
+
 
 @pytest.fixture
 def pyproject(tmp_path: Path) -> Path:
     p = tmp_path / "pyproject.toml"
     p.write_text(PYPROJECT_TEMPLATE.format(version="0.8.5"))
+    return p
+
+
+@pytest.fixture
+def package_json(tmp_path: Path) -> Path:
+    p = tmp_path / "package.json"
+    p.write_text(PACKAGE_JSON_TEMPLATE.format(version="0.1.0"))
     return p
 
 
@@ -210,3 +233,172 @@ class TestCLI:
     def test_requires_one_of_bump_or_explicit(self, pyproject: Path, monkeypatch) -> None:
         with pytest.raises(SystemExit):
             self._run(monkeypatch, ["--pyproject", str(pyproject)])
+
+
+class TestPackageJson:
+    """Coverage for ``package.json`` (npm) manifest handling."""
+
+    def test_read_current_version(self, package_json: Path) -> None:
+        assert bump_version.read_current_version_package_json(package_json) == "0.1.0"
+
+    def test_read_raises_when_no_version(self, tmp_path: Path) -> None:
+        p = tmp_path / "package.json"
+        p.write_text('{"name": "fli"}\n')
+        with pytest.raises(RuntimeError):
+            bump_version.read_current_version_package_json(p)
+
+    def test_write_updates_only_top_level_version(self, package_json: Path) -> None:
+        bump_version.write_new_version_package_json(package_json, "0.2.0")
+        text = package_json.read_text()
+        # Should still be valid JSON.
+        parsed = json.loads(text)
+        assert parsed["version"] == "0.2.0"
+        # Nested dependency versions must NOT be rewritten.
+        assert parsed["dependencies"]["zod"] == "^3.23.8"
+        assert parsed["devDependencies"]["typescript"] == "^5.7.2"
+
+    def test_write_preserves_formatting(self, package_json: Path) -> None:
+        before = package_json.read_text()
+        bump_version.write_new_version_package_json(package_json, "0.2.0")
+        after = package_json.read_text()
+        # Only the version line changes; surrounding whitespace untouched.
+        assert before.replace('"version": "0.1.0"', '"version": "0.2.0"') == after
+
+    def test_write_raises_when_no_version_field(self, tmp_path: Path) -> None:
+        p = tmp_path / "package.json"
+        p.write_text('{"name": "fli"}\n')
+        with pytest.raises(RuntimeError):
+            bump_version.write_new_version_package_json(p, "0.2.0")
+
+    def test_write_ignores_nested_version_key_before_top_level(self, tmp_path: Path) -> None:
+        # A nested "version" key that appears textually BEFORE the top-level
+        # one must not be mistaken for it (this was the failure mode of the
+        # earlier regex-based implementation).
+        content = (
+            "{\n"
+            '  "name": "fli",\n'
+            '  "overrides": {\n'
+            '    "version": "9.9.9"\n'
+            "  },\n"
+            '  "version": "0.1.0"\n'
+            "}\n"
+        )
+        p = tmp_path / "package.json"
+        p.write_text(content)
+        bump_version.write_new_version_package_json(p, "0.2.0")
+        parsed = json.loads(p.read_text())
+        assert parsed["version"] == "0.2.0"
+        # Nested same-named key must remain untouched.
+        assert parsed["overrides"]["version"] == "9.9.9"
+
+    def test_write_ignores_nested_version_inside_inline_object(self, tmp_path: Path) -> None:
+        # Same as above but with an inline-object value so the nested
+        # "version" key sits on the same line as the outer key.
+        content = '{\n  "overrides": {"version": "9.9.9"},\n  "version": "0.1.0"\n}\n'
+        p = tmp_path / "package.json"
+        p.write_text(content)
+        bump_version.write_new_version_package_json(p, "0.2.0")
+        parsed = json.loads(p.read_text())
+        assert parsed["version"] == "0.2.0"
+        assert parsed["overrides"]["version"] == "9.9.9"
+
+    def test_write_ignores_version_substring_in_other_value(self, tmp_path: Path) -> None:
+        # A string value containing the substring "version" must not be
+        # mistaken for the version field.
+        content = (
+            '{\n  "description": "release v1.0 with new version layout",\n  "version": "0.1.0"\n}\n'
+        )
+        p = tmp_path / "package.json"
+        p.write_text(content)
+        bump_version.write_new_version_package_json(p, "0.2.0")
+        parsed = json.loads(p.read_text())
+        assert parsed["version"] == "0.2.0"
+        assert parsed["description"] == "release v1.0 with new version layout"
+
+
+class TestPackageJsonCLI:
+    """End-to-end CLI behaviour for ``--package-json`` + ``--tag-prefix``."""
+
+    def _run(self, monkeypatch, args) -> int:
+        monkeypatch.setattr(sys, "argv", ["bump_version.py", *args])
+        return bump_version.main(args)
+
+    def test_print_only_does_not_modify_file(self, package_json: Path, monkeypatch, capsys) -> None:
+        rc = self._run(
+            monkeypatch,
+            [
+                "--package-json",
+                str(package_json),
+                "--bump",
+                "minor",
+                "--tag-prefix",
+                "fli-js-v",
+            ],
+        )
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "current=0.1.0" in out
+        assert "new=0.2.0" in out
+        assert "tag=fli-js-v0.2.0" in out
+        # File untouched
+        assert bump_version.read_current_version_package_json(package_json) == "0.1.0"
+
+    def test_write_updates_file(self, package_json: Path, monkeypatch) -> None:
+        rc = self._run(
+            monkeypatch,
+            [
+                "--package-json",
+                str(package_json),
+                "--bump",
+                "patch",
+                "--write",
+            ],
+        )
+        assert rc == 0
+        assert bump_version.read_current_version_package_json(package_json) == "0.1.1"
+
+    def test_explicit_version_with_custom_tag_prefix(
+        self, package_json: Path, monkeypatch, capsys
+    ) -> None:
+        rc = self._run(
+            monkeypatch,
+            [
+                "--package-json",
+                str(package_json),
+                "--explicit",
+                "1.0.0",
+                "--tag-prefix",
+                "fli-js-v",
+            ],
+        )
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "new=1.0.0" in out
+        assert "tag=fli-js-v1.0.0" in out
+
+    def test_pyproject_and_package_json_are_mutually_exclusive(
+        self, pyproject: Path, package_json: Path, monkeypatch
+    ) -> None:
+        with pytest.raises(SystemExit):
+            self._run(
+                monkeypatch,
+                [
+                    "--pyproject",
+                    str(pyproject),
+                    "--package-json",
+                    str(package_json),
+                    "--bump",
+                    "patch",
+                ],
+            )
+
+    def test_default_tag_prefix_for_pyproject(self, pyproject: Path, monkeypatch, capsys) -> None:
+        # Sanity: when --tag-prefix isn't supplied, it defaults to 'v' so the
+        # existing Python release workflow keeps producing ``vX.Y.Z`` tags.
+        rc = self._run(
+            monkeypatch,
+            ["--pyproject", str(pyproject), "--bump", "patch"],
+        )
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "tag=v0.8.6" in out

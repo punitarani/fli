@@ -4,6 +4,7 @@
  * 1:1 port of fli/models/google_flights/dates.py.
  */
 
+import { formatIsoDate, parseIsoDate } from "../../core/dates.ts";
 import { AIRLINE_NAMES, type Airline } from "../airline.ts";
 import {
   type Alliance,
@@ -19,7 +20,6 @@ import {
 } from "./base.ts";
 
 const MAX_PAST_FROM_DATE_DAYS = 6;
-const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function airlineSortKey(a: Airline): string {
   const code = a.startsWith("_") ? a.slice(1) : a;
@@ -28,27 +28,6 @@ function airlineSortKey(a: Airline): string {
 
 function serializeCode(code: string): string {
   return code.startsWith("_") ? code.slice(1) : code;
-}
-
-function parseIsoDate(s: string): Date {
-  if (!ISO_DATE_RE.test(s)) throw new TypeError(`Expected YYYY-MM-DD, got: ${s}`);
-  const parts = s.split("-").map((p) => Number.parseInt(p, 10));
-  const [y, m, d] = parts;
-  if (y == null || m == null || d == null) {
-    throw new TypeError(`Expected YYYY-MM-DD, got: ${s}`);
-  }
-  const date = new Date(Date.UTC(y, m - 1, d));
-  if (date.getUTCFullYear() !== y || date.getUTCMonth() !== m - 1 || date.getUTCDate() !== d) {
-    throw new TypeError(`Invalid date: ${s}`);
-  }
-  return date;
-}
-
-function formatIso(d: Date): string {
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(d.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
 }
 
 function todayUtc(): Date {
@@ -138,8 +117,8 @@ export class DateSearchFilters {
     const fromDate = parseIsoDate(from_date);
     const toDate = parseIsoDate(to_date);
     if (fromDate > toDate) {
-      const swappedFrom = formatIso(toDate);
-      const swappedTo = formatIso(fromDate);
+      const swappedFrom = formatIsoDate(toDate);
+      const swappedTo = formatIsoDate(fromDate);
       from_date = swappedFrom;
       to_date = swappedTo;
     }
@@ -157,7 +136,7 @@ export class DateSearchFilters {
         (today.getTime() - fromParsed.getTime()) / (1000 * 60 * 60 * 24),
       );
       if (deltaDays > MAX_PAST_FROM_DATE_DAYS) {
-        from_date = formatIso(today);
+        from_date = formatIsoDate(today);
       }
     }
 

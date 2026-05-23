@@ -123,6 +123,66 @@ describe("Client", () => {
     }
   });
 
+  test("external AbortSignal propagates without retry and is NOT a SearchTimeoutError", async () => {
+    let calls = 0;
+    const fake = async (_u: unknown, init?: RequestInit): Promise<Response> => {
+      calls++;
+      return new Promise<Response>((_, reject) => {
+        const signal = init?.signal;
+        if (signal?.aborted) {
+          reject(new DOMException("Aborted", "AbortError"));
+          return;
+        }
+        signal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"));
+        });
+      });
+    };
+    const c = new Client({
+      fetchImpl: asFetch(fake),
+      retries: 3,
+      timeoutMs: 60_000,
+      backoffMs: 1,
+    });
+    const controller = new AbortController();
+    const cancelled = new Error("caller aborted");
+    setTimeout(() => controller.abort(cancelled), 20);
+    try {
+      await c.post("https://example.com", { body: "", signal: controller.signal });
+      expect.unreachable();
+    } catch (e) {
+      // Caller's reason propagates as-is — NOT wrapped as a timeout.
+      expect(e).toBe(cancelled);
+      expect(e).not.toBeInstanceOf(SearchTimeoutError);
+    }
+    // No retry — the request stops the moment the caller cancels.
+    expect(calls).toBe(1);
+  });
+
+  test("pre-aborted external signal short-circuits before any fetch retry", async () => {
+    let calls = 0;
+    // Real `fetch` rejects synchronously on a pre-aborted signal — model that.
+    const fake = async (_u: unknown, init?: RequestInit): Promise<Response> => {
+      calls++;
+      if (init?.signal?.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+      }
+      return okResponse();
+    };
+    const c = new Client({ fetchImpl: asFetch(fake), retries: 3, backoffMs: 1 });
+    const reason = new Error("already cancelled");
+    const controller = new AbortController();
+    controller.abort(reason);
+    try {
+      await c.post("https://example.com", { body: "", signal: controller.signal });
+      expect.unreachable();
+    } catch (e) {
+      expect(e).toBe(reason);
+      expect(e).not.toBeInstanceOf(SearchTimeoutError);
+    }
+    expect(calls).toBe(1);
+  });
+
   test("retries on transient network failure then succeeds", async () => {
     let calls = 0;
     const fake = async (): Promise<Response> => {

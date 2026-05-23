@@ -6,6 +6,7 @@
  */
 
 import { extractCurrencyFromPriceToken } from "../core/currency.ts";
+import { formatIsoDate, parseIsoDate } from "../core/dates.ts";
 import { TripType } from "../models/google-flights/base.ts";
 import { DateSearchFilters } from "../models/google-flights/dates.ts";
 import { type Client, getClient } from "./client.ts";
@@ -28,28 +29,6 @@ export interface DateSearchOptions {
   currency?: string | null;
   language?: string | null;
   country?: string | null;
-}
-
-function parseIsoDate(s: string): Date {
-  const parts = s.split("-");
-  if (parts.length < 3) throw new Error(`Invalid date: ${s}`);
-  const y = Number.parseInt(parts[0] as string, 10);
-  const m = Number.parseInt(parts[1] as string, 10);
-  const d = Number.parseInt(parts[2] as string, 10);
-  // `Number.parseInt("abc", 10)` returns NaN, and `NaN == null` is false, so
-  // a nullish-only guard would let malformed dates produce an Invalid Date
-  // that silently propagates as NaN-valued `getTime()` downstream.
-  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) {
-    throw new Error(`Invalid date: ${s}`);
-  }
-  return new Date(Date.UTC(y, m - 1, d));
-}
-
-function formatIsoDate(d: Date): string {
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(d.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
 }
 
 function cloneSegments(filters: DateSearchFilters) {

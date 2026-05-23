@@ -1,0 +1,173 @@
+name: Upload npm Package
+
+on:
+  release:
+    types: [ published ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to publish to'
+        required: true
+        default: 'dry-run'
+        type: choice
+        options:
+        - dry-run
+        - npm
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Environment to publish to (npm or dry-run)'
+        required: false
+        default: 'npm'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  fli-js-tests:
+    # Only run when we're actually going to publish: workflow_dispatch /
+    # workflow_call always; release events only for the fli-js-v* tag family
+    # so a PyPI release (vX.Y.Z) does not pointlessly rerun the JS pipeline.
+    if: ${{ github.event_name != 'release' || startsWith(github.event.release.tag_name, 'fli-js-v') }}
+    name: fli-js / Format, lint, typecheck, tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: fli-js
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Biome format check
+        run: bun run format:check
+
+      - name: Biome + oxlint check
+        run: bun run lint
+
+      - name: TypeScript typecheck
+        run: bun run typecheck
+
+      - name: Verify generated enums are in sync with data/
+        run: |
+          bun run generate:enums
+          if ! git diff --quiet src/models/airport.ts src/models/airline.ts; then
+            echo "::error::Generated enums are out of date — run 'bun run generate:enums' and commit." >&2
+            git diff --stat src/models/airport.ts src/models/airline.ts
+            exit 1
+          fi
+
+      - name: Run tests
+        run: bun run test
+
+  release-build:
+    needs: [ fli-js-tests ]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: fli-js
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build distribution
+        run: bun run build
+
+      - name: Verify build output looks sane
+        run: |
+          test -f dist/index.js
+          test -f dist/index.d.ts
+          test -f dist/core/index.js
+          test -f dist/models/index.js
+          test -f dist/search/index.js
+          # No stray .ts imports in compiled JS (sanity check rewriteRelativeImportExtensions).
+          if grep -rE 'from "[^"]*\.ts"' dist/ --include='*.js'; then
+            echo "::error::Compiled JS contains .ts imports — TS extension rewrite failed." >&2
+            exit 1
+          fi
+
+      - name: Inspect packed contents
+        run: |
+          npm pack --dry-run --json > /tmp/pack.json
+          python3 - <<'PY'
+          import json, sys
+          d = json.load(open("/tmp/pack.json"))[0]
+          files = [f["path"] for f in d["files"]]
+          assert any(p.startswith("dist/") for p in files), f"no dist/ files in tarball: {files}"
+          assert "package.json" in files
+          assert "README.md" in files
+          assert "LICENSE" in files
+          print(f"OK — {len(files)} files, package size {d['size']} bytes")
+          PY
+
+      - name: Pack tarball
+        run: npm pack
+
+      - name: Upload tarball
+        uses: actions/upload-artifact@v8
+        with:
+          name: npm-tarball
+          path: fli-js/*.tgz
+
+  npm-publish:
+    runs-on: ubuntu-latest
+    needs:
+      - release-build
+    # Publish on a real GitHub Release (fli-js-v* only), or when
+    # workflow_call/workflow_dispatch explicitly asks for environment=npm.
+    if: |
+      (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'fli-js-v'))
+      || inputs.environment == 'npm'
+    permissions:
+      id-token: write
+      contents: read
+
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/fli
+
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Retrieve packed tarball
+        uses: actions/download-artifact@v8
+        with:
+          name: npm-tarball
+          path: dist-tarball/
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          tarball=$(find dist-tarball -maxdepth 1 -name '*.tgz' -print -quit)
+          if [ -z "$tarball" ]; then
+            echo "::error::No tarball found in dist-tarball/"
+            exit 1
+          fi
+          echo "Publishing ${tarball}"
+          npm publish "${tarball}" --provenance --access public
