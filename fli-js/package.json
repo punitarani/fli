@@ -1,6 +1,6 @@
 {
-  "name": "fli",
-  "version": "0.0.2",
+  "name": "fli-js",
+  "version": "0.0.4",
   "description": "TypeScript port of the fli library: programmatic access to Google Flights data through direct API interaction.",
   "type": "module",
   "main": "./dist/index.js",

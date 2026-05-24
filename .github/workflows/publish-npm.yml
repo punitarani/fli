@@ -134,10 +134,16 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - release-build
-    # Publish on a real GitHub Release (fli-js-v* only), or when
-    # workflow_call/workflow_dispatch explicitly asks for environment=npm.
+    # Publish when workflow_call / workflow_dispatch explicitly asks for
+    # environment=npm (the canonical path: release-npm.yml calls this workflow),
+    # or on a human-created GitHub Release tagged fli-js-v* (manual fallback).
+    # release-npm.yml creates its tag/Release via the bot AND publishes via the
+    # workflow_call above, so excluding github-actions[bot] here prevents the
+    # release event from triggering a SECOND, racing publish of the same version
+    # — which collides on the provenance transparency log
+    # (TLOG_CREATE_ENTRY_ERROR 409). Mirrors publish.yml (PyPI).
     if: |
-      (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'fli-js-v'))
+      (github.event_name == 'release' && github.actor != 'github-actions[bot]' && startsWith(github.event.release.tag_name, 'fli-js-v'))
       || inputs.environment == 'npm'
     permissions:
       id-token: write
@@ -145,7 +151,7 @@ jobs:
 
     environment:
       name: npm
-      url: https://www.npmjs.com/package/fli
+      url: https://www.npmjs.com/package/fli-js
 
     steps:
       - name: Setup Node.js
@@ -169,5 +175,8 @@ jobs:
             echo "::error::No tarball found in dist-tarball/"
             exit 1
           fi
-          echo "Publishing ${tarball}"
-          npm publish "${tarball}" --provenance --access public
+          # `npm publish <path>` treats a bare one-slash path like
+          # `dist-tarball/foo.tgz` as a GitHub owner/repo shorthand and tries to
+          # git-clone it. The leading `./` forces npm to treat it as a local tarball.
+          echo "Publishing ./${tarball}"
+          npm publish "./${tarball}" --provenance --access public

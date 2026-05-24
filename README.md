@@ -27,7 +27,7 @@ fli-mcp
 fli-mcp-http  # serves at http://127.0.0.1:8000/mcp/
 ```
 
-![MCP Demo](https://github.com/punitarani/fli/blob/main/data/mcp-demo.gif)
+![MCP Demo](https://raw.githubusercontent.com/punitarani/fli/main/docs/assets/mcp-demo.gif)
 
 ### Connecting to Claude Desktop
 
@@ -115,7 +115,7 @@ pipx install flights
 fli --help
 ```
 
-![CLI Demo](https://github.com/punitarani/fli/blob/main/data/cli-demo.png)
+![CLI Demo](https://raw.githubusercontent.com/punitarani/fli/main/docs/assets/cli-demo.png)
 
 ## Features
 
