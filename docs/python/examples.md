@@ -1,21 +1,21 @@
 # Advanced Examples
 
-This document contains advanced code examples demonstrating complex flight search scenarios. All examples are available as runnable scripts in the `examples/` directory.
+This document contains advanced code examples demonstrating complex flight search scenarios. All examples are available as runnable scripts in the [`examples/python/`](https://github.com/punitarani/fli/tree/main/examples/python) directory.
 
 ## Running Examples
 
 ```bash
 # Run with uv (recommended - handles dependencies automatically)
-uv run python examples/complex_flight_search.py
-uv run python examples/time_restrictions_search.py
-uv run python examples/price_tracking.py
+uv run python examples/python/complex_flight_search.py
+uv run python examples/python/time_restrictions_search.py
+uv run python examples/python/price_tracking.py
 
 # Or install dependencies first, then run directly
 pip install pydantic curl_cffi httpx pandas tenacity
-python examples/complex_flight_search.py
+python examples/python/complex_flight_search.py
 ```
 
-> 💡 **Tip**: All example files include automatic dependency checking and will show helpful installation instructions if dependencies are missing.
+> 💡 **Tip**: Each example is self-contained — change the airports, dates, and filters at the top of the script to fit your search.
 
 ## Complex Flight Search
 

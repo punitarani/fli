@@ -79,25 +79,23 @@ results = search.search(filters)
 
 ### Running These Examples
 
-You can find complete, runnable versions of these examples in the `examples/` directory:
+You can find complete, runnable versions of these examples in the [`examples/python/`](https://github.com/punitarani/fli/tree/main/examples/python) directory:
 
 ```bash
 # Run with uv (recommended)
-uv run python examples/basic_one_way_search.py
-uv run python examples/date_range_search.py
+uv run python examples/python/basic_one_way_search.py
+uv run python examples/python/date_range_search.py
 
 # Or install dependencies and run directly
 pip install pydantic curl_cffi httpx
-python examples/basic_one_way_search.py
+python examples/python/basic_one_way_search.py
 ```
 
 For more advanced examples, see:
 
-* `examples/complex_flight_search.py` - Advanced filtering
-* `examples/result_processing.py` - Data analysis
-* `examples/error_handling_with_retries.py` - Robust error handling
-
-> 💡 All examples include automatic dependency checking and helpful error messages.
+* `examples/python/complex_flight_search.py` - Advanced filtering
+* `examples/python/result_processing.py` - Data analysis
+* `examples/python/error_handling_with_retries.py` - Robust error handling
 
 ## HTTP Client
 
