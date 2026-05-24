@@ -1,7 +1,7 @@
 # Releasing fli-js to npm
 
-Releases of the TypeScript / JavaScript package `fli` on
-[npmjs.com](https://www.npmjs.com/package/fli) are driven by a manual
+Releases of the TypeScript / JavaScript package `fli-js` on
+[npmjs.com](https://www.npmjs.com/package/fli-js) are driven by a manual
 GitHub Actions workflow. There is no auto-publish on push to `main`;
 cutting a release is always an explicit, one-click action — same shape
 as the Python release flow, but on its own schedule.

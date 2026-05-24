@@ -9,7 +9,7 @@ filter encoding, same wire-format decoders.
 ## Install
 
 ```bash
-bun add @punitarani/fli   # or: npm install @punitarani/fli / pnpm add @punitarani/fli
+npm i fli-js   # or: pnpm add fli-js / yarn add fli-js / bun add fli-js
 ```
 
 ## Quick start
@@ -24,7 +24,7 @@ import {
   SearchFlights,
   SeatType,
   SortBy,
-} from "@punitarani/fli";
+} from "fli-js";
 
 const filters = new FlightSearchFilters({
   passenger_info: { adults: 1, children: 0, infants_in_seat: 0, infants_on_lap: 0 },
@@ -47,7 +47,7 @@ console.log(results);
 ### Date-range search
 
 ```ts
-import { Airport, DateSearchFilters, FlightSegment, SearchDates } from "@punitarani/fli";
+import { Airport, DateSearchFilters, FlightSegment, SearchDates } from "fli-js";
 
 const filters = new DateSearchFilters({
   passenger_info: { adults: 1, children: 0, infants_in_seat: 0, infants_on_lap: 0 },
@@ -77,7 +77,7 @@ The TypeScript port uses native `fetch` (Bun's built-in) and replaces
   explicit `proxy` option on `new Client({...})`).
 
 ```ts
-import { Client, SearchFlights } from "@punitarani/fli";
+import { Client, SearchFlights } from "fli-js";
 
 const search = new SearchFlights(
   new Client({ proxy: "http://user:pass@proxy.example.com:8080" }),
@@ -89,11 +89,11 @@ Set the per-request timeout with `FLI_TIMEOUT=30` (seconds) or via the
 
 ## Modules
 
-- `fli/models` — `Airport`, `Airline`, `FlightSearchFilters`, `DateSearchFilters`,
+- `fli-js/models` — `Airport`, `Airline`, `FlightSearchFilters`, `DateSearchFilters`,
   `FlightSegment`, `FlightResult`, `BookingOption`, all enums.
-- `fli/core` — string-to-enum parsers, segment builders, airport search,
+- `fli-js/core` — string-to-enum parsers, segment builders, airport search,
   currency token decoders.
-- `fli/search` — `SearchFlights`, `SearchDates`, `Client`, error classes,
+- `fli-js/search` — `SearchFlights`, `SearchDates`, `Client`, error classes,
   protobuf token helpers (`buildBookingToken`, `extractBookingTokenFromTfu`).
 
 ## Development

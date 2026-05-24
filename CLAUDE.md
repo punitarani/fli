@@ -141,7 +141,7 @@ server-side; the data is not displayed in the current release.
 
 ## Releasing
 
-The Python (`flights` on PyPI) and JavaScript (`fli` on npm) packages
+The Python (`flights` on PyPI) and JavaScript (`fli-js` on npm) packages
 are versioned and released **independently**, but with the same shape:
 manual `workflow_dispatch` → bump → tag → GitHub Release → publish.
 
