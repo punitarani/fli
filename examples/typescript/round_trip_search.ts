@@ -49,7 +49,7 @@ async function main(): Promise<void> {
   }
 
   for (const [outbound, ret] of itineraries) {
-    console.log(`Total: $${outbound.price}`);
+    console.log(`Total: $${outbound.price ?? "N/A"}`);
     for (const [label, flight] of [
       ["Outbound", outbound],
       ["Return", ret],

@@ -59,7 +59,7 @@ async function main(): Promise<void> {
       const last = segment.legs[segment.legs.length - 1];
       console.log(
         `  ${first.departure_airport} -> ${last.arrival_airport}  ` +
-          `$${segment.price}  ${segment.duration} min  ${segment.stops} stop(s)`,
+          `$${segment.price ?? "N/A"}  ${segment.duration} min  ${segment.stops} stop(s)`,
       );
     }
   });

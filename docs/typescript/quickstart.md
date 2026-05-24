@@ -27,13 +27,16 @@ import {
   SortBy,
 } from "fli";
 
+// travel_date must be in the future, so compute it dynamically.
+const inDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+
 const filters = new FlightSearchFilters({
   passenger_info: { adults: 1, children: 0, infants_in_seat: 0, infants_on_lap: 0 },
   flight_segments: [
     new FlightSegment({
       departure_airport: [[[Airport.JFK, 0]]],
       arrival_airport: [[[Airport.LAX, 0]]],
-      travel_date: "2026-12-25",
+      travel_date: inDays(30),
     }),
   ],
   seat_type: SeatType.ECONOMY,
@@ -43,7 +46,7 @@ const filters = new FlightSearchFilters({
 
 const results = await new SearchFlights().search(filters, { currency: "USD" });
 for (const flight of results ?? []) {
-  console.log(`$${flight.price} — ${flight.duration} min — ${flight.stops} stop(s)`);
+  console.log(`$${flight.price ?? "N/A"} — ${flight.duration} min — ${flight.stops} stop(s)`);
 }
 ```
 
@@ -73,6 +76,8 @@ import {
   TripType,
 } from "fli";
 
+const inDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+
 const filters = new FlightSearchFilters({
   trip_type: TripType.ROUND_TRIP,
   passenger_info: { adults: 1, children: 0, infants_in_seat: 0, infants_on_lap: 0 },
@@ -80,12 +85,12 @@ const filters = new FlightSearchFilters({
     new FlightSegment({
       departure_airport: [[[Airport.JFK, 0]]],
       arrival_airport: [[[Airport.LAX, 0]]],
-      travel_date: "2026-12-25",
+      travel_date: inDays(30),
     }),
     new FlightSegment({
       departure_airport: [[[Airport.LAX, 0]]],
       arrival_airport: [[[Airport.JFK, 0]]],
-      travel_date: "2027-01-02",
+      travel_date: inDays(37),
     }),
   ],
 });
@@ -95,7 +100,7 @@ const itineraries = (await new SearchFlights().search(filters, { topN: 5 })) as
   | null;
 
 for (const [outbound, ret] of itineraries ?? []) {
-  console.log(`Total $${outbound.price} (return ${ret.legs[0].flight_number})`);
+  console.log(`Total $${outbound.price ?? "N/A"} (return ${ret.legs[0].flight_number})`);
 }
 ```
 
@@ -104,17 +109,19 @@ for (const [outbound, ret] of itineraries ?? []) {
 ```ts
 import { Airport, DateSearchFilters, FlightSegment, SearchDates } from "fli";
 
+const inDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+
 const filters = new DateSearchFilters({
   passenger_info: { adults: 1, children: 0, infants_in_seat: 0, infants_on_lap: 0 },
   flight_segments: [
     new FlightSegment({
       departure_airport: [[[Airport.JFK, 0]]],
       arrival_airport: [[[Airport.LAX, 0]]],
-      travel_date: "2026-12-01",
+      travel_date: inDays(30),
     }),
   ],
-  from_date: "2026-12-01",
-  to_date: "2026-12-31",
+  from_date: inDays(30),
+  to_date: inDays(60),
 });
 
 const dates = await new SearchDates().search(filters);
@@ -141,13 +148,15 @@ import {
   SeatType,
 } from "fli";
 
+const inDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+
 const filters = new FlightSearchFilters({
   passenger_info: { adults: 1, children: 0, infants_in_seat: 0, infants_on_lap: 0 },
   flight_segments: [
     new FlightSegment({
       departure_airport: [[[Airport.JFK, 0]]],
       arrival_airport: [[[Airport.NRT, 0]]],
-      travel_date: "2026-12-25",
+      travel_date: inDays(30),
     }),
   ],
   seat_type: SeatType.BUSINESS,

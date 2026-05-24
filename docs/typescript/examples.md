@@ -45,6 +45,8 @@ import {
   TripType,
 } from "fli";
 
+const inDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+
 const leg = (from: Airport, to: Airport, date: string) =>
   new FlightSegment({
     departure_airport: [[[from, 0]]],
@@ -56,9 +58,9 @@ const filters = new FlightSearchFilters({
   trip_type: TripType.MULTI_CITY,
   passenger_info: { adults: 1, children: 0, infants_in_seat: 0, infants_on_lap: 0 },
   flight_segments: [
-    leg(Airport.JFK, Airport.LHR, "2026-12-25"),
-    leg(Airport.LHR, Airport.CDG, "2026-12-29"),
-    leg(Airport.CDG, Airport.JFK, "2027-01-01"),
+    leg(Airport.JFK, Airport.LHR, inDays(30)),
+    leg(Airport.LHR, Airport.CDG, inDays(34)),
+    leg(Airport.CDG, Airport.JFK, inDays(38)),
   ],
 });
 

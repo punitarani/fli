@@ -58,7 +58,9 @@ async function main(): Promise<void> {
   console.log(`Found ${flights.length} flights (prices in EUR):`);
   for (const flight of flights.slice(0, 10)) {
     const carriers = [...new Set(flight.legs.map((l) => l.airline))].sort().join(" / ");
-    console.log(`  EUR ${flight.price}  ${flight.duration} min  ${flight.stops} stop(s)  via ${carriers}`);
+    console.log(
+      `  EUR ${flight.price ?? "N/A"}  ${flight.duration} min  ${flight.stops} stop(s)  via ${carriers}`,
+    );
   }
 }
 

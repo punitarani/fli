@@ -46,7 +46,9 @@ async function main(): Promise<void> {
   }
 
   for (const flight of results) {
-    console.log(`Price: $${flight.price}  Duration: ${flight.duration} min  Stops: ${flight.stops}`);
+    console.log(
+      `Price: $${flight.price ?? "N/A"}  Duration: ${flight.duration} min  Stops: ${flight.stops}`,
+    );
     for (const leg of flight.legs) {
       console.log(
         `  ${leg.airline} ${leg.flight_number}: ` +
