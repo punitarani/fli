@@ -43,7 +43,7 @@ import {
   FlightSegment,
   SearchFlights,
   TripType,
-} from "fli";
+} from "fli-js";
 
 const inDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
 
@@ -81,7 +81,7 @@ import {
   SearchConnectionError,
   SearchHTTPError,
   SearchTimeoutError,
-} from "fli";
+} from "fli-js";
 
 try {
   await new SearchFlights().search(filters);

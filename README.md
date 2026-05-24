@@ -426,15 +426,17 @@ Each example is self-contained — change the airports, dates, and filters at th
 ## TypeScript / JavaScript
 
 Fli is also available as a 1:1 TypeScript port, published to npm as
-[`fli`](https://www.npmjs.com/package/fli). Same models, same filter encoding,
+[`fli-js`](https://www.npmjs.com/package/fli-js). Same models, same filter encoding,
 same direct-API approach.
 
 ```bash
-bun add fli   # or: npm install fli
+bun add fli-js   # or: npm install fli-js
 ```
 
 ```ts
-import { Airport, FlightSearchFilters, FlightSegment, SearchFlights, SeatType } from "fli";
+import { Airport, FlightSearchFilters, FlightSegment, SearchFlights, SeatType } from "fli-js";
+
+const inDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
 
 const filters = new FlightSearchFilters({
   passenger_info: { adults: 1, children: 0, infants_in_seat: 0, infants_on_lap: 0 },
@@ -442,7 +444,7 @@ const filters = new FlightSearchFilters({
     new FlightSegment({
       departure_airport: [[[Airport.JFK, 0]]],
       arrival_airport: [[[Airport.LAX, 0]]],
-      travel_date: "2026-12-25",
+      travel_date: inDays(30),
     }),
   ],
   seat_type: SeatType.ECONOMY,

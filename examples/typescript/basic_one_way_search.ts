@@ -13,7 +13,7 @@ import {
   SearchFlights,
   SeatType,
   SortBy,
-} from "fli";
+} from "fli-js";
 
 function inDays(days: number): string {
   const d = new Date();

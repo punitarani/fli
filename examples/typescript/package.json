@@ -12,6 +12,6 @@
     "errors": "bun run error_handling_with_retries.ts"
   },
   "dependencies": {
-    "fli": "^0.0.2"
+    "fli-js": "^0.0.4"
   }
 }

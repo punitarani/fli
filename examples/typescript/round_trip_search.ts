@@ -13,7 +13,7 @@ import {
   FlightSegment,
   SearchFlights,
   TripType,
-} from "fli";
+} from "fli-js";
 
 function inDays(days: number): string {
   const d = new Date();

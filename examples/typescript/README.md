@@ -1,6 +1,6 @@
 # Fli TypeScript Examples
 
-Runnable TypeScript examples for the [`fli`](https://www.npmjs.com/package/fli)
+Runnable TypeScript examples for the [`fli-js`](https://www.npmjs.com/package/fli-js)
 library. Each file is standalone and mirrors its Python counterpart in
 [`../python`](../python).
 

@@ -10,7 +10,7 @@ Fli ships in two flavors with a shared design:
 | | Package | Install | Docs |
 |---|---|---|---|
 | **Python** | [`flights`](https://pypi.org/project/flights/) (PyPI) | `pip install flights` | [Python Quick Start](python/quickstart.md) |
-| **TypeScript** | [`fli`](https://www.npmjs.com/package/fli) (npm) | `bun add fli` | [TypeScript Quick Start](typescript/quickstart.md) |
+| **TypeScript** | [`fli-js`](https://www.npmjs.com/package/fli-js) (npm) | `bun add fli-js` | [TypeScript Quick Start](typescript/quickstart.md) |
 
 The TypeScript package is a 1:1 port of the Python library — same models, same
 filter encoding, same wire-format decoders.
@@ -60,7 +60,7 @@ for flight in SearchFlights().search(filters) or []:
 import {
   Airport, FlightSearchFilters, FlightSegment,
   MaxStops, SearchFlights, SeatType, SortBy,
-} from "fli";
+} from "fli-js";
 
 const filters = new FlightSearchFilters({
   passenger_info: { adults: 1, children: 0, infants_in_seat: 0, infants_on_lap: 0 },

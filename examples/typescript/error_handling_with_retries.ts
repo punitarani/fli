@@ -17,7 +17,7 @@ import {
   SearchFlights,
   SearchHTTPError,
   SearchTimeoutError,
-} from "fli";
+} from "fli-js";
 
 function inDays(days: number): string {
   const d = new Date();

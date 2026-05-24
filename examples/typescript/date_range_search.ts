@@ -6,7 +6,7 @@
  * one-way, [outbound, return] for round trips). Run with:
  *   bun run date_range_search.ts
  */
-import { Airport, DateSearchFilters, FlightSegment, SearchDates } from "fli";
+import { Airport, DateSearchFilters, FlightSegment, SearchDates } from "fli-js";
 
 function inDays(days: number): string {
   const d = new Date();

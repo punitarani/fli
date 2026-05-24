@@ -1,14 +1,14 @@
 # TypeScript Quick Start
 
 `fli` is a 1:1 TypeScript / JavaScript port of the Python library, published
-to npm as [`fli`](https://www.npmjs.com/package/fli). It mirrors the Python
+to npm as [`fli-js`](https://www.npmjs.com/package/fli-js). It mirrors the Python
 package — same models, same filter encoding, same wire-format decoders — and
 talks directly to Google Flights (no scraping).
 
 ## Installation
 
 ```bash
-bun add fli       # or: npm install fli / pnpm add fli
+bun add fli-js       # or: npm install fli-js / pnpm add fli-js
 ```
 
 The package ships ESM type definitions. It runs on Bun and on Node via a
@@ -25,7 +25,7 @@ import {
   SearchFlights,
   SeatType,
   SortBy,
-} from "fli";
+} from "fli-js";
 
 // travel_date must be in the future, so compute it dynamically.
 const inDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
@@ -74,7 +74,7 @@ import {
   FlightSegment,
   SearchFlights,
   TripType,
-} from "fli";
+} from "fli-js";
 
 const inDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
 
@@ -107,7 +107,7 @@ for (const [outbound, ret] of itineraries ?? []) {
 ## Cheapest dates
 
 ```ts
-import { Airport, DateSearchFilters, FlightSegment, SearchDates } from "fli";
+import { Airport, DateSearchFilters, FlightSegment, SearchDates } from "fli-js";
 
 const inDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
 
@@ -146,7 +146,7 @@ import {
   MaxStops,
   SearchFlights,
   SeatType,
-} from "fli";
+} from "fli-js";
 
 const inDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
 
@@ -181,7 +181,7 @@ The `Client` rate-limits to 10 req/s and retries transient failures with
 exponential backoff. Tune it or point it at a proxy:
 
 ```ts
-import { Client, SearchFlights } from "fli";
+import { Client, SearchFlights } from "fli-js";
 
 const client = new Client({
   timeoutMs: 30_000,
