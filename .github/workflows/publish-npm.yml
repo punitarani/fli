@@ -169,5 +169,8 @@ jobs:
             echo "::error::No tarball found in dist-tarball/"
             exit 1
           fi
-          echo "Publishing ${tarball}"
-          npm publish "${tarball}" --provenance --access public
+          # `npm publish <path>` treats a bare one-slash path like
+          # `dist-tarball/foo.tgz` as a GitHub owner/repo shorthand and tries to
+          # git-clone it. The leading `./` forces npm to treat it as a local tarball.
+          echo "Publishing ./${tarball}"
+          npm publish "./${tarball}" --provenance --access public
