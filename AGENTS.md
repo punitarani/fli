@@ -27,8 +27,9 @@ All standard commands are in the `Makefile` and `CLAUDE.md`. Key ones:
 
 Releases are manual: GitHub Actions → **Release** → Run workflow on `main`,
 choose `bump=patch|minor|major|explicit`. Run with `dry_run=true` first to
-preview. Bump logic is in `scripts/bump_version.py` (testable). Full guide:
-`docs/guides/release.md`.
+preview. Bump logic is in `scripts/bump_version.py` (testable). See the
+Releasing section in `CLAUDE.md` and the `.github/workflows/release*.yml`
+workflows for the full process.
 
 ### MCP server notes
 

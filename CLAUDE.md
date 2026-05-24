@@ -163,7 +163,8 @@ notes. The version-bump logic lives in `scripts/bump_version.py` (covered
 by `tests/scripts/test_bump_version.py`); the same script handles both
 `pyproject.toml` (via `--pyproject`) and `package.json` (via
 `--package-json`), and the tag prefix is controlled by `--tag-prefix`.
-Full process: `docs/guides/release.md` (PyPI), `docs/guides/release-npm.md` (npm).
+The release workflows (`.github/workflows/release.yml` and
+`release-npm.yml`) are the source of truth for the exact steps.
 
 ## Code Style and Standards
 

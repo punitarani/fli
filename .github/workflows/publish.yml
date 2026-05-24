@@ -2,14 +2,14 @@ name: Upload Python Package
 
 # Triggers:
 # - release: published    -> auto-publish when a GH Release is created manually
-#                            (e.g. via the manual fallback in docs/guides/release.md)
+#                            (e.g. the manual release fallback)
 # - workflow_dispatch     -> manual publish, used for TestPyPI smoke tests or
 #                            recovery (e.g. shipping a tag that release.yml failed
 #                            to publish). Pick the tag/branch in the dispatch UI.
 #
 # This workflow is NOT called from release.yml -- release.yml inlines its own
-# publish steps. See docs/guides/release.md for the rationale (PyPI Trusted
-# Publishing attestations are incompatible with reusable workflow chains).
+# publish steps because PyPI Trusted Publishing attestations are incompatible
+# with reusable workflow chains. See the Releasing section in CLAUDE.md.
 
 on:
   release:
