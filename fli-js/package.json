@@ -1,5 +1,5 @@
 {
-  "name": "fli",
+  "name": "@punitarani/fli",
   "version": "0.0.2",
   "description": "TypeScript port of the fli library: programmatic access to Google Flights data through direct API interaction.",
   "type": "module",

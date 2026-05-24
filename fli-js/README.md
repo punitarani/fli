@@ -9,7 +9,7 @@ filter encoding, same wire-format decoders.
 ## Install
 
 ```bash
-bun add fli       # or: npm install fli / pnpm add fli
+bun add @punitarani/fli   # or: npm install @punitarani/fli / pnpm add @punitarani/fli
 ```
 
 ## Quick start
@@ -24,7 +24,7 @@ import {
   SearchFlights,
   SeatType,
   SortBy,
-} from "fli";
+} from "@punitarani/fli";
 
 const filters = new FlightSearchFilters({
   passenger_info: { adults: 1, children: 0, infants_in_seat: 0, infants_on_lap: 0 },
@@ -47,7 +47,7 @@ console.log(results);
 ### Date-range search
 
 ```ts
-import { Airport, DateSearchFilters, FlightSegment, SearchDates } from "fli";
+import { Airport, DateSearchFilters, FlightSegment, SearchDates } from "@punitarani/fli";
 
 const filters = new DateSearchFilters({
   passenger_info: { adults: 1, children: 0, infants_in_seat: 0, infants_on_lap: 0 },
@@ -77,7 +77,7 @@ The TypeScript port uses native `fetch` (Bun's built-in) and replaces
   explicit `proxy` option on `new Client({...})`).
 
 ```ts
-import { Client, SearchFlights } from "fli";
+import { Client, SearchFlights } from "@punitarani/fli";
 
 const search = new SearchFlights(
   new Client({ proxy: "http://user:pass@proxy.example.com:8080" }),

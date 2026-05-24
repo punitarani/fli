@@ -145,7 +145,7 @@ jobs:
 
     environment:
       name: npm
-      url: https://www.npmjs.com/package/fli
+      url: https://www.npmjs.com/package/@punitarani/fli
 
     steps:
       - name: Setup Node.js
