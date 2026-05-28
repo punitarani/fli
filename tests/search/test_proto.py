@@ -16,7 +16,10 @@ import base64
 import pytest
 
 from fli.search._proto import (
+    LegSpec,
     build_booking_token,
+    build_tfs_token,
+    build_tfu_token,
     decode_booking_token,
     extract_booking_token_from_tfu,
     extract_session_id_from_tfu,
@@ -258,6 +261,228 @@ class TestExtractBookingTokenFromTfuEdgeCases:
         tfu = self._encode_tfu(raw)
         with pytest.raises(ValueError, match="unsupported wire type"):
             extract_booking_token_from_tfu(tfu)
+
+
+# ---------------------------------------------------------------------------
+# Captured tfs/tfu booking-URL fixtures (2026-05-28)
+# ---------------------------------------------------------------------------
+
+# Round-trip JFK→LAX (AA171 outbound, AA28 return) — the authoritative
+# round-trip fixture; byte-perfect reproduction of LIVE_BOOKING_URL's tfs.
+_LIVE_TFS_RT = (
+    "CBwQAho_EgoyMDI2LTA3LTE1Ih8KA0pGSxIKMjAyNi0wNy0xNRoDTEFYKgJBQTIDMTcxagcIAR"
+    "IDSkZLcgcIARIDTEFYGj4SCjIwMjYtMDctMTkiHgoDTEFYEgoyMDI2LTA3LTE5GgNKRksqAkFBMgIy"
+    "OGoHCAESA0xBWHIHCAESA0pGS0ABSAFwAYIBCwj___________8BmAEB"
+)
+
+# One-way nonstop LAX→ORD (UA729), captured 2026-05-28.  No segment-level f5
+# field — matches encoder output byte-for-byte.
+_LIVE_TFS_OW = (
+    "CBwQAho_EgoyMDI2LTA4LTE1Ih8KA0xBWBIKMjAyNi0wOC0xNRoDT1JEKgJVQTIDNzI5"
+    "agcIARIDTEFYcgcIARIDT1JEQAFIAXABggELCP___________wGYAQI"
+)
+
+# One-way 2-stop BOS→DEN(WN739)→SJC(WN389)→SEA(WN389), captured 2026-05-28.
+# Three repeated f4 legs within one f3 segment.
+_LIVE_TFS_3LEG = (
+    "CBwQAhqBARIKMjAyNi0wOC0xNSIfCgNCT1MSCjIwMjYtMDgtMTUaA0RFTioCV04yAzczOSIfCgNERU4S"
+    "CjIwMjYtMDgtMTUaA1NKQyoCV04yAzM4OSIfCgNTSkMSCjIwMjYtMDgtMTUaA1NFQSoCV04yAzM4OWoH"
+    "CAESA0JPU3IHCAESA1NFQUABSAFwAYIBCwj___________8BmAEC"
+)
+
+
+def _b64url_to_bytes(s: str) -> bytes:
+    """Decode a urlsafe-base64 string (padding optional) to raw bytes."""
+    pad = "=" * ((4 - len(s) % 4) % 4)
+    return base64.urlsafe_b64decode(s + pad)
+
+
+class TestBuildTfsToken:
+    """Byte-perfect golden tests for build_tfs_token."""
+
+    def _tfs_bytes(self, tfs: str) -> bytes:
+        return _b64url_to_bytes(tfs)
+
+    def test_round_trip_byte_perfect(self):
+        """Two-segment round-trip reproduces LIVE_BOOKING_URL tfs byte-for-byte."""
+        segments = [
+            # Outbound: JFK→LAX on 2026-07-15, AA171
+            [LegSpec("JFK", "2026-07-15", "LAX", "AA", "171")],
+            # Return: LAX→JFK on 2026-07-19, AA28
+            [LegSpec("LAX", "2026-07-19", "JFK", "AA", "28")],
+        ]
+        built = build_tfs_token(segments, is_one_way=False)
+        capt_hex = self._tfs_bytes(_LIVE_TFS_RT).hex()
+        built_hex = _b64url_to_bytes(built).hex()
+        assert self._tfs_bytes(built) == self._tfs_bytes(_LIVE_TFS_RT), (
+            f"\nbuilt: {built_hex}\ncapt:  {capt_hex}"
+        )
+
+    def test_one_way_nonstop_byte_perfect(self):
+        """One-way nonstop (LAX→ORD UA729) reproduces captured tfs byte-for-byte."""
+        segments = [[LegSpec("LAX", "2026-08-15", "ORD", "UA", "729")]]
+        built = build_tfs_token(segments, is_one_way=True)
+        capt_hex = self._tfs_bytes(_LIVE_TFS_OW).hex()
+        built_hex = _b64url_to_bytes(built).hex()
+        assert self._tfs_bytes(built) == self._tfs_bytes(_LIVE_TFS_OW), (
+            f"\nbuilt: {built_hex}\ncapt:  {capt_hex}"
+        )
+
+    def test_multi_leg_connection_byte_perfect(self):
+        """Three-leg connection BOS→DEN→SJC→SEA reproduces captured tfs byte-for-byte."""
+        segments = [
+            [
+                LegSpec("BOS", "2026-08-15", "DEN", "WN", "739"),
+                LegSpec("DEN", "2026-08-15", "SJC", "WN", "389"),
+                LegSpec("SJC", "2026-08-15", "SEA", "WN", "389"),
+            ]
+        ]
+        built = build_tfs_token(segments, is_one_way=True)
+        capt_hex = self._tfs_bytes(_LIVE_TFS_3LEG).hex()
+        built_hex = _b64url_to_bytes(built).hex()
+        assert self._tfs_bytes(built) == self._tfs_bytes(_LIVE_TFS_3LEG), (
+            f"\nbuilt: {built_hex}\ncapt:  {capt_hex}"
+        )
+
+    def test_f19_one_way_is_2(self):
+        built = build_tfs_token(
+            [[LegSpec("SFO", "2026-09-01", "PHX", "AA", "100")]], is_one_way=True
+        )
+        raw = _b64url_to_bytes(built)
+        # f19 tag: (19 << 3) | 0 = 152 = 0x98 (needs second varint byte 0x01); value = 2
+        assert raw[-3:] == bytes([0x98, 0x01, 0x02])
+
+    def test_f19_round_trip_is_1(self):
+        segs = [
+            [LegSpec("JFK", "2026-09-01", "LAX", "AA", "1")],
+            [LegSpec("LAX", "2026-09-08", "JFK", "AA", "2")],
+        ]
+        built = build_tfs_token(segs, is_one_way=False)
+        raw = _b64url_to_bytes(built)
+        # f19 tag 0x98 0x01; value = 1
+        assert raw[-3:] == bytes([0x98, 0x01, 0x01])
+
+    def test_urlsafe_no_padding(self):
+        built = build_tfs_token([[LegSpec("SFO", "2026-09-01", "PHX", "AA", "100")]])
+        assert "=" not in built
+        assert "+" not in built
+        assert "/" not in built
+
+    def test_empty_segments_raises(self):
+        with pytest.raises(ValueError, match="non-empty"):
+            build_tfs_token([])
+
+    def test_empty_leg_list_raises(self):
+        with pytest.raises(ValueError, match="no legs"):
+            build_tfs_token([[]])
+
+    def test_multi_leg_connection_repeated_f4(self):
+        """Three legs in one segment → three repeated f4 fields (verified by byte count)."""
+        segments = [
+            [
+                LegSpec("BOS", "2026-08-15", "DEN", "WN", "739"),
+                LegSpec("DEN", "2026-08-15", "SJC", "WN", "389"),
+                LegSpec("SJC", "2026-08-15", "SEA", "WN", "389"),
+            ]
+        ]
+        built = build_tfs_token(segments, is_one_way=True)
+        raw = _b64url_to_bytes(built)
+        assert len(raw) == 159, f"expected 159 bytes, got {len(raw)}"
+
+    def test_f9_airline_code_in_proto(self):
+        """Frontier (F9) airline code is correctly encoded in the proto bytes."""
+        segments = [[LegSpec("SFO", "2026-09-01", "PHX", "F9", "2638")]]
+        built = build_tfs_token(segments)
+        raw = _b64url_to_bytes(built)
+        assert b"F9" in raw
+
+
+class TestBuildTfuToken:
+    """Tests for the tfu outer-wrapper builder."""
+
+    def test_structure_f2_and_f4_constants(self):
+        """Outer proto must have f2={f1:0} and f4=empty (per capture)."""
+        inner = build_booking_token(
+            session_id=CAPTURED_SESSION,
+            airline_code="AA",
+            flight_number="28",
+            leg_index=1,
+            price_cents=34680,
+            currency="USD",
+        )
+        tfu = build_tfu_token(inner)
+        raw = _b64url_to_bytes(tfu)
+
+        # Walk outer proto and check field 2 and field 4.
+        from fli.search._proto import _read_varint
+
+        off = 0
+        fields: dict[int, bytes] = {}
+        while off < len(raw):
+            tag, off = _read_varint(raw, off)
+            field = tag >> 3
+            wire = tag & 7
+            assert wire == 2, f"expected length-delim, got wire {wire} for field {field}"
+            length, off2 = _read_varint(raw, off)
+            off = off2
+            fields[field] = raw[off : off + length]
+            off += length
+
+        # f2 = {f1: 0} → bytes 08 00
+        assert fields[2] == bytes([0x08, 0x00]), f"f2={fields[2].hex()}"
+        # f4 = empty
+        assert fields[4] == b"", f"f4={fields[4].hex()}"
+
+    def test_urlsafe_no_padding(self):
+        inner = build_booking_token(
+            session_id="sess",
+            airline_code="AA",
+            flight_number="1",
+            leg_index=1,
+            price_cents=100,
+            currency="USD",
+        )
+        tfu = build_tfu_token(inner)
+        assert "=" not in tfu
+        assert "+" not in tfu
+        assert "/" not in tfu
+
+    def test_inner_token_round_trips(self):
+        """Inner token extracted from built tfu equals the original."""
+        inner = build_booking_token(
+            session_id=CAPTURED_SESSION,
+            airline_code="AA",
+            flight_number="28",
+            leg_index=1,
+            price_cents=34680,
+            currency="USD",
+        )
+        tfu = build_tfu_token(inner)
+        extracted = extract_booking_token_from_tfu(tfu)
+        # Both should decode to the same booking token fields.
+        d1 = decode_booking_token(inner)
+        d2 = decode_booking_token(extracted)
+        assert d1 == d2
+
+
+class TestToUrlsafeB64:
+    def test_converts_standard_to_urlsafe(self):
+        from fli.search._proto import _to_urlsafe_b64
+
+        # Bytes that produce + and / in standard base64
+        data = bytes([0xFB, 0xFF])  # standard b64: +/8=
+        result = _to_urlsafe_b64(data)
+        assert "+" not in result
+        assert "/" not in result
+        assert "=" not in result
+
+    def test_round_trips_to_original_bytes(self):
+        from fli.search._proto import _to_urlsafe_b64
+
+        data = b"\xde\xad\xbe\xef"
+        encoded = _to_urlsafe_b64(data)
+        pad = "=" * ((4 - len(encoded) % 4) % 4)
+        assert base64.urlsafe_b64decode(encoded + pad) == data
 
 
 class TestDecodeBookingTokenHexFallback:

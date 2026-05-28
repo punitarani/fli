@@ -441,6 +441,38 @@ class TestSearchReturnsBookingUrl:
         assert "booking_url" in result
         assert "JFK" in result["booking_url"]
 
+    def test_per_flight_booking_url_in_flights_array(self, monkeypatch, params):
+        """Each flight in the flights[] array carries its own booking_url."""
+        flight = _make_bookable_flight()
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.search",
+            lambda self, *a, **k: [flight],
+        )
+        # Monkeypatch build_flight_booking_url to return a recognisable value
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.build_flight_booking_url",
+            lambda self, f, **kw: "https://www.google.com/travel/flights/booking?tfs=TEST",
+        )
+        result = _execute_flight_search(params)
+        assert result["success"] is True
+        assert result["flights"][0]["booking_url"] == (
+            "https://www.google.com/travel/flights/booking?tfs=TEST"
+        )
+
+    def test_top_level_search_booking_url_still_present(self, monkeypatch, params):
+        """The top-level search booking_url (q= link) is kept alongside per-flight links."""
+        flight = _make_bookable_flight()
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.search",
+            lambda self, *a, **k: [flight],
+        )
+        result = _execute_flight_search(params)
+        assert result["success"] is True
+        # Top-level booking_url points to the search page, not a specific flight
+        assert "q=" in result["booking_url"]
+        # Per-flight booking_url is in each flight dict
+        assert "booking_url" in result["flights"][0]
+
     def test_booking_url_present_when_no_flights(self, monkeypatch, params):
         monkeypatch.setattr(
             "fli.mcp.server.SearchFlights.search",
@@ -472,6 +504,27 @@ class TestExecuteBookingOptions:
         assert result["options"][0]["booking_url"] == "https://book.aa.com/x"
         assert "selected_flight" in result
         assert "booking_url" in result
+
+    def test_selected_flight_has_per_flight_booking_url(self, monkeypatch, params):
+        """selected_flight in booking-options response carries its own booking_url."""
+        flight = _make_bookable_flight()
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.search",
+            lambda self, *a, **k: [flight],
+        )
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.get_booking_options",
+            lambda self, *a, **k: [_make_option_helper()],
+        )
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.build_flight_booking_url",
+            lambda self, f, **kw: "https://www.google.com/travel/flights/booking?tfs=SEL",
+        )
+        result = _execute_booking_options(params, ["BA178"])
+        assert result["success"] is True
+        assert result["selected_flight"]["booking_url"] == (
+            "https://www.google.com/travel/flights/booking?tfs=SEL"
+        )
 
     def test_no_match_lists_available_flights(self, monkeypatch, params):
         flight = _make_bookable_flight()

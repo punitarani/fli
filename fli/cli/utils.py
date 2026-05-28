@@ -253,19 +253,24 @@ def _serialize_flight_segment_result(
 def serialize_flight_result(
     flight_data: Any,
     default_currency: str = "USD",
+    *,
+    booking_url: str | None = None,
 ) -> dict[str, Any]:
     """Serialize a flight result or round-trip/multi-city tuple for JSON output."""
     if not isinstance(flight_data, tuple):
-        return _serialize_flight_segment_result(
+        out = _serialize_flight_segment_result(
             flight_data, include_price=True, default_currency=default_currency
         )
+        if booking_url:
+            out["booking_url"] = booking_url
+        return out
 
     segments = list(flight_data)
 
     if len(segments) == 2:
         # Round-trip: Google Flights returns the full RT price on the outbound leg.
         outbound, return_flight = segments
-        return {
+        out = {
             "price": outbound.price,
             "currency": outbound.currency or default_currency,
             "duration": outbound.duration + return_flight.duration,
@@ -273,16 +278,22 @@ def serialize_flight_result(
             "outbound": _serialize_flight_segment_result(outbound),
             "return": _serialize_flight_segment_result(return_flight),
         }
+        if booking_url:
+            out["booking_url"] = booking_url
+        return out
 
     # Multi-city (3+ legs): combined price is on the final leg.
     price_segment = segments[-1]
-    return {
+    out = {
         "price": price_segment.price,
         "currency": price_segment.currency or default_currency,
         "duration": sum(s.duration for s in segments),
         "stops": sum(s.stops for s in segments),
         "segments": [_serialize_flight_segment_result(s) for s in segments],
     }
+    if booking_url:
+        out["booking_url"] = booking_url
+    return out
 
 
 def serialize_date_result(
@@ -380,6 +391,7 @@ def display_flight_results(
     trip_type: TripType = TripType.ONE_WAY,
     default_currency: str = "USD",
     booking_url: str | None = None,
+    booking_urls: list[str | None] | None = None,
 ):
     """Display flight results in a beautiful format.
 
@@ -388,8 +400,11 @@ def display_flight_results(
             or tuples of FlightResults (round-trip or multi-city)
         trip_type: The trip type to correctly interpret pricing.
         default_currency: Fallback currency code when Google does not return one.
-        booking_url: Optional Google Flights deep link shown as a footer so the
-            user can open and book the search in a browser.
+        booking_url: Optional search-level Google Flights deep link shown as a
+            footer so the user can open and browse the full search results.
+        booking_urls: Optional per-flight booking deep-link URLs aligned with
+            ``flights``.  When provided, a clickable "Book" row is added to
+            each flight's info table.
 
     """
     if not flights:
@@ -426,6 +441,12 @@ def display_flight_results(
             table.add_row("Self transfer", "yes (separate tickets)")
         if price_segment.mixed_cabin:
             table.add_row("Mixed cabin", "yes")
+
+        # Per-flight booking deep-link (when available)
+        if booking_urls is not None and i - 1 < len(booking_urls):
+            burl = booking_urls[i - 1]
+            if burl:
+                table.add_row("Book", f"[link={burl}]{burl}[/link]")
 
         # Create segments tables for each direction
         all_segments = []

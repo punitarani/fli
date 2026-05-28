@@ -106,7 +106,8 @@ Search for flights between two airports on a specific date.
           "airline": "BA",
           "flight_number": "178"
         }
-      ]
+      ],
+      "booking_url": "https://www.google.com/travel/flights/booking?tfs=CBwQAh..."
     }
   ],
   "count": 5,
@@ -115,9 +116,11 @@ Search for flights between two airports on a specific date.
 }
 ```
 
-The top-level `booking_url` is a Google Flights deep link (route and dates
-pre-filled) that you can hand to the user to view and book the results. To
-retrieve concrete bookable fares and per-vendor links for one flight, pass its
+Each flight in `flights[]` carries a `booking_url` that deep-links directly to
+that specific flight's booking page on Google Flights (pre-loaded itinerary, no
+search step required). The top-level `booking_url` is a broader search-page
+link (route + date pre-filled) and is a reliable fallback. To retrieve
+per-vendor prices and airline-direct booking links, pass the flight's
 `flight_number` (e.g. `BA178`) to [`get_booking_options`](#get_booking_options).
 
 ### `search_dates`
@@ -215,7 +218,8 @@ find out where (and at what price) a specific flight can be booked.
   "selected_flight": {
     "price": 450.00,
     "currency": "USD",
-    "legs": [{ "airline": "BA", "flight_number": "178", "...": "..." }]
+    "legs": [{ "airline": "BA", "flight_number": "178", "...": "..." }],
+    "booking_url": "https://www.google.com/travel/flights/booking?tfs=CBwQAh..."
   },
   "options": [
     {
@@ -233,6 +237,10 @@ find out where (and at what price) a specific flight can be booked.
 }
 ```
 
+`selected_flight.booking_url` is a deep link that opens the specific itinerary's
+booking page directly on Google Flights (the `tfs` protobuf URL, no search step
+required). The top-level `booking_url` is a broader search-page link.
+
 When no flight matches `flight_numbers`, the response has `success: false` and
 an `available_flights` list of the flight-number sequences that were found, so
 you can retry with a valid identifier.
@@ -240,8 +248,9 @@ you can retry with a valid identifier.
 !!! note "Vendor fares may be empty"
     Google's booking endpoint often returns no per-vendor fares without a
     browser-minted session token. When that happens `options` is `[]` and the
-    response carries a `note` — fall back to the top-level `booking_url`, which
-    always deep-links to the bookable search on Google Flights.
+    response carries a `note` — use `selected_flight.booking_url` to open the
+    specific flight's booking page directly, or fall back to the top-level
+    `booking_url` for the search page.
 
 ## Available Prompts
 

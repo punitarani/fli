@@ -201,6 +201,14 @@ def _search_flights_core(
             typer.echo("No flights found.")
             raise typer.Exit(1)
 
+        # Build per-flight booking deep-links (tfs+tfu; never raises).
+        booking_urls = [
+            search_client.build_flight_booking_url(
+                result, currency=currency, language=language, country=country
+            )
+            for result in results
+        ]
+
         if output_format == OutputFormat.JSON:
             emit_json(
                 build_json_success_response(
@@ -209,8 +217,8 @@ def _search_flights_core(
                     query=query,
                     results_key="flights",
                     results=[
-                        serialize_flight_result(result, default_currency=currency)
-                        for result in results
+                        serialize_flight_result(result, default_currency=currency, booking_url=burl)
+                        for result, burl in zip(results, booking_urls, strict=False)
                     ],
                     booking_url=booking_url,
                 )
@@ -222,6 +230,7 @@ def _search_flights_core(
             trip_type=trip_type,
             default_currency=currency,
             booking_url=booking_url,
+            booking_urls=booking_urls,
         )
 
     except ParseError as e:

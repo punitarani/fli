@@ -430,7 +430,12 @@ def _flight_extras(flight: Any) -> dict[str, Any]:
     return out
 
 
-def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[str, Any]:
+def _serialize_flight_result(
+    flight: Any,
+    is_round_trip: bool = False,
+    *,
+    booking_url: str | None = None,
+) -> dict[str, Any]:
     """Serialize a flight result (or round-trip/multi-city tuple) to a dictionary."""
     if not isinstance(flight, tuple):
         out = {
@@ -439,6 +444,8 @@ def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[s
             "legs": [_serialize_flight_leg(leg) for leg in flight.legs],
         }
         out.update(_flight_extras(flight))
+        if booking_url:
+            out["booking_url"] = booking_url
         return out
 
     segments = list(flight)
@@ -458,6 +465,8 @@ def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[s
         return_extras = _flight_extras(return_flight)
         if return_extras:
             out["return_flight"] = return_extras
+        if booking_url:
+            out["booking_url"] = booking_url
         return out
 
     # Multi-city (3+ legs) or 2-leg non-round-trip: combined price on the
@@ -469,6 +478,8 @@ def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[s
         "legs": [_serialize_flight_leg(leg) for segment in segments for leg in segment.legs],
     }
     out.update(_flight_extras(price_segment))
+    if booking_url:
+        out["booking_url"] = booking_url
     return out
 
 
@@ -619,9 +630,21 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
                 "booking_url": booking_url,
             }
 
-        # Serialize results
+        # Serialize results; attach per-flight deep-link booking URL.
         is_round_trip = trip_type == TripType.ROUND_TRIP
-        flight_results = [_serialize_flight_result(f, is_round_trip) for f in flights]
+        flight_results = [
+            _serialize_flight_result(
+                f,
+                is_round_trip,
+                booking_url=search_client.build_flight_booking_url(
+                    f,
+                    currency=params.currency,
+                    language=params.language,
+                    country=params.country,
+                ),
+            )
+            for f in flights
+        ]
 
         if CONFIG.max_results:
             flight_results = flight_results[: CONFIG.max_results]
@@ -701,10 +724,18 @@ def _execute_booking_options(
         )
 
         is_round_trip = trip_type == TripType.ROUND_TRIP
+        flight_booking_url = search_client.build_flight_booking_url(
+            flight,
+            currency=params.currency,
+            language=params.language,
+            country=params.country,
+        )
         serialized = [_serialize_booking_option(o) for o in options]
         result = {
             "success": True,
-            "selected_flight": _serialize_flight_result(flight, is_round_trip),
+            "selected_flight": _serialize_flight_result(
+                flight, is_round_trip, booking_url=flight_booking_url
+            ),
             "options": serialized,
             "count": len(serialized),
             "booking_url": booking_url,
@@ -712,10 +743,12 @@ def _execute_booking_options(
         if not serialized:
             # Google's GetBookingResults frequently returns no vendors without a
             # browser-minted session token (see fli.search._booking_capture).
-            # Point the consumer at the deep link so a booking path always exists.
+            # The per-flight deep link in selected_flight.booking_url opens the
+            # specific itinerary's booking page directly.
             result["note"] = (
                 "Google returned no per-vendor booking fares for this itinerary. "
-                "Open booking_url on Google Flights to view and book it."
+                "Use selected_flight.booking_url to open the specific flight's "
+                "booking page on Google Flights."
             )
         return result
 
