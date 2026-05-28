@@ -120,6 +120,10 @@ Search for flights on a specific date.
 - `currency` / `language` / `country` - Google `curr=` / `hl=` / `gl=` URL params
 - `sort_by` - CHEAPEST, DURATION, DEPARTURE_TIME, ARRIVAL_TIME
 
+**Response:** Includes a top-level `booking_url` — a Google Flights deep link
+(route + dates pre-filled) the consumer can hand to the user to view and book.
+Each flight leg still carries its `flight_number`, which feeds `get_booking_options`.
+
 ### `search_dates`
 Find cheapest travel dates within a range.
 
@@ -132,6 +136,25 @@ Find cheapest travel dates within a range.
 - `exclude_airlines`, `alliance`, `exclude_alliance`, `min_layover`, `max_layover` - Same as `search_flights`
 - `currency`, `language`, `country` - Same locale knobs as `search_flights`
 - `sort_by_price` - Boolean to sort by price
+
+**Response:** Each date result carries a `booking_url` deep-linking to Google
+Flights for that specific date (and return date for round trips).
+
+### `get_booking_options`
+Get bookable fares (vendor names, prices, and direct booking URLs) for a
+single itinerary. Runs a fresh search, selects the flight identified by
+`flight_numbers` (or the top result when omitted), then calls
+`SearchFlights.get_booking_options` and returns the airline-direct and OTA
+options — each with a clickable `booking_url` and `google_click_url`.
+
+**Key Parameters:**
+- `origin` / `destination` / `departure_date` / `return_date` - Same as `search_flights`
+- `flight_numbers` - Ordered flight numbers identifying the itinerary, taken
+  from a prior `search_flights` result (e.g. `['BA178']` one-way,
+  `['AA100', 'AA200']` round-trip). Accepts bare (`'178'`) or airline-prefixed
+  (`'BA178'`) forms. Omit to price the top result.
+- `cabin_class`, `max_stops`, `passengers`, `airlines`, `exclude_basic_economy` - Same as `search_flights`
+- `currency`, `language`, `country` - Same locale knobs as `search_flights`
 
 ### Note on emissions
 Both tools accept the `emissions` filter (forwarded to Google's

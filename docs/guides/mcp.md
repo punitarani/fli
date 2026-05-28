@@ -104,15 +104,21 @@ Search for flights between two airports on a specific date.
           "arrival_time": "2026-03-16T06:30:00",
           "duration": 450,
           "airline": "BA",
-          "flight_number": "BA178"
+          "flight_number": "178"
         }
       ]
     }
   ],
   "count": 5,
-  "trip_type": "ONE_WAY"
+  "trip_type": "ONE_WAY",
+  "booking_url": "https://www.google.com/travel/flights?q=Flights%20from%20JFK%20to%20LHR%20on%202026-03-15"
 }
 ```
+
+The top-level `booking_url` is a Google Flights deep link (route and dates
+pre-filled) that you can hand to the user to view and book the results. To
+retrieve concrete bookable fares and per-vendor links for one flight, pass its
+`flight_number` (e.g. `BA178`) to [`get_booking_options`](#get_booking_options).
 
 ### `search_dates`
 
@@ -153,13 +159,15 @@ Find the cheapest travel dates between two airports within a date range.
       "date": "2026-03-15",
       "price": 350.00,
       "currency": "USD",
-      "return_date": null
+      "return_date": null,
+      "booking_url": "https://www.google.com/travel/flights?q=Flights%20from%20JFK%20to%20LHR%20on%202026-03-15"
     },
     {
       "date": "2026-03-18",
       "price": 375.00,
       "currency": "USD",
-      "return_date": null
+      "return_date": null,
+      "booking_url": "https://www.google.com/travel/flights?q=Flights%20from%20JFK%20to%20LHR%20on%202026-03-18"
     }
   ],
   "count": 30,
@@ -167,6 +175,67 @@ Find the cheapest travel dates between two airports within a date range.
   "date_range": "2026-03-01 to 2026-03-31"
 }
 ```
+
+Each date result carries a `booking_url` deep-linking to Google Flights for
+that specific date (and return date for round trips).
+
+### `get_booking_options`
+
+Get bookable fares — vendor names, prices, and **direct booking URLs** — for a
+single itinerary. The tool runs a fresh search, selects the flight identified
+by `flight_numbers` (or the top result when omitted), and returns the
+airline-direct and online-travel-agency options Google surfaces for it.
+
+Use `search_flights` first to discover flight numbers, then call this tool to
+find out where (and at what price) a specific flight can be booked.
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `origin` | string | Yes | - | Departure airport IATA code (e.g., 'JFK') |
+| `destination` | string | Yes | - | Arrival airport IATA code (e.g., 'LHR') |
+| `departure_date` | string | Yes | - | Travel date in YYYY-MM-DD format |
+| `flight_numbers` | list | No | null | Ordered flight numbers identifying the itinerary (e.g. `['BA178']`, or `['AA100', 'AA200']` round-trip). Bare (`'178'`) or airline-prefixed (`'BA178'`). Omit to price the top result. |
+| `return_date` | string | No | null | Return date for round trips |
+| `cabin_class` | string | No | ECONOMY | ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST |
+| `max_stops` | string | No | ANY | ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS |
+| `passengers` | int | No | 1 | Number of adult passengers |
+| `airlines` | list | No | null | Filter by airline codes (e.g., ['BA', 'AA']) |
+| `exclude_basic_economy` | bool | No | false | Exclude basic economy fares |
+| `currency` | string | No | null | ISO 4217 currency code (`curr=`) |
+| `language` | string | No | null | BCP-47 language code (`hl=`) |
+| `country` | string | No | null | ISO 3166-1 alpha-2 country (`gl=`) |
+
+**Example Response:**
+
+```json
+{
+  "success": true,
+  "selected_flight": {
+    "price": 450.00,
+    "currency": "USD",
+    "legs": [{ "airline": "BA", "flight_number": "178", "...": "..." }]
+  },
+  "options": [
+    {
+      "vendor_name": "British Airways",
+      "vendor_code": "BA",
+      "is_airline_direct": true,
+      "price": 450.00,
+      "currency": "USD",
+      "booking_url": "https://www.britishairways.com/...",
+      "google_click_url": "https://www.google.com/..."
+    }
+  ],
+  "count": 1,
+  "booking_url": "https://www.google.com/travel/flights?q=Flights%20from%20JFK%20to%20LHR%20on%202026-03-15"
+}
+```
+
+When no flight matches `flight_numbers`, the response has `success: false` and
+an `available_flights` list of the flight-number sequences that were found, so
+you can retry with a valid identifier.
 
 ## Available Prompts
 

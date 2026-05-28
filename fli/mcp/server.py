@@ -7,6 +7,7 @@ travel dates.
 
 import json
 import os
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
 
@@ -39,6 +40,7 @@ from fli.models import (
     TripType,
 )
 from fli.search import SearchDates, SearchFlights
+from fli.search._urls import with_locale_params
 
 
 class FlightSearchConfig(BaseSettings):
@@ -267,6 +269,98 @@ def _airline_code(airline: Any) -> str:
     return getattr(airline, "name", str(airline)).lstrip("_")
 
 
+def _iata(airport: Any) -> str:
+    """Return the bare IATA code from an ``Airport`` enum or plain string."""
+    return getattr(airport, "name", str(airport)).lstrip("_")
+
+
+def _google_flights_url(
+    origins: list[Airport],
+    destinations: list[Airport],
+    departure_date: str,
+    return_date: str | None,
+    currency: str | None,
+    language: str | None,
+    country: str | None,
+) -> str:
+    """Build a shareable Google Flights deep link for the search.
+
+    Returns a ``https://www.google.com/travel/flights`` URL whose natural
+    language ``q`` parameter pre-fills the route and dates, so the consumer
+    can hand the user a single clickable link to view and book the flights.
+    Locale knobs (``curr``/``hl``/``gl``) are appended when supplied. The
+    first airport of each side is used when multiple are given, keeping the
+    query unambiguous for Google's parser.
+    """
+    origin = _iata(origins[0])
+    destination = _iata(destinations[0])
+    query = f"Flights from {origin} to {destination} on {departure_date}"
+    if return_date:
+        query += f" through {return_date}"
+    url = f"https://www.google.com/travel/flights?q={urllib.parse.quote(query)}"
+    return with_locale_params(url, currency, language, country)
+
+
+def _serialize_booking_option(option: Any) -> dict[str, Any]:
+    """Serialize a single bookable fare to a clean dictionary."""
+    out: dict[str, Any] = {}
+    for key in (
+        "vendor_name",
+        "vendor_code",
+        "fare_name",
+        "currency",
+        "booking_url",
+        "google_click_url",
+    ):
+        value = getattr(option, key, None)
+        if value not in (None, ""):
+            out[key] = value
+    if getattr(option, "price", None) is not None:
+        out["price"] = option.price
+    if getattr(option, "is_airline_direct", False):
+        out["is_airline_direct"] = True
+    return out
+
+
+def _flight_legs(flight: Any) -> list[Any]:
+    """Flatten a result (or round-trip/multi-city tuple) into its legs."""
+    if isinstance(flight, tuple):
+        return [leg for segment in flight for leg in segment.legs]
+    return list(flight.legs)
+
+
+def _leg_identifiers(leg: Any) -> set[str]:
+    """Return the accepted identifier spellings for a leg ('178' and 'BA178')."""
+    number = str(leg.flight_number).upper().replace(" ", "")
+    code = _airline_code(leg.airline).upper()
+    return {number, f"{code}{number}"}
+
+
+def _match_flight(flights: list[Any], flight_numbers: list[str] | None) -> Any | None:
+    """Pick the result matching ``flight_numbers`` (order-sensitive).
+
+    Each entry is matched against either the bare flight number ('178') or
+    the airline-prefixed form ('BA178'), case-insensitively. When no flight
+    numbers are supplied the first result is returned (the top/cheapest row
+    under the default sort).
+    """
+    if not flight_numbers:
+        return flights[0] if flights else None
+    want = [fn.upper().replace(" ", "") for fn in flight_numbers]
+    for flight in flights:
+        legs = _flight_legs(flight)
+        if len(legs) != len(want):
+            continue
+        if all(token in _leg_identifiers(leg) for token, leg in zip(want, legs, strict=True)):
+            return flight
+    return None
+
+
+def _flight_idents(flight: Any) -> list[str]:
+    """Human-readable airline+number labels for each leg of a result."""
+    return [f"{_airline_code(leg.airline)}{leg.flight_number}" for leg in _flight_legs(flight)]
+
+
 def _serialize_flight_leg(leg: Any) -> dict[str, Any]:
     """Serialize a single flight leg to a dictionary."""
     out: dict[str, Any] = {
@@ -379,14 +473,36 @@ def _serialize_flight_result(flight: Any, is_round_trip: bool = False) -> dict[s
     return out
 
 
-def _serialize_date_result(date_result: Any) -> dict[str, Any]:
-    """Serialize a date price result to a dictionary."""
-    return {
+def _date_str(value: Any) -> str | None:
+    """Coerce a ``DatePrice`` date element (datetime) to ``YYYY-MM-DD``."""
+    if value is None:
+        return None
+    if hasattr(value, "date"):
+        return value.date().isoformat()
+    return str(value)
+
+
+def _serialize_date_result(
+    date_result: Any,
+    origins: list[Airport],
+    destinations: list[Airport],
+    locale: tuple[str | None, str | None, str | None],
+) -> dict[str, Any]:
+    """Serialize a date price result, including a deep link for that date."""
+    dates = date_result.date
+    departure = _date_str(dates[0]) if dates else None
+    return_date = _date_str(dates[1]) if dates and len(dates) > 1 else None
+    out: dict[str, Any] = {
         "date": date_result.date,
         "price": date_result.price,
         "currency": date_result.currency or CONFIG.default_currency,
-        "return_date": getattr(date_result, "return_date", None),
+        "return_date": return_date,
     }
+    if departure:
+        out["booking_url"] = _google_flights_url(
+            origins, destinations, departure, return_date, *locale
+        )
+    return out
 
 
 # =============================================================================
@@ -402,66 +518,78 @@ def _resolve_airports(codes: str) -> list[Airport]:
     return airports
 
 
+def _build_flight_filters(
+    params: FlightSearchParams,
+) -> tuple[FlightSearchFilters, TripType, list[Airport], list[Airport]]:
+    """Translate request params into search filters and resolved airports.
+
+    Shared by :func:`_execute_flight_search` and
+    :func:`_execute_booking_options` so both build identical filters from
+    the same inputs.
+    """
+    # Parse inputs using shared utilities (supports comma-separated multi-airport)
+    origins = _resolve_airports(params.origin)
+    destinations = _resolve_airports(params.destination)
+    cabin_class = parse_cabin_class(params.cabin_class)
+    max_stops = parse_max_stops(params.max_stops)
+    sort_by = parse_sort_by(params.sort_by)
+    airlines = parse_airlines(params.airlines)
+    airlines_exclude = parse_airlines(params.exclude_airlines)
+    alliances = parse_alliances(params.alliance)
+    alliances_exclude = parse_alliances(params.exclude_alliance)
+
+    # Build time restrictions
+    departure_window = params.departure_window or CONFIG.default_departure_window
+    time_restrictions = build_time_restrictions(departure_window) if departure_window else None
+
+    # Build flight segments (pass full lists for multi-airport support)
+    segments, trip_type = build_flight_segments(
+        origin=origins,
+        destination=destinations,
+        departure_date=params.departure_date,
+        return_date=params.return_date,
+        time_restrictions=time_restrictions,
+    )
+
+    # Parse new filters
+    emissions_filter = parse_emissions(params.emissions)
+    bags_filter = None
+    if params.checked_bags > 0 or params.carry_on:
+        bags_filter = BagsFilter(checked_bags=params.checked_bags, carry_on=params.carry_on)
+
+    layover_restrictions = None
+    if params.min_layover is not None or params.max_layover is not None:
+        from fli.models import LayoverRestrictions
+
+        layover_restrictions = LayoverRestrictions(
+            min_duration=params.min_layover,
+            max_duration=params.max_layover,
+        )
+
+    filters = FlightSearchFilters(
+        trip_type=trip_type,
+        passenger_info=PassengerInfo(adults=params.passengers),
+        flight_segments=segments,
+        stops=max_stops,
+        seat_type=cabin_class,
+        airlines=airlines,
+        airlines_exclude=airlines_exclude,
+        alliances=alliances,
+        alliances_exclude=alliances_exclude,
+        layover_restrictions=layover_restrictions,
+        sort_by=sort_by,
+        exclude_basic_economy=params.exclude_basic_economy,
+        emissions=emissions_filter,
+        bags=bags_filter,
+        show_all_results=params.show_all_results,
+    )
+    return filters, trip_type, origins, destinations
+
+
 def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
     """Execute a flight search and return formatted results."""
     try:
-        # Parse inputs using shared utilities (supports comma-separated multi-airport)
-        origins = _resolve_airports(params.origin)
-        destinations = _resolve_airports(params.destination)
-        cabin_class = parse_cabin_class(params.cabin_class)
-        max_stops = parse_max_stops(params.max_stops)
-        sort_by = parse_sort_by(params.sort_by)
-        airlines = parse_airlines(params.airlines)
-        airlines_exclude = parse_airlines(params.exclude_airlines)
-        alliances = parse_alliances(params.alliance)
-        alliances_exclude = parse_alliances(params.exclude_alliance)
-
-        # Build time restrictions
-        departure_window = params.departure_window or CONFIG.default_departure_window
-        time_restrictions = build_time_restrictions(departure_window) if departure_window else None
-
-        # Build flight segments (pass full lists for multi-airport support)
-        segments, trip_type = build_flight_segments(
-            origin=origins,
-            destination=destinations,
-            departure_date=params.departure_date,
-            return_date=params.return_date,
-            time_restrictions=time_restrictions,
-        )
-
-        # Parse new filters
-        emissions_filter = parse_emissions(params.emissions)
-        bags_filter = None
-        if params.checked_bags > 0 or params.carry_on:
-            bags_filter = BagsFilter(checked_bags=params.checked_bags, carry_on=params.carry_on)
-
-        layover_restrictions = None
-        if params.min_layover is not None or params.max_layover is not None:
-            from fli.models import LayoverRestrictions
-
-            layover_restrictions = LayoverRestrictions(
-                min_duration=params.min_layover,
-                max_duration=params.max_layover,
-            )
-
-        # Create search filters
-        filters = FlightSearchFilters(
-            trip_type=trip_type,
-            passenger_info=PassengerInfo(adults=params.passengers),
-            flight_segments=segments,
-            stops=max_stops,
-            seat_type=cabin_class,
-            airlines=airlines,
-            airlines_exclude=airlines_exclude,
-            alliances=alliances,
-            alliances_exclude=alliances_exclude,
-            layover_restrictions=layover_restrictions,
-            sort_by=sort_by,
-            exclude_basic_economy=params.exclude_basic_economy,
-            emissions=emissions_filter,
-            bags=bags_filter,
-            show_all_results=params.show_all_results,
-        )
+        filters, trip_type, origins, destinations = _build_flight_filters(params)
 
         # Perform search
         currency = parse_currency(params.currency)
@@ -473,8 +601,24 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
             country=params.country,
         )
 
+        booking_url = _google_flights_url(
+            origins,
+            destinations,
+            params.departure_date,
+            params.return_date,
+            params.currency,
+            params.language,
+            params.country,
+        )
+
         if not flights:
-            return {"success": True, "flights": [], "count": 0, "trip_type": trip_type.name}
+            return {
+                "success": True,
+                "flights": [],
+                "count": 0,
+                "trip_type": trip_type.name,
+                "booking_url": booking_url,
+            }
 
         # Serialize results
         is_round_trip = trip_type == TripType.ROUND_TRIP
@@ -488,6 +632,7 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
             "flights": flight_results,
             "count": len(flight_results),
             "trip_type": trip_type.name,
+            "booking_url": booking_url,
         }
 
     except ParseError as e:
@@ -497,6 +642,81 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
         if "validation error" in error_msg.lower():
             return {"success": False, "error": "Invalid parameter value", "flights": []}
         return {"success": False, "error": f"Search failed: {error_msg}", "flights": []}
+
+
+def _execute_booking_options(
+    params: FlightSearchParams, flight_numbers: list[str] | None
+) -> dict[str, Any]:
+    """Fetch real bookable fares (vendor URLs + prices) for one itinerary.
+
+    Re-runs the search so the client captures a fresh shopping session,
+    selects the itinerary identified by ``flight_numbers`` (or the top
+    result when omitted), then calls
+    :meth:`fli.search.SearchFlights.get_booking_options` and serializes the
+    vendor list — each carrying a direct ``booking_url``.
+    """
+    try:
+        filters, trip_type, origins, destinations = _build_flight_filters(params)
+
+        currency = parse_currency(params.currency)
+        search_client = SearchFlights()
+        flights = search_client.search(
+            filters,
+            currency=currency,
+            language=params.language,
+            country=params.country,
+        )
+
+        booking_url = _google_flights_url(
+            origins,
+            destinations,
+            params.departure_date,
+            params.return_date,
+            params.currency,
+            params.language,
+            params.country,
+        )
+
+        if not flights:
+            return {"success": True, "options": [], "count": 0, "booking_url": booking_url}
+
+        flight = _match_flight(flights, flight_numbers)
+        if flight is None:
+            return {
+                "success": False,
+                "error": (
+                    "No flight matched the requested flight_numbers. Pass values "
+                    "from a prior search_flights result (e.g. ['BA178'] or ['178'])."
+                ),
+                "available_flights": [_flight_idents(f) for f in flights[:20]],
+                "options": [],
+                "booking_url": booking_url,
+            }
+
+        options = search_client.get_booking_options(
+            flight,
+            filters,
+            currency=currency,
+            language=params.language,
+            country=params.country,
+        )
+
+        is_round_trip = trip_type == TripType.ROUND_TRIP
+        return {
+            "success": True,
+            "selected_flight": _serialize_flight_result(flight, is_round_trip),
+            "options": [_serialize_booking_option(o) for o in options],
+            "count": len(options),
+            "booking_url": booking_url,
+        }
+
+    except ParseError as e:
+        return {"success": False, "error": str(e), "options": []}
+    except Exception as e:
+        error_msg = str(e)
+        if "validation error" in error_msg.lower():
+            return {"success": False, "error": "Invalid parameter value", "options": []}
+        return {"success": False, "error": f"Booking lookup failed: {error_msg}", "options": []}
 
 
 def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
@@ -575,7 +795,8 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
             dates.sort(key=lambda x: x.price)
 
         # Serialize results
-        date_results = [_serialize_date_result(d) for d in dates]
+        locale = (params.currency, params.language, params.country)
+        date_results = [_serialize_date_result(d, origins, destinations, locale) for d in dates]
 
         if CONFIG.max_results:
             date_results = date_results[: CONFIG.max_results]
@@ -874,6 +1095,104 @@ def search_dates(
 def _search_dates_from_params(params: DateSearchParams) -> dict[str, Any]:
     """Entry point for tests that call the tool via a params object."""
     return _execute_date_search(params)
+
+
+@mcp.tool(
+    annotations={
+        "title": "Get Booking Options",
+        "readOnlyHint": True,
+        "idempotentHint": True,
+    },
+)
+def get_booking_options(
+    origin: Annotated[
+        str,
+        Field(description="Departure airport IATA code(s), comma-separated for multiple"),
+    ],
+    destination: Annotated[
+        str,
+        Field(description="Arrival airport IATA code(s), comma-separated for multiple"),
+    ],
+    departure_date: Annotated[str, Field(description="Travel date in YYYY-MM-DD format")],
+    flight_numbers: Annotated[
+        list[str] | None,
+        Field(
+            description=(
+                "Flight numbers identifying the itinerary to price, in order, taken from a "
+                "prior search_flights result (e.g. ['BA178'] one-way, ['AA100', 'AA200'] "
+                "round-trip). Accepts bare numbers ('178') or airline-prefixed ('BA178'). "
+                "Omit to price the top result."
+            )
+        ),
+    ] = None,
+    return_date: Annotated[
+        str | None,
+        Field(description="Return date in YYYY-MM-DD format (omit for one-way)"),
+    ] = None,
+    cabin_class: Annotated[
+        str,
+        Field(description="Cabin class: ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST"),
+    ] = CONFIG.default_cabin_class,
+    max_stops: Annotated[
+        str,
+        Field(description="Maximum stops: ANY, NON_STOP, ONE_STOP, TWO_PLUS_STOPS"),
+    ] = "ANY",
+    passengers: Annotated[
+        int | None,
+        Field(description="Number of adult passengers", ge=1),
+    ] = None,
+    airlines: Annotated[
+        list[str] | None,
+        Field(description="Filter by airline IATA codes (e.g., ['BA', 'AA'])"),
+    ] = None,
+    exclude_basic_economy: Annotated[
+        bool,
+        Field(description="Exclude basic economy fares from results"),
+    ] = False,
+    currency: Annotated[
+        str | None,
+        Field(description="ISO 4217 currency code (USD, EUR, GBP, JPY...) for prices."),
+    ] = None,
+    language: Annotated[
+        str | None,
+        Field(description="Optional BCP-47 language code (e.g., 'en-GB') for the `hl` URL param."),
+    ] = None,
+    country: Annotated[
+        str | None,
+        Field(description="Optional ISO 3166-1 alpha-2 country code (e.g., 'GB')."),
+    ] = None,
+) -> dict[str, Any]:
+    """Get bookable fares (vendor names, prices, and direct booking URLs) for a flight.
+
+    Runs a fresh search, selects the itinerary identified by ``flight_numbers``
+    (or the top result when omitted), and returns the airline-direct and
+    online-travel-agency options Google surfaces for it — each with a
+    clickable ``booking_url``. Use ``search_flights`` first to discover the
+    flight numbers, then call this tool to retrieve where and at what price
+    it can be booked.
+    """
+    params = FlightSearchParams(
+        origin=origin,
+        destination=destination,
+        departure_date=departure_date,
+        return_date=return_date,
+        cabin_class=cabin_class,
+        max_stops=max_stops,
+        passengers=passengers or CONFIG.default_passengers,
+        airlines=airlines,
+        exclude_basic_economy=exclude_basic_economy,
+        currency=currency,
+        language=language,
+        country=country,
+    )
+    return _execute_booking_options(params, flight_numbers)
+
+
+def _get_booking_options_from_params(
+    params: FlightSearchParams, flight_numbers: list[str] | None = None
+) -> dict[str, Any]:
+    """Entry point for tests that call the tool via a params object."""
+    return _execute_booking_options(params, flight_numbers)
 
 
 def _find_airports_impl(query: str, limit: int = 10) -> dict[str, Any]:

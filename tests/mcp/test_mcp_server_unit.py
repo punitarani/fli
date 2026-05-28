@@ -14,8 +14,12 @@ import pytest
 from fli.mcp.server import (
     FlightSearchParams,
     _airline_code,
+    _execute_booking_options,
     _execute_flight_search,
     _flight_extras,
+    _google_flights_url,
+    _match_flight,
+    _serialize_booking_option,
     _serialize_flight_leg,
     _serialize_layover,
 )
@@ -249,3 +253,241 @@ class TestExecuteFlightSearchNetworkError:
         )
         result = _execute_flight_search(valid_params)
         assert result["flights"] == []
+
+
+def _make_bookable_leg(code="BA", number="178"):
+    """Build a flight leg mock with optional fields set to None for clean serialization."""
+    leg = MagicMock()
+    airline = MagicMock()
+    airline.name = code
+    leg.airline = airline
+    leg.flight_number = number
+    leg.departure_airport = "JFK"
+    leg.arrival_airport = "LHR"
+    leg.departure_datetime = None
+    leg.arrival_datetime = None
+    leg.duration = 420
+    leg.departure_airport_name = None
+    leg.arrival_airport_name = None
+    leg.operating_airline = None
+    leg.aircraft = None
+    leg.legroom = None
+    leg.overnight = False
+    leg.amenities = None
+    return leg
+
+
+def _make_bookable_flight(legs=None, price=342.0):
+    flight = MagicMock()
+    flight.legs = legs or [_make_bookable_leg()]
+    flight.price = price
+    flight.currency = "USD"
+    flight.layovers = None
+    flight.primary_airline = None
+    flight.primary_airline_name = None
+    flight.self_transfer = None
+    flight.mixed_cabin = None
+    flight.booking_token = "tok"
+    return flight
+
+
+def _make_option_helper():
+    opt = MagicMock()
+    opt.vendor_name = "American Airlines"
+    opt.vendor_code = "AA"
+    opt.fare_name = "Main Cabin"
+    opt.currency = "USD"
+    opt.booking_url = "https://book.aa.com/x"
+    opt.google_click_url = "https://www.google.com/x"
+    opt.price = 342.0
+    opt.is_airline_direct = True
+    return opt
+
+
+class TestGoogleFlightsUrl:
+    def _url(self, **kwargs):
+        from fli.models import Airport
+
+        defaults = {
+            "origins": [Airport.JFK],
+            "destinations": [Airport.LHR],
+            "departure_date": "2026-12-01",
+            "return_date": None,
+            "currency": None,
+            "language": None,
+            "country": None,
+        }
+        defaults.update(kwargs)
+        return _google_flights_url(
+            defaults["origins"],
+            defaults["destinations"],
+            defaults["departure_date"],
+            defaults["return_date"],
+            defaults["currency"],
+            defaults["language"],
+            defaults["country"],
+        )
+
+    def test_one_way_contains_route_and_date(self):
+        url = self._url()
+        assert url.startswith("https://www.google.com/travel/flights?q=")
+        assert "JFK" in url
+        assert "LHR" in url
+        assert "2026-12-01" in url
+
+    def test_round_trip_includes_return_date(self):
+        url = self._url(return_date="2026-12-10")
+        assert "2026-12-10" in url
+
+    def test_locale_params_appended(self):
+        url = self._url(currency="EUR", language="en-GB", country="GB")
+        assert "curr=EUR" in url
+        assert "hl=en-GB" in url
+        assert "gl=GB" in url
+
+    def test_uses_first_airport_when_multiple(self):
+        from fli.models import Airport
+
+        url = self._url(origins=[Airport.JFK, Airport.LGA], destinations=[Airport.LHR])
+        assert "JFK" in url
+        assert "LGA" not in url
+
+
+class TestMatchFlight:
+    def test_match_by_bare_number(self):
+        flight = _make_bookable_flight(legs=[_make_bookable_leg("BA", "178")])
+        assert _match_flight([flight], ["178"]) is flight
+
+    def test_match_by_airline_prefixed(self):
+        flight = _make_bookable_flight(legs=[_make_bookable_leg("BA", "178")])
+        assert _match_flight([flight], ["BA178"]) is flight
+
+    def test_match_is_case_insensitive(self):
+        flight = _make_bookable_flight(legs=[_make_bookable_leg("BA", "178")])
+        assert _match_flight([flight], ["ba178"]) is flight
+
+    def test_no_match_returns_none(self):
+        flight = _make_bookable_flight(legs=[_make_bookable_leg("BA", "178")])
+        assert _match_flight([flight], ["ZZ999"]) is None
+
+    def test_none_defaults_to_first(self):
+        first = _make_bookable_flight(legs=[_make_bookable_leg("BA", "1")])
+        second = _make_bookable_flight(legs=[_make_bookable_leg("AA", "2")])
+        assert _match_flight([first, second], None) is first
+
+    def test_round_trip_tuple_matched_in_order(self):
+        outbound = _make_bookable_flight(legs=[_make_bookable_leg("AA", "100")])
+        inbound = _make_bookable_flight(legs=[_make_bookable_leg("AA", "200")])
+        combo = (outbound, inbound)
+        assert _match_flight([combo], ["AA100", "AA200"]) is combo
+
+    def test_wrong_leg_count_does_not_match(self):
+        flight = _make_bookable_flight(legs=[_make_bookable_leg("BA", "178")])
+        assert _match_flight([flight], ["BA178", "BA179"]) is None
+
+
+class TestSerializeBookingOption:
+    def _make_option(self, **overrides):
+        opt = MagicMock()
+        opt.vendor_name = None
+        opt.vendor_code = None
+        opt.fare_name = None
+        opt.currency = None
+        opt.booking_url = None
+        opt.google_click_url = None
+        opt.price = None
+        opt.is_airline_direct = False
+        for k, v in overrides.items():
+            setattr(opt, k, v)
+        return opt
+
+    def test_populated_fields_included(self):
+        opt = self._make_option(
+            vendor_name="American Airlines",
+            booking_url="https://aa.com/book",
+            price=342.0,
+            currency="USD",
+            is_airline_direct=True,
+        )
+        result = _serialize_booking_option(opt)
+        assert result["vendor_name"] == "American Airlines"
+        assert result["booking_url"] == "https://aa.com/book"
+        assert result["price"] == 342.0
+        assert result["is_airline_direct"] is True
+
+    def test_empty_option_serializes_to_empty_dict(self):
+        result = _serialize_booking_option(self._make_option())
+        assert result == {}
+
+    def test_airline_direct_false_excluded(self):
+        opt = self._make_option(vendor_name="Expedia", is_airline_direct=False)
+        result = _serialize_booking_option(opt)
+        assert "is_airline_direct" not in result
+
+
+class TestSearchReturnsBookingUrl:
+    @pytest.fixture
+    def params(self):
+        return FlightSearchParams(origin="JFK", destination="LHR", departure_date="2026-12-01")
+
+    def test_booking_url_present_on_success(self, monkeypatch, params):
+        flight = _make_bookable_flight()
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.search",
+            lambda self, *a, **k: [flight],
+        )
+        result = _execute_flight_search(params)
+        assert result["success"] is True
+        assert "booking_url" in result
+        assert "JFK" in result["booking_url"]
+
+    def test_booking_url_present_when_no_flights(self, monkeypatch, params):
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.search",
+            lambda self, *a, **k: None,
+        )
+        result = _execute_flight_search(params)
+        assert result["count"] == 0
+        assert "booking_url" in result
+
+
+class TestExecuteBookingOptions:
+    @pytest.fixture
+    def params(self):
+        return FlightSearchParams(origin="JFK", destination="LHR", departure_date="2026-12-01")
+
+    def test_returns_options_with_booking_url(self, monkeypatch, params):
+        flight = _make_bookable_flight()
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.search",
+            lambda self, *a, **k: [flight],
+        )
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.get_booking_options",
+            lambda self, *a, **k: [_make_option_helper()],
+        )
+        result = _execute_booking_options(params, ["BA178"])
+        assert result["success"] is True
+        assert result["count"] == 1
+        assert result["options"][0]["booking_url"] == "https://book.aa.com/x"
+        assert "selected_flight" in result
+        assert "booking_url" in result
+
+    def test_no_match_lists_available_flights(self, monkeypatch, params):
+        flight = _make_bookable_flight()
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.search",
+            lambda self, *a, **k: [flight],
+        )
+        result = _execute_booking_options(params, ["ZZ999"])
+        assert result["success"] is False
+        assert result["available_flights"] == [["BA178"]]
+
+    def test_no_flights_returns_empty_options(self, monkeypatch, params):
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.search",
+            lambda self, *a, **k: None,
+        )
+        result = _execute_booking_options(params, None)
+        assert result["success"] is True
+        assert result["options"] == []
