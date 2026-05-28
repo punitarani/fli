@@ -376,6 +376,9 @@ def dates(
         if sort_by_price:
             results.sort(key=lambda x: x.price)
 
+        origin_code = origin_airport.name.lstrip("_")
+        destination_code = destination_airport.name.lstrip("_")
+
         if output_format == OutputFormat.JSON:
             emit_json(
                 build_json_success_response(
@@ -384,7 +387,16 @@ def dates(
                     query=query,
                     results_key="dates",
                     results=[
-                        serialize_date_result(result, trip_type, default_currency=currency)
+                        serialize_date_result(
+                            result,
+                            trip_type,
+                            default_currency=currency,
+                            origin=origin_code,
+                            destination=destination_code,
+                            currency=currency,
+                            language=language,
+                            country=country,
+                        )
                         for result in results
                     ],
                 )
@@ -400,7 +412,16 @@ def dates(
             typer.echo(message)
             raise typer.Exit(1)
 
-        display_date_results(results, trip_type, default_currency=currency)
+        display_date_results(
+            results,
+            trip_type,
+            default_currency=currency,
+            origin=origin_code,
+            destination=destination_code,
+            currency=currency,
+            language=language,
+            country=country,
+        )
 
     except ParseError as e:
         if output_format == OutputFormat.JSON:

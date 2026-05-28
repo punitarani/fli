@@ -7,7 +7,6 @@ travel dates.
 
 import json
 import os
-import urllib.parse
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
 
@@ -20,6 +19,7 @@ from fli.core import (
     build_date_search_segments,
     build_flight_segments,
     build_time_restrictions,
+    google_flights_url,
     parse_airlines,
     parse_alliances,
     parse_cabin_class,
@@ -40,7 +40,6 @@ from fli.models import (
     TripType,
 )
 from fli.search import SearchDates, SearchFlights
-from fli.search._urls import with_locale_params
 
 
 class FlightSearchConfig(BaseSettings):
@@ -285,20 +284,20 @@ def _google_flights_url(
 ) -> str:
     """Build a shareable Google Flights deep link for the search.
 
-    Returns a ``https://www.google.com/travel/flights`` URL whose natural
-    language ``q`` parameter pre-fills the route and dates, so the consumer
-    can hand the user a single clickable link to view and book the flights.
-    Locale knobs (``curr``/``hl``/``gl``) are appended when supplied. The
-    first airport of each side is used when multiple are given, keeping the
-    query unambiguous for Google's parser.
+    Thin wrapper over :func:`fli.core.google_flights_url` that takes the
+    resolved airport lists used internally; the first airport of each side is
+    used when multiple are given, keeping the query unambiguous for Google's
+    parser.
     """
-    origin = _iata(origins[0])
-    destination = _iata(destinations[0])
-    query = f"Flights from {origin} to {destination} on {departure_date}"
-    if return_date:
-        query += f" through {return_date}"
-    url = f"https://www.google.com/travel/flights?q={urllib.parse.quote(query)}"
-    return with_locale_params(url, currency, language, country)
+    return google_flights_url(
+        _iata(origins[0]),
+        _iata(destinations[0]),
+        departure_date,
+        return_date,
+        currency=currency,
+        language=language,
+        country=country,
+    )
 
 
 def _serialize_booking_option(option: Any) -> dict[str, Any]:

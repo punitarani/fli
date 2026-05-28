@@ -15,7 +15,7 @@ from rich.text import Text
 
 from fli.cli.console import console
 from fli.cli.enums import DayOfWeek
-from fli.core import format_price, format_price_axis_label
+from fli.core import format_price, format_price_axis_label, google_flights_url
 from fli.core.builders import normalize_date
 from fli.core.parsers import ParseError
 from fli.core.parsers import parse_airlines as core_parse_airlines
@@ -289,16 +289,38 @@ def serialize_date_result(
     date_result: Any,
     trip_type: TripType,
     default_currency: str = "USD",
+    *,
+    origin: str | None = None,
+    destination: str | None = None,
+    currency: str | None = None,
+    language: str | None = None,
+    country: str | None = None,
 ) -> dict[str, Any]:
-    """Serialize a date search result for JSON output."""
+    """Serialize a date search result for JSON output.
+
+    When ``origin`` and ``destination`` are provided, a ``booking_url``
+    deep-linking to Google Flights for that specific date is included.
+    """
+    departure_date = date_result.date[0].date().isoformat()
+    return_date = None
+    if trip_type == TripType.ROUND_TRIP and len(date_result.date) > 1:
+        return_date = date_result.date[1].date().isoformat()
     payload = {
-        "departure_date": date_result.date[0].date().isoformat(),
-        "return_date": None,
+        "departure_date": departure_date,
+        "return_date": return_date,
         "price": date_result.price,
         "currency": date_result.currency or default_currency,
     }
-    if trip_type == TripType.ROUND_TRIP and len(date_result.date) > 1:
-        payload["return_date"] = date_result.date[1].date().isoformat()
+    if origin and destination:
+        payload["booking_url"] = google_flights_url(
+            origin,
+            destination,
+            departure_date,
+            return_date,
+            currency=currency,
+            language=language,
+            country=country,
+        )
     return payload
 
 
@@ -309,9 +331,10 @@ def build_json_success_response(
     query: dict[str, Any],
     results_key: str,
     results: list[dict[str, Any]],
+    booking_url: str | None = None,
 ) -> dict[str, Any]:
     """Build a JSON success payload for CLI commands."""
-    return {
+    payload: dict[str, Any] = {
         "success": True,
         "data_source": "google_flights",
         "search_type": search_type,
@@ -320,6 +343,9 @@ def build_json_success_response(
         "count": len(results),
         results_key: results,
     }
+    if booking_url:
+        payload["booking_url"] = booking_url
+    return payload
 
 
 def build_json_error_response(
@@ -350,7 +376,10 @@ def emit_json(payload: dict[str, Any]) -> None:
 
 
 def display_flight_results(
-    flights: list, trip_type: TripType = TripType.ONE_WAY, default_currency: str = "USD"
+    flights: list,
+    trip_type: TripType = TripType.ONE_WAY,
+    default_currency: str = "USD",
+    booking_url: str | None = None,
 ):
     """Display flight results in a beautiful format.
 
@@ -359,6 +388,8 @@ def display_flight_results(
             or tuples of FlightResults (round-trip or multi-city)
         trip_type: The trip type to correctly interpret pricing.
         default_currency: Fallback currency code when Google does not return one.
+        booking_url: Optional Google Flights deep link shown as a footer so the
+            user can open and book the search in a browser.
 
     """
     if not flights:
@@ -464,8 +495,29 @@ def display_flight_results(
         )
         console.print()
 
+    if booking_url:
+        console.print(
+            Panel(
+                Text(booking_url, style="cyan"),
+                title="[bold]Open on Google Flights[/bold]",
+                border_style="cyan",
+                box=box.ROUNDED,
+            )
+        )
+        console.print()
 
-def display_date_results(dates: list, trip_type: TripType, default_currency: str = "USD"):
+
+def display_date_results(
+    dates: list,
+    trip_type: TripType,
+    default_currency: str = "USD",
+    *,
+    origin: str | None = None,
+    destination: str | None = None,
+    currency: str | None = None,
+    language: str | None = None,
+    country: str | None = None,
+):
     """Display date search results with sparkline chart and table."""
     if not dates:
         console.print(Panel("No flights found for these dates", style="red"))
@@ -500,8 +552,37 @@ def display_date_results(dates: list, trip_type: TripType, default_currency: str
 
     console.print()  # Add spacing between chart and table
 
+    # When the route is known, render each departure date as a clickable
+    # Google Flights deep link (rich hyperlink — keeps the table narrow while
+    # still letting the user jump straight to that date's flights).
+    links_enabled = bool(origin and destination)
+
+    def _departure_cell(date_price: Any) -> str:
+        label = date_price.date[0].strftime("%Y-%m-%d")
+        if not links_enabled:
+            return label
+        return_date = (
+            date_price.date[1].date().isoformat()
+            if trip_type == TripType.ROUND_TRIP and len(date_price.date) > 1
+            else None
+        )
+        url = google_flights_url(
+            origin,
+            destination,
+            date_price.date[0].date().isoformat(),
+            return_date,
+            currency=currency,
+            language=language,
+            country=country,
+        )
+        return f"[link={url}]{label}[/link]"
+
     # Build the table (using original order, not sorted)
-    table = Table(title="Cheapest Dates to Fly", box=box.ROUNDED)
+    table = Table(
+        title="Cheapest Dates to Fly",
+        caption="Departure dates link to Google Flights" if links_enabled else None,
+        box=box.ROUNDED,
+    )
     table.add_column("Departure", style="cyan")
     table.add_column("Day", style="yellow")
     if trip_type == TripType.ROUND_TRIP:
@@ -512,13 +593,13 @@ def display_date_results(dates: list, trip_type: TripType, default_currency: str
     for date_price in dates:
         if trip_type == TripType.ONE_WAY:
             table.add_row(
-                date_price.date[0].strftime("%Y-%m-%d"),
+                _departure_cell(date_price),
                 date_price.date[0].strftime("%A"),
                 format_price(date_price.price, date_price.currency or default_currency),
             )
         else:
             table.add_row(
-                date_price.date[0].strftime("%Y-%m-%d"),
+                _departure_cell(date_price),
                 date_price.date[0].strftime("%A"),
                 date_price.date[1].strftime("%Y-%m-%d"),
                 date_price.date[1].strftime("%A"),
