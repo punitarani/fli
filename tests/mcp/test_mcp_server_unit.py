@@ -491,3 +491,20 @@ class TestExecuteBookingOptions:
         result = _execute_booking_options(params, None)
         assert result["success"] is True
         assert result["options"] == []
+
+    def test_empty_vendor_list_adds_fallback_note(self, monkeypatch, params):
+        flight = _make_bookable_flight()
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.search",
+            lambda self, *a, **k: [flight],
+        )
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.get_booking_options",
+            lambda self, *a, **k: [],
+        )
+        result = _execute_booking_options(params, ["BA178"])
+        assert result["success"] is True
+        assert result["options"] == []
+        assert "booking_url" in result
+        assert "note" in result
+        assert "booking_url" in result["note"]

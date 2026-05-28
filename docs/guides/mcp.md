@@ -237,6 +237,12 @@ When no flight matches `flight_numbers`, the response has `success: false` and
 an `available_flights` list of the flight-number sequences that were found, so
 you can retry with a valid identifier.
 
+!!! note "Vendor fares may be empty"
+    Google's booking endpoint often returns no per-vendor fares without a
+    browser-minted session token. When that happens `options` is `[]` and the
+    response carries a `note` — fall back to the top-level `booking_url`, which
+    always deep-links to the bookable search on Google Flights.
+
 ## Available Prompts
 
 The MCP server also provides prompt templates to help guide searches:

@@ -702,13 +702,23 @@ def _execute_booking_options(
         )
 
         is_round_trip = trip_type == TripType.ROUND_TRIP
-        return {
+        serialized = [_serialize_booking_option(o) for o in options]
+        result = {
             "success": True,
             "selected_flight": _serialize_flight_result(flight, is_round_trip),
-            "options": [_serialize_booking_option(o) for o in options],
-            "count": len(options),
+            "options": serialized,
+            "count": len(serialized),
             "booking_url": booking_url,
         }
+        if not serialized:
+            # Google's GetBookingResults frequently returns no vendors without a
+            # browser-minted session token (see fli.search._booking_capture).
+            # Point the consumer at the deep link so a booking path always exists.
+            result["note"] = (
+                "Google returned no per-vendor booking fares for this itinerary. "
+                "Open booking_url on Google Flights to view and book it."
+            )
+        return result
 
     except ParseError as e:
         return {"success": False, "error": str(e), "options": []}
