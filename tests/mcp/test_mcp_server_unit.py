@@ -20,6 +20,7 @@ from fli.mcp.server import (
     _google_flights_url,
     _match_flight,
     _serialize_booking_option,
+    _serialize_date_result,
     _serialize_flight_leg,
     _serialize_layover,
 )
@@ -384,6 +385,48 @@ class TestMatchFlight:
     def test_wrong_leg_count_does_not_match(self):
         flight = _make_bookable_flight(legs=[_make_bookable_leg("BA", "178")])
         assert _match_flight([flight], ["BA178", "BA179"]) is None
+
+    def test_match_when_flight_number_pre_prefixed(self):
+        """Pre-prefixed flight_number ('BA178') still matches both forms.
+
+        Guards against a double-prefix ('BABA178') if the decoder ever yields
+        an already-prefixed flight number; both bare and prefixed caller forms
+        must resolve.
+        """
+        flight = _make_bookable_flight(legs=[_make_bookable_leg("BA", "BA178")])
+        assert _match_flight([flight], ["178"]) is flight
+        assert _match_flight([flight], ["BA178"]) is flight
+
+
+class TestSerializeDateResult:
+    def _make_date_result(self, dates, price=350.0, currency="USD"):
+        dr = MagicMock()
+        dr.date = dates
+        dr.price = price
+        dr.currency = currency
+        return dr
+
+    def test_date_is_yyyy_mm_dd_string_one_way(self):
+        from datetime import datetime
+
+        from fli.models import Airport
+
+        dr = self._make_date_result((datetime(2026, 3, 15),))
+        out = _serialize_date_result(dr, [Airport.JFK], [Airport.LHR], (None, None, None))
+        assert out["date"] == "2026-03-15"
+        assert isinstance(out["date"], str)
+        assert out["return_date"] is None
+
+    def test_date_and_return_date_strings_round_trip(self):
+        from datetime import datetime
+
+        from fli.models import Airport
+
+        dr = self._make_date_result((datetime(2026, 3, 15), datetime(2026, 3, 22)))
+        out = _serialize_date_result(dr, [Airport.JFK], [Airport.LHR], (None, None, None))
+        assert out["date"] == "2026-03-15"
+        assert out["return_date"] == "2026-03-22"
+        assert "booking_url" in out
 
 
 class TestSerializeBookingOption:

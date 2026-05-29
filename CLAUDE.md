@@ -157,6 +157,12 @@ options — each with a clickable `booking_url` and `google_click_url`.
   `['AA100', 'AA200']` round-trip). Accepts bare (`'178'`) or airline-prefixed
   (`'BA178'`) forms. Omit to price the top result.
 - `cabin_class`, `max_stops`, `passengers`, `airlines`, `exclude_basic_economy` - Same as `search_flights`
+- `departure_window`, `sort_by`, `exclude_airlines`, `alliance`, `exclude_alliance`,
+  `min_layover`, `max_layover`, `emissions`, `checked_bags`, `carry_on` - Same as
+  `search_flights`. Pass the **same filters used for `search_flights`** so the
+  re-run search reproduces the same result set; otherwise (especially when
+  `flight_numbers` is omitted) the priced "top result" may differ from what the
+  user saw.
 - `currency`, `language`, `country` - Same locale knobs as `search_flights`
 
 ### Note on emissions

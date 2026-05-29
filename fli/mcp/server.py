@@ -332,7 +332,11 @@ def _leg_identifiers(leg: Any) -> set[str]:
     """Return the accepted identifier spellings for a leg ('178' and 'BA178')."""
     number = str(leg.flight_number).upper().replace(" ", "")
     code = _airline_code(leg.airline).upper()
-    return {number, f"{code}{number}"}
+    # Strip a leading airline-code prefix if the flight_number already carries
+    # it (e.g. "BA178" -> "178") so the bare and prefixed forms are always both
+    # valid and we never produce a double-prefixed token ("BABA178").
+    bare = number[len(code) :] if code and number.startswith(code) else number
+    return {bare, f"{code}{bare}"}
 
 
 def _match_flight(flights: list[Any], flight_numbers: list[str] | None) -> Any | None:
@@ -503,7 +507,7 @@ def _serialize_date_result(
     departure = _date_str(dates[0]) if dates else None
     return_date = _date_str(dates[1]) if dates and len(dates) > 1 else None
     out: dict[str, Any] = {
-        "date": date_result.date,
+        "date": departure,
         "price": date_result.price,
         "currency": date_result.currency or CONFIG.default_currency,
         "return_date": return_date,
@@ -1203,6 +1207,49 @@ def get_booking_options(
         str | None,
         Field(description="Optional ISO 3166-1 alpha-2 country code (e.g., 'GB')."),
     ] = None,
+    departure_window: Annotated[
+        str | None,
+        Field(description="Departure time window in 'HH-HH' 24h format (e.g., '6-20')"),
+    ] = None,
+    sort_by: Annotated[
+        str,
+        Field(
+            description="Sort by: TOP_FLIGHTS, BEST, CHEAPEST,"
+            " DEPARTURE_TIME, ARRIVAL_TIME, DURATION, EMISSIONS"
+        ),
+    ] = CONFIG.default_sort_by,
+    exclude_airlines: Annotated[
+        list[str] | None,
+        Field(description="Airline IATA codes to EXCLUDE from results."),
+    ] = None,
+    alliance: Annotated[
+        list[str] | None,
+        Field(description="Restrict to alliances: ONEWORLD, SKYTEAM, STAR_ALLIANCE."),
+    ] = None,
+    exclude_alliance: Annotated[
+        list[str] | None,
+        Field(description="Alliance names to EXCLUDE from results."),
+    ] = None,
+    min_layover: Annotated[
+        int | None,
+        Field(description="Minimum layover duration in minutes.", ge=1),
+    ] = None,
+    max_layover: Annotated[
+        int | None,
+        Field(description="Maximum layover duration in minutes.", ge=1),
+    ] = None,
+    emissions: Annotated[
+        str,
+        Field(description="Filter by emissions level: ALL or LESS"),
+    ] = "ALL",
+    checked_bags: Annotated[
+        int,
+        Field(description="Number of checked bags to include in price (0, 1, or 2)", ge=0, le=2),
+    ] = 0,
+    carry_on: Annotated[
+        bool,
+        Field(description="Include carry-on bag fee in displayed price"),
+    ] = False,
 ) -> dict[str, Any]:
     """Get bookable fares (vendor names, prices, and direct booking URLs) for a flight.
 
@@ -1212,20 +1259,37 @@ def get_booking_options(
     clickable ``booking_url``. Use ``search_flights`` first to discover the
     flight numbers, then call this tool to retrieve where and at what price
     it can be booked.
+
+    Pass the same filters (``sort_by``, ``departure_window``,
+    ``exclude_airlines``, ``alliance``, layover/bags/emissions, …) that were
+    used for ``search_flights`` so the re-run search reproduces the same result
+    set — otherwise, when ``flight_numbers`` is omitted, the priced "top
+    result" may differ from the one the user saw.
     """
+    effective_departure_window = departure_window or CONFIG.default_departure_window
     params = FlightSearchParams(
         origin=origin,
         destination=destination,
         departure_date=departure_date,
         return_date=return_date,
+        departure_window=effective_departure_window,
         cabin_class=cabin_class,
         max_stops=max_stops,
+        sort_by=sort_by,
         passengers=passengers or CONFIG.default_passengers,
         airlines=airlines,
         exclude_basic_economy=exclude_basic_economy,
+        emissions=emissions,
+        checked_bags=checked_bags,
+        carry_on=carry_on,
         currency=currency,
         language=language,
         country=country,
+        exclude_airlines=exclude_airlines,
+        alliance=alliance,
+        exclude_alliance=exclude_alliance,
+        min_layover=min_layover,
+        max_layover=max_layover,
     )
     return _execute_booking_options(params, flight_numbers)
 

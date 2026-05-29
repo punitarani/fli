@@ -206,9 +206,22 @@ find out where (and at what price) a specific flight can be booked.
 | `passengers` | int | No | 1 | Number of adult passengers |
 | `airlines` | list | No | null | Filter by airline codes (e.g., ['BA', 'AA']) |
 | `exclude_basic_economy` | bool | No | false | Exclude basic economy fares |
+| `departure_window` | string | No | null | Time window in 'HH-HH' format (e.g., '6-20') |
+| `sort_by` | string | No | CHEAPEST | Sort order — matters when `flight_numbers` is omitted |
+| `exclude_airlines` | list | No | null | Airline IATA codes to **exclude** |
+| `alliance` / `exclude_alliance` | list | No | null | Restrict / exclude ONEWORLD, SKYTEAM, STAR_ALLIANCE |
+| `min_layover` / `max_layover` | int | No | null | Layover duration bounds (minutes) |
+| `emissions` | string | No | ALL | ALL or LESS |
+| `checked_bags` | int | No | 0 | Checked bags included in price (0–2) |
+| `carry_on` | bool | No | false | Include carry-on bag fee in price |
 | `currency` | string | No | null | ISO 4217 currency code (`curr=`) |
 | `language` | string | No | null | BCP-47 language code (`hl=`) |
 | `country` | string | No | null | ISO 3166-1 alpha-2 country (`gl=`) |
+
+> **Tip:** Pass the **same filters you used for `search_flights`** so the re-run
+> search reproduces the same result set. Otherwise — especially when
+> `flight_numbers` is omitted — the priced "top result" may differ from the one
+> the user saw.
 
 **Example Response:**
 
