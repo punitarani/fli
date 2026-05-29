@@ -354,33 +354,26 @@ class SearchFlights:
         self,
         flight: FlightResult | tuple[FlightResult, ...],
         *,
-        session_id: str | None = None,
         currency: str | None = None,
         language: str | None = None,
         country: str | None = None,
     ) -> str:
         """Build a Google Flights deep-link URL for a specific itinerary.
 
-        Constructs ``https://www.google.com/travel/flights/booking?tfs=…``
-        (and ``&tfu=…`` when a session id and price are available) that opens
-        the booking page pre-loaded with the given itinerary.
+        Constructs ``https://www.google.com/travel/flights/booking?tfs=…`` that
+        opens the booking page pre-loaded with the given itinerary — the
+        airline/OTA fare options and the "Continue" booking CTA included.
 
-        ``tfs`` is fully deterministic — no session id required.  ``tfu``
-        is a best-effort enhancement that requires a live session id (from a
-        prior :meth:`search` call on this instance or passed explicitly).
-        The URL is always valid with ``tfs`` alone; ``tfu`` simply provides
-        richer vendor-pricing data on the booking page.
-
-        This method never raises.  When the session id is absent or the
-        flight has no price, only the ``tfs`` parameter is included.
+        The ``tfs`` itinerary token is fully deterministic (built from the
+        flight's airports, dates and flight numbers); no session id or network
+        round-trip is required, so the same itinerary always yields the same
+        URL. This method never raises — on malformed input it falls back to the
+        generic Google Flights URL.
 
         Args:
             flight: A :class:`~fli.models.FlightResult` (one-way / single
                 segment) or a tuple of them (round-trip / multi-city, one
                 element per travel direction).
-            session_id: Override the cached session id.  Defaults to
-                ``self._last_session_id`` from the most recent
-                :meth:`search` call.
             currency: ISO 4217 currency code appended as ``curr=``.
             language: BCP-47 language code appended as ``hl=``.
             country: ISO 3166-1 alpha-2 country code appended as ``gl=``.
@@ -389,7 +382,7 @@ class SearchFlights:
             A ``https://www.google.com/travel/flights/booking?tfs=…`` URL.
 
         """
-        from fli.search._proto import LegSpec, build_booking_token, build_tfs_token, build_tfu_token
+        from fli.search._proto import LegSpec, build_tfs_token
 
         def _iata(airport: object) -> str:
             # Handle both Airport enum (has .name) and plain strings.
@@ -398,7 +391,6 @@ class SearchFlights:
         results: list[FlightResult] = list(flight) if isinstance(flight, tuple) else [flight]
         is_one_way = len(results) == 1
 
-        # Build the tfs itinerary token — always deterministic.
         try:
             segments: list[list[LegSpec]] = []
             for result in results:
@@ -417,28 +409,7 @@ class SearchFlights:
             url = f"https://www.google.com/travel/flights/booking?tfs={tfs}"
         except Exception:
             logger.debug("build_flight_booking_url: tfs construction failed", exc_info=True)
-            return with_locale_params(
-                "https://www.google.com/travel/flights", currency, language, country
-            )
-
-        # Add tfu when session + price are available (mirrors get_booking_options logic).
-        effective_session = session_id or self._last_session_id
-        price_result = results[-1]  # price lives on last segment (matches GBR token convention)
-        if effective_session and price_result.price is not None:
-            try:
-                last_leg = price_result.legs[-1]
-                inner_token = build_booking_token(
-                    session_id=effective_session,
-                    airline_code=_iata(last_leg.airline),
-                    flight_number=last_leg.flight_number,
-                    leg_index=1,
-                    price_cents=int(price_result.price * 100),
-                    currency=price_result.currency or currency or "USD",
-                )
-                tfu = build_tfu_token(inner_token)
-                url += f"&tfu={tfu}"
-            except Exception:
-                logger.debug("build_flight_booking_url: tfu construction failed", exc_info=True)
+            url = "https://www.google.com/travel/flights"
 
         return with_locale_params(url, currency, language, country)
 

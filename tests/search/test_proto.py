@@ -19,7 +19,6 @@ from fli.search._proto import (
     LegSpec,
     build_booking_token,
     build_tfs_token,
-    build_tfu_token,
     decode_booking_token,
     extract_booking_token_from_tfu,
     extract_session_id_from_tfu,
@@ -395,74 +394,6 @@ class TestBuildTfsToken:
         built = build_tfs_token(segments)
         raw = _b64url_to_bytes(built)
         assert b"F9" in raw
-
-
-class TestBuildTfuToken:
-    """Tests for the tfu outer-wrapper builder."""
-
-    def test_structure_f2_and_f4_constants(self):
-        """Outer proto must have f2={f1:0} and f4=empty (per capture)."""
-        inner = build_booking_token(
-            session_id=CAPTURED_SESSION,
-            airline_code="AA",
-            flight_number="28",
-            leg_index=1,
-            price_cents=34680,
-            currency="USD",
-        )
-        tfu = build_tfu_token(inner)
-        raw = _b64url_to_bytes(tfu)
-
-        # Walk outer proto and check field 2 and field 4.
-        from fli.search._proto import _read_varint
-
-        off = 0
-        fields: dict[int, bytes] = {}
-        while off < len(raw):
-            tag, off = _read_varint(raw, off)
-            field = tag >> 3
-            wire = tag & 7
-            assert wire == 2, f"expected length-delim, got wire {wire} for field {field}"
-            length, off2 = _read_varint(raw, off)
-            off = off2
-            fields[field] = raw[off : off + length]
-            off += length
-
-        # f2 = {f1: 0} → bytes 08 00
-        assert fields[2] == bytes([0x08, 0x00]), f"f2={fields[2].hex()}"
-        # f4 = empty
-        assert fields[4] == b"", f"f4={fields[4].hex()}"
-
-    def test_urlsafe_no_padding(self):
-        inner = build_booking_token(
-            session_id="sess",
-            airline_code="AA",
-            flight_number="1",
-            leg_index=1,
-            price_cents=100,
-            currency="USD",
-        )
-        tfu = build_tfu_token(inner)
-        assert "=" not in tfu
-        assert "+" not in tfu
-        assert "/" not in tfu
-
-    def test_inner_token_round_trips(self):
-        """Inner token extracted from built tfu equals the original."""
-        inner = build_booking_token(
-            session_id=CAPTURED_SESSION,
-            airline_code="AA",
-            flight_number="28",
-            leg_index=1,
-            price_cents=34680,
-            currency="USD",
-        )
-        tfu = build_tfu_token(inner)
-        extracted = extract_booking_token_from_tfu(tfu)
-        # Both should decode to the same booking token fields.
-        d1 = decode_booking_token(inner)
-        d2 = decode_booking_token(extracted)
-        assert d1 == d2
 
 
 class TestToUrlsafeB64:

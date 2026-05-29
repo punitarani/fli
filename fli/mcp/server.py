@@ -420,7 +420,6 @@ def _flight_extras(flight: Any) -> dict[str, Any]:
         ("primary_airline_name", "primary_airline_name"),
         ("self_transfer", "self_transfer"),
         ("mixed_cabin", "mixed_cabin"),
-        ("booking_token", "booking_token"),
     ):
         v = getattr(flight, src, None)
         if v is not None and v != "":

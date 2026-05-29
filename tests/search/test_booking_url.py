@@ -92,10 +92,11 @@ def _connection(price=150.0) -> FlightResult:
     )
 
 
-def _make_client(session_id: str | None = "sess123") -> SearchFlights:
+def _make_client() -> SearchFlights:
+    # build_flight_booking_url needs no session id or HTTP client — the tfs
+    # token is fully deterministic from the itinerary.
     client = SearchFlights.__new__(SearchFlights)
-    client._last_session_id = session_id
-    # Prevent real HTTP client construction
+    client._last_session_id = None
     client.client = MagicMock()
     return client
 
@@ -107,52 +108,43 @@ def _make_client(session_id: str | None = "sess123") -> SearchFlights:
 
 class TestBuildFlightBookingUrl:
     def test_one_way_has_tfs(self):
-        client = _make_client(session_id=None)
+        client = _make_client()
         url = client.build_flight_booking_url(_one_way())
         assert url.startswith("https://www.google.com/travel/flights/booking?tfs=")
 
     def test_round_trip_has_tfs(self):
-        client = _make_client(session_id=None)
+        client = _make_client()
         url = client.build_flight_booking_url(_round_trip())
         assert "tfs=" in url
 
     def test_tfs_no_padding_or_standard_b64(self):
-        client = _make_client(session_id=None)
+        client = _make_client()
         url = client.build_flight_booking_url(_one_way())
         tfs = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["tfs"][0]
         assert "=" not in tfs
         assert "+" not in tfs
         assert "/" not in tfs
 
-    def test_tfu_present_when_session_and_price(self):
-        client = _make_client(session_id="sess123")
+    def test_no_tfu_param_emitted(self):
+        # tfu adds no value over tfs (tfs-only lands on the specific-flight
+        # booking page with vendor fares), so it is never emitted — even when
+        # a session id is cached.
+        client = _make_client()
+        client._last_session_id = "sess123"
         url = client.build_flight_booking_url(_one_way(price=100.0))
-        qs = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
-        assert "tfu" in qs
-
-    def test_tfu_absent_when_no_session(self):
-        client = _make_client(session_id=None)
-        url = client.build_flight_booking_url(_one_way())
         assert "tfu" not in url
 
-    def test_tfu_absent_when_price_none(self):
-        client = _make_client(session_id="sess123")
-        flight = _one_way(price=None)
-        url = client.build_flight_booking_url(flight)
-        assert "tfu" not in url
-
-    def test_tfu_uses_explicit_session_over_cached(self):
-        client = _make_client(session_id="cached_sess")
-        url_explicit = client.build_flight_booking_url(_one_way(), session_id="explicit_sess")
-        url_cached = client.build_flight_booking_url(_one_way())
-        # Both should have tfu but with different inner tokens
-        assert "tfu" in url_explicit
-        assert "tfu" in url_cached
-        # They differ because session ids differ
-        assert url_explicit != url_cached
+    def test_deterministic_same_itinerary_same_url(self):
+        # No session id / network state means the same itinerary always yields
+        # an identical URL (cacheable, reproducible).
+        client = _make_client()
+        a = client.build_flight_booking_url(_one_way())
+        client._last_session_id = "some-session"
+        b = client.build_flight_booking_url(_one_way())
+        assert a == b
 
     def test_locale_params_appended(self):
-        client = _make_client(session_id=None)
+        client = _make_client()
         url = client.build_flight_booking_url(
             _one_way(), currency="EUR", language="en-GB", country="GB"
         )
@@ -161,14 +153,14 @@ class TestBuildFlightBookingUrl:
         assert "gl=GB" in url
 
     def test_no_locale_params_when_not_provided(self):
-        client = _make_client(session_id=None)
+        client = _make_client()
         url = client.build_flight_booking_url(_one_way())
         assert "curr=" not in url
         assert "hl=" not in url
         assert "gl=" not in url
 
     def test_connection_flight_uses_each_leg_in_tfs(self):
-        client = _make_client(session_id=None)
+        client = _make_client()
         flight = _connection()
         url = client.build_flight_booking_url(flight)
         # Decode tfs and verify both legs are encoded
@@ -183,7 +175,7 @@ class TestBuildFlightBookingUrl:
         assert b"ORD" in raw
 
     def test_round_trip_two_segments_in_tfs(self):
-        client = _make_client(session_id=None)
+        client = _make_client()
         import base64
 
         url = client.build_flight_booking_url(_round_trip())
@@ -197,7 +189,7 @@ class TestBuildFlightBookingUrl:
         """Frontier (F9 — enum _F9 with underscore prefix) encodes as 'F9'."""
         import base64
 
-        client = _make_client(session_id=None)
+        client = _make_client()
         # Use a mock airline with underscore prefix in name to simulate _F9
         mock_leg = MagicMock()
         mock_airline = MagicMock()
@@ -228,7 +220,7 @@ class TestBuildFlightBookingUrl:
 
     def test_never_raises_on_bad_data(self):
         """Method must not raise even when flight data is malformed."""
-        client = _make_client(session_id="sess")
+        client = _make_client()
         bad_flight = MagicMock()
         bad_flight.legs = [MagicMock(departure_datetime=None)]
         # Should not raise; falls back to a Google Flights URL
@@ -236,6 +228,6 @@ class TestBuildFlightBookingUrl:
         assert "google.com" in url
 
     def test_returns_string(self):
-        client = _make_client(session_id=None)
+        client = _make_client()
         result = client.build_flight_booking_url(_one_way())
         assert isinstance(result, str)

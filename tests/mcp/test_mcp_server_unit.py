@@ -179,25 +179,16 @@ class TestFlightExtras:
         f.primary_airline_name = None
         f.self_transfer = None
         f.mixed_cabin = None
-        f.booking_token = None
         f.primary_airline = None
         f.layovers = None
         for k, v in overrides.items():
             setattr(f, k, v)
         return f
 
-    def test_booking_token_included_when_set(self):
+    def test_booking_token_not_surfaced(self):
+        # booking_token is an internal artifact no MCP tool consumes; it must
+        # never appear in the response shape even when the parser populates it.
         f = self._make_flight(booking_token="tok123")
-        result = _flight_extras(f)
-        assert result["booking_token"] == "tok123"
-
-    def test_booking_token_excluded_when_empty_string(self):
-        f = self._make_flight(booking_token="")
-        result = _flight_extras(f)
-        assert "booking_token" not in result
-
-    def test_booking_token_excluded_when_none(self):
-        f = self._make_flight(booking_token=None)
         result = _flight_extras(f)
         assert "booking_token" not in result
 

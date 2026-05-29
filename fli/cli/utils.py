@@ -232,7 +232,6 @@ def _serialize_flight_segment_result(
     for src in (
         "self_transfer",
         "mixed_cabin",
-        "booking_token",
     ):
         v = getattr(flight, src, None)
         if v is not None and v != "":

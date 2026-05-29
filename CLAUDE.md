@@ -75,7 +75,7 @@ uv run mkdocs build         # Build static docs
 5. **MCP Server** (`fli/mcp/`)
    - FastMCP-based server with four tools: `search_flights`, `search_dates`, `get_booking_options`, `find_airports`
    - Industry-standard parameter naming: `origin`, `destination`, `cabin_class`, `max_stops`
-   - Per-flight booking deep-link URLs (`tfs`+`tfu` protobuf) in every search result
+   - Per-flight booking deep-link URLs (`tfs` protobuf) in every search result
    - Prompt templates for guided searches
    - Configuration via environment variables
 
@@ -122,10 +122,12 @@ Search for flights on a specific date.
 - `sort_by` - CHEAPEST, DURATION, DEPARTURE_TIME, ARRIVAL_TIME
 
 **Response:** Each flight in `flights[]` carries its own `booking_url` — a
-`tfs`+`tfu` protobuf deep link that opens the specific itinerary's booking page
-on Google Flights. The top-level `booking_url` is a broader search-page link
-(route + dates pre-filled) kept as a reliable fallback. Each flight's
-`flight_number` can be passed to `get_booking_options` for per-vendor pricing.
+`tfs` protobuf deep link that opens the specific itinerary's booking page
+(vendor fares + "Continue" CTA) on Google Flights. The token is deterministic
+(no session id), so the same itinerary always yields the same URL. The
+top-level `booking_url` is a broader search-page link (route + dates
+pre-filled) kept as a reliable fallback. Each flight's `flight_number` can be
+passed to `get_booking_options` for per-vendor pricing.
 
 ### `search_dates`
 Find cheapest travel dates within a range.

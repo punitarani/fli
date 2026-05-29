@@ -17,10 +17,12 @@ Two token types are implemented:
        field 7 (varint): 28                                    (stops bucket marker)
        field 14 (varint): same as inner field 1                (price duplicated)
 
-2. **Deep-link URL parameters** (``tfs`` + ``tfu``) — embedded in
-   ``https://www.google.com/travel/flights/booking?tfs=…&tfu=…`` to open a
-   specific itinerary's booking page.  Structure reverse-engineered 2026-05-28
-   (see ``.reverse-eng/notes/booking_results.md``).
+2. **Deep-link itinerary token** (``tfs``) — embedded in
+   ``https://www.google.com/travel/flights/booking?tfs=…`` to open a specific
+   itinerary's booking page (vendor fares + "Continue" CTA included). The
+   ``tfs`` token alone is sufficient; the companion ``tfu`` token Google's UI
+   also emits is not needed and is intentionally not built. Structure
+   reverse-engineered 2026-05-28 (see ``.reverse-eng/notes/booking_results.md``).
 
 We implement only the protobuf primitives we need here — varint, length-
 delimited string/bytes, nested-message — to avoid the protobuf-runtime
@@ -37,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# tfs / tfu helpers
+# tfs deep-link helpers
 # ---------------------------------------------------------------------------
 
 
@@ -321,17 +323,15 @@ def extract_session_id_from_tfu(tfu: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Deep-link URL parameter builders (tfs / tfu)
+# Deep-link URL parameter builder (tfs)
 # ---------------------------------------------------------------------------
 
 
 def _to_urlsafe_b64(data: bytes) -> str:
     """Encode *data* as URL-safe base64 without ``=`` padding.
 
-    Both ``tfs`` and ``tfu`` query parameters use the urlsafe alphabet
-    (``-`` / ``_``) with padding stripped.  ``build_booking_token`` emits
-    *standard* base64 (``+`` / ``/``); callers should pass the raw payload
-    bytes rather than the pre-encoded string to avoid double-encoding.
+    The ``tfs`` query parameter uses the urlsafe alphabet (``-`` / ``_``) with
+    padding stripped.
     """
     return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
 
@@ -416,40 +416,3 @@ def build_tfs_token(
         + _varint_field(19, f19)
     )
     return _to_urlsafe_b64(payload)
-
-
-def build_tfu_token(inner_token_standard_b64: str) -> str:
-    """Wrap an inner booking token in the ``tfu`` outer protobuf.
-
-    The ``tfu`` parameter bundles the session-anchored booking token (from
-    :func:`build_booking_token`) in an outer protobuf envelope:
-
-    ::
-
-        outer {
-          field 1 (str): urlsafe-base64(inner_token_bytes)
-          field 2 (msg): { field 1 (varint): 0 }
-          field 4 (str): ""   (empty)
-        }
-
-    Reverse-engineered 2026-05-28 from captured booking-page URLs.
-
-    Args:
-        inner_token_standard_b64: The standard-base64 token produced by
-            :func:`build_booking_token`.
-
-    Returns:
-        URL-safe base64 string (no ``=`` padding) for the ``tfu=`` parameter.
-
-    """
-    # Decode the standard-base64 inner token bytes, then re-encode urlsafe.
-    padding = "=" * ((4 - len(inner_token_standard_b64) % 4) % 4)
-    inner_bytes = base64.b64decode(inner_token_standard_b64 + padding)
-    inner_urlsafe = _to_urlsafe_b64(inner_bytes)
-
-    outer = (
-        _length_delim(1, inner_urlsafe.encode("ascii"))
-        + _length_delim(2, _varint_field(1, 0))
-        + _length_delim(4, b"")  # empty field
-    )
-    return _to_urlsafe_b64(outer)
