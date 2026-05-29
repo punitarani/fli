@@ -745,7 +745,7 @@ def _execute_booking_options(
         }
         if not serialized:
             # Google's GetBookingResults frequently returns no vendors without a
-            # browser-minted session token (see fli.search._booking_capture).
+            # browser-minted session token that fli does not reproduce server-side.
             # The per-flight deep link in selected_flight.booking_url opens the
             # specific itinerary's booking page directly.
             result["note"] = (

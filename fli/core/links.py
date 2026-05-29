@@ -3,8 +3,7 @@
 Both the CLI and MCP surface a clickable Google Flights link alongside
 search results so a consumer can open the route (and complete a booking)
 in a browser. The natural-language ``q`` form used here is the same one
-Google's own frontend accepts and is what :mod:`fli.search._booking_capture`
-drives a real browser to.
+Google's own frontend accepts.
 
 ``with_locale_params`` lives here (rather than in :mod:`fli.search`) so the
 core layer stays free of any dependency on the search package; the search
