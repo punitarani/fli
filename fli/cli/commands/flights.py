@@ -201,7 +201,7 @@ def _search_flights_core(
             typer.echo("No flights found.")
             raise typer.Exit(1)
 
-        # Build per-flight booking deep-links (tfs+tfu; never raises).
+        # Build per-flight booking deep-links (tfs; never raises).
         booking_urls = [
             search_client.build_flight_booking_url(
                 result, currency=currency, language=language, country=country

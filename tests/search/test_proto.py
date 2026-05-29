@@ -1,12 +1,8 @@
-"""Tests for the GetBookingResults protobuf token builder + tfu URL parser.
+"""Tests for the GetBookingResults protobuf token builder and tfs deep-link token.
 
 The builder reproduces a byte-perfect copy of the captured token from a
 live booking-page URL. The captured fixture is the authoritative
 reference — any change to the builder must keep this byte-equal.
-
-The tfu parser extracts the same booking token from a ``tfu=`` URL
-parameter — the value Google's UI puts in the booking-page URL after a
-user clicks "Select flight".
 """
 
 from __future__ import annotations
@@ -20,8 +16,6 @@ from fli.search._proto import (
     build_booking_token,
     build_tfs_token,
     decode_booking_token,
-    extract_booking_token_from_tfu,
-    extract_session_id_from_tfu,
 )
 
 # Captured live from a real booking page (2026-05-14):
@@ -155,54 +149,6 @@ class TestDecodeBookingTokenEdgeCases:
             decode_booking_token(bad_token)
 
 
-# Live `tfu` URL parameter captured 2026-05-14 from a JFK→LAX RT booking page.
-LIVE_TFU = (
-    "CmxDalJJVVZwUk1FOUJjRVZyZEVWQlEzaFRkVkZDUnkwdExTMHRMUzB0TFhCcVltWjZOMEZCUVVGQlIyOUd"
-    "PVlpGU0U5SVVXRkJFZ1pCUVRJNEl6RWFDd2o0amdJUUFob0RWVk5FT0J4dytJNEMSAggAIgA"
-)
-LIVE_BOOKING_URL = (
-    "https://www.google.com/travel/flights/booking"
-    "?tfs=CBwQAho_EgoyMDI2LTA3LTE1Ih8KA0pGSxIKMjAyNi0wNy0xNRoDTEFYKgJBQTIDMTcxagcIAR"
-    "IDSkZLcgcIARIDTEFYGj4SCjIwMjYtMDctMTkiHgoDTEFYEgoyMDI2LTA3LTE5GgNKRksqAkFBMgIy"
-    "OGoHCAESA0xBWHIHCAESA0pGS0ABSAFwAYIBCwj___________8BmAEB"
-    f"&tfu={LIVE_TFU}&hl=en&gl=US&curr=USD"
-)
-
-
-class TestExtractBookingTokenFromTfu:
-    def test_extract_from_bare_tfu_value(self):
-        token = extract_booking_token_from_tfu(LIVE_TFU)
-        # The extracted bytes must decode back to a recognisable booking token.
-        decoded = decode_booking_token(token)
-        assert decoded["field_2"] == "AA28#1"
-        assert decoded["field_3"]["field_3"] == "USD"
-
-    def test_extract_from_full_booking_url(self):
-        token_url = extract_booking_token_from_tfu(LIVE_BOOKING_URL)
-        token_bare = extract_booking_token_from_tfu(LIVE_TFU)
-        assert token_url == token_bare
-
-    def test_extract_session_id_round_trip(self):
-        session = extract_session_id_from_tfu(LIVE_TFU)
-        # 50-ish base64-alphabet bytes, starts with H, has "--" separator
-        assert isinstance(session, str)
-        assert len(session) > 30
-        assert session.startswith("H")
-        assert "-" in session
-
-    def test_url_without_tfu_param_rejected(self):
-        with pytest.raises(ValueError):
-            extract_booking_token_from_tfu(
-                "https://www.google.com/travel/flights/booking?tfs=ABC&hl=en"
-            )
-
-    def test_invalid_base64_rejected(self):
-        # Garbage input should raise ValueError (specific message varies
-        # by which validation step rejects first).
-        with pytest.raises(ValueError):
-            extract_booking_token_from_tfu("!!!!not-valid-base64!!!!")
-
-
 @pytest.mark.parametrize(
     "data, expected",
     [
@@ -224,50 +170,12 @@ def test_read_varint_truncated_raises():
         _read_varint(b"\x80", 0)  # MSB set but no continuation byte
 
 
-class TestExtractBookingTokenFromTfuEdgeCases:
-    """edge-case wire types that appear before field 1 in the outer tfu protobuf."""
-
-    def _encode_tfu(self, raw: bytes) -> str:
-        return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
-
-    @pytest.mark.parametrize(
-        "prefix_bytes, token_bytes",
-        [
-            # field 2, wire 5 (fixed32): tag 0x15, 4 bytes
-            (bytes([0x15]) + bytes([0x00, 0x00, 0x00, 0x01]), b"testtoken"),
-            # field 3, wire 1 (fixed64): (3 << 3) | 1 = 0x19, 8 bytes
-            (bytes([0x19]) + bytes(8), b"mytoken"),
-        ],
-    )
-    def test_non_field1_wire_types_skipped(self, prefix_bytes, token_bytes):
-        field1 = bytes([0x0A]) + bytes([len(token_bytes)]) + token_bytes
-        tfu = self._encode_tfu(prefix_bytes + field1)
-        assert extract_booking_token_from_tfu(tfu) == token_bytes.decode("ascii")
-
-    def test_no_field1_raises_value_error(self):
-        from fli.search._proto import _varint_field
-
-        # Only field 2 as a varint — no field 1 present.
-        raw = _varint_field(2, 42)
-        tfu = self._encode_tfu(raw)
-        with pytest.raises(ValueError, match="no field 1"):
-            extract_booking_token_from_tfu(tfu)
-
-    def test_unsupported_wire_type_raises_value_error(self):
-        # Wire type 3 (start group) is not handled.
-        # Tag for field 1, wire 3 = (1 << 3) | 3 = 11
-        raw = bytes([11])
-        tfu = self._encode_tfu(raw)
-        with pytest.raises(ValueError, match="unsupported wire type"):
-            extract_booking_token_from_tfu(tfu)
-
-
 # ---------------------------------------------------------------------------
-# Captured tfs/tfu booking-URL fixtures (2026-05-28)
+# Captured tfs booking-URL fixtures (2026-05-28)
 # ---------------------------------------------------------------------------
 
 # Round-trip JFK→LAX (AA171 outbound, AA28 return) — the authoritative
-# round-trip fixture; byte-perfect reproduction of LIVE_BOOKING_URL's tfs.
+# round-trip fixture, captured byte-for-byte from a live booking-page tfs.
 _LIVE_TFS_RT = (
     "CBwQAho_EgoyMDI2LTA3LTE1Ih8KA0pGSxIKMjAyNi0wNy0xNRoDTEFYKgJBQTIDMTcxagcIAR"
     "IDSkZLcgcIARIDTEFYGj4SCjIwMjYtMDctMTkiHgoDTEFYEgoyMDI2LTA3LTE5GgNKRksqAkFBMgIy"
@@ -303,7 +211,7 @@ class TestBuildTfsToken:
         return _b64url_to_bytes(tfs)
 
     def test_round_trip_byte_perfect(self):
-        """Two-segment round-trip reproduces LIVE_BOOKING_URL tfs byte-for-byte."""
+        """Two-segment round-trip reproduces the captured booking-page tfs byte-for-byte."""
         segments = [
             # Outbound: JFK→LAX on 2026-07-15, AA171
             [LegSpec("JFK", "2026-07-15", "LAX", "AA", "171")],
