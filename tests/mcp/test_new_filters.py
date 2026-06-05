@@ -233,3 +233,54 @@ class TestSearchDatesNewFilters:
         assert filters.layover_restrictions is not None
         assert filters.layover_restrictions.min_duration == 120
         assert filters.layover_restrictions.max_duration == 600
+
+
+# ---------------------------------------------------------------------------
+# passenger mix — adults / children / infants flow into PassengerInfo
+# ---------------------------------------------------------------------------
+
+
+class TestPassengerMix:
+    def test_flight_search_passenger_mix(self, captured_search):
+        params = FlightSearchParams(
+            origin="OPO",
+            destination="HKG",
+            departure_date=_future(30),
+            passengers=2,
+            children=1,
+            infants_in_seat=1,
+        )
+        _search_flights_from_params(params)
+        info = captured_search["filters"].passenger_info
+        assert info.adults == 2
+        assert info.children == 1
+        assert info.infants_in_seat == 1
+        assert info.infants_on_lap == 0
+
+    def test_flight_search_defaults_to_adults_only(self, captured_search):
+        params = FlightSearchParams(
+            origin="JFK",
+            destination="LAX",
+            departure_date=_future(30),
+            passengers=1,
+        )
+        _search_flights_from_params(params)
+        info = captured_search["filters"].passenger_info
+        assert (info.children, info.infants_in_seat, info.infants_on_lap) == (0, 0, 0)
+
+    def test_date_search_passenger_mix(self, captured_dates):
+        params = DateSearchParams(
+            origin="OPO",
+            destination="HKG",
+            start_date=_future(30),
+            end_date=_future(60),
+            passengers=2,
+            children=1,
+            infants_on_lap=1,
+        )
+        _search_dates_from_params(params)
+        info = captured_dates["filters"].passenger_info
+        assert info.adults == 2
+        assert info.children == 1
+        assert info.infants_on_lap == 1
+        assert info.infants_in_seat == 0
