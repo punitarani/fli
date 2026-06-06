@@ -1,5 +1,6 @@
 """Date search CLI command for finding cheapest travel dates."""
 
+import time
 from datetime import datetime, timedelta
 from typing import Annotated
 
@@ -76,13 +77,29 @@ def dates(
         datetime.now() + timedelta(days=60)
     ).strftime("%Y-%m-%d"),
     trip_duration: Annotated[
-        int,
+        int | None,
         typer.Option(
             "--duration",
             "-d",
             help="Trip duration in days",
         ),
-    ] = 3,
+    ] = None,
+    min_duration: Annotated[
+        int | None,
+        typer.Option(
+            "--min-duration",
+            help="Minimum trip duration in days (requires --round)",
+            min=1,
+        ),
+    ] = None,
+    max_duration: Annotated[
+        int | None,
+        typer.Option(
+            "--max-duration",
+            help="Maximum trip duration in days (requires --round)",
+            min=1,
+        ),
+    ] = None,
     airlines: Annotated[
         list[str] | None,
         typer.Option(
@@ -268,6 +285,15 @@ def dates(
         end_date = normalize_cli_date(end_date)
         departure_window = normalize_cli_time_range(departure_window)
 
+        if (min_duration is not None or max_duration is not None) and trip_duration is not None:
+            raise ValueError("Cannot specify both --duration and --min-duration/--max-duration")
+
+        if trip_duration is None and min_duration is None and max_duration is None:
+            trip_duration = 3
+
+        if (min_duration is not None or max_duration is not None) and not is_round_trip:
+            raise ValueError("--min-duration and --max-duration require --round")
+
         # Parse parameters using shared utilities
         origin_airport = resolve_airport(origin)
         destination_airport = resolve_airport(destination)
@@ -293,6 +319,8 @@ def dates(
             "start_date": start_date,
             "end_date": end_date,
             "trip_duration": trip_duration,
+            "min_duration": min_duration,
+            "max_duration": max_duration,
             "is_round_trip": is_round_trip,
             "cabin_class": seat_type.name,
             "max_stops": stops.name,
@@ -319,16 +347,6 @@ def dates(
                 latest_arrival=None,
             )
 
-        # Build flight segments using shared builder
-        segments, trip_type = build_date_search_segments(
-            origin=origin_airport,
-            destination=destination_airport,
-            start_date=start_date,
-            trip_duration=trip_duration,
-            is_round_trip=is_round_trip,
-            time_restrictions=time_restrictions,
-        )
-
         # Build layover constraints (min / max duration; airports stay
         # restricted via the existing model field).
         layover_restrictions = None
@@ -340,34 +358,73 @@ def dates(
                 max_duration=max_layover,
             )
 
-        # Create search filters
-        filters = DateSearchFilters(
-            trip_type=trip_type,
-            passenger_info=PassengerInfo(adults=1),
-            flight_segments=segments,
-            stops=stops,
-            seat_type=seat_type,
-            airlines=parsed_airlines,
-            airlines_exclude=parsed_exclude_airlines,
-            alliances=parsed_alliances,
-            alliances_exclude=parsed_exclude_alliances,
-            layover_restrictions=layover_restrictions,
-            from_date=start_date,
-            to_date=end_date,
-            duration=trip_duration if trip_type == TripType.ROUND_TRIP else None,
-        )
+        durations_to_search = []
+        if min_duration is not None or max_duration is not None:
+            actual_min = min_duration if min_duration is not None else 1
+            if max_duration is not None:
+                actual_max = max_duration
+            else:
+                from_dt = datetime.strptime(start_date, "%Y-%m-%d")
+                to_dt = datetime.strptime(end_date, "%Y-%m-%d")
+                actual_max = max(actual_min, (to_dt - from_dt).days)
+            if actual_min > actual_max:
+                raise ValueError(
+                    f"--min-duration ({actual_min}) must not exceed --max-duration ({actual_max})"
+                )
+            durations_to_search = list(range(actual_min, actual_max + 1))
+        else:
+            durations_to_search = [trip_duration] if trip_type == TripType.ROUND_TRIP else [None]
 
-        # Perform search; pass currency/language/country through as URL params.
         search_client = SearchDates()
-        results = search_client.search(
-            filters,
-            currency=currency,
-            language=language,
-            country=country,
-        )
+        all_results = []
+        seen_dates = set()
 
-        if not results:
-            results = []
+        for idx, current_duration in enumerate(durations_to_search):
+            if idx > 0:
+                time.sleep(1)
+
+            # Build flight segments using shared builder
+            segments, _ = build_date_search_segments(
+                origin=origin_airport,
+                destination=destination_airport,
+                start_date=start_date,
+                trip_duration=current_duration if current_duration is not None else 3,
+                is_round_trip=is_round_trip,
+                time_restrictions=time_restrictions,
+            )
+
+            # Create search filters
+            filters = DateSearchFilters(
+                trip_type=trip_type,
+                passenger_info=PassengerInfo(adults=1),
+                flight_segments=segments,
+                stops=stops,
+                seat_type=seat_type,
+                airlines=parsed_airlines,
+                airlines_exclude=parsed_exclude_airlines,
+                alliances=parsed_alliances,
+                alliances_exclude=parsed_exclude_alliances,
+                layover_restrictions=layover_restrictions,
+                from_date=start_date,
+                to_date=end_date,
+                duration=current_duration,
+            )
+
+            results = search_client.search(
+                filters,
+                currency=currency,
+                language=language,
+                country=country,
+            )
+            
+            if results:
+                for res in results:
+                    date_tuple = tuple(res.date)
+                    if date_tuple not in seen_dates:
+                        seen_dates.add(date_tuple)
+                        all_results.append(res)
+
+        results = all_results
 
         if selected_days:
             results = filter_dates_by_days(results, selected_days, trip_type)
@@ -435,6 +492,8 @@ def dates(
                         "start_date": start_date,
                         "end_date": end_date,
                         "trip_duration": trip_duration,
+                        "min_duration": min_duration,
+                        "max_duration": max_duration,
                         "is_round_trip": is_round_trip,
                         "cabin_class": cabin_class,
                         "max_stops": max_stops,
@@ -490,6 +549,8 @@ def dates(
                         "start_date": start_date,
                         "end_date": end_date,
                         "trip_duration": trip_duration,
+                        "min_duration": min_duration,
+                        "max_duration": max_duration,
                         "is_round_trip": is_round_trip,
                         "cabin_class": cabin_class,
                         "max_stops": max_stops,

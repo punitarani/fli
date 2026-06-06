@@ -85,6 +85,8 @@ The MCP server provides two main tools:
 | `start_date`        | string | Start of date range in YYYY-MM-DD format                    |
 | `end_date`          | string | End of date range in YYYY-MM-DD format                      |
 | `trip_duration`     | int    | Trip duration in days (for round-trips)                     |
+| `min_duration`      | int    | Minimum trip duration in days                               |
+| `max_duration`      | int    | Maximum trip duration in days                               |
 | `is_round_trip`     | bool   | Whether to search for round-trip flights                    |
 | `cabin_class`       | string | ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST                |
 | `max_stops`         | string | ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS                  |
@@ -244,6 +246,8 @@ fli multi \
 | `--from`                | Start date                                 | `2026-01-01`             |
 | `--to`                  | End date                                   | `2026-02-01`             |
 | `--duration, -d`        | Trip duration in days                      | `3`                      |
+| `--min-duration`        | Minimum trip duration in days              | `3`                      |
+| `--max-duration`        | Maximum trip duration in days              | `5`                      |
 | `--round, -R`           | Round-trip search                          | (flag)                   |
 | `--airlines, -a`        | Airline IATA codes                         | `BA,KL`                  |
 | `--exclude-airlines, -A`| Airline IATA codes to **exclude**          | `DL,B6`                  |

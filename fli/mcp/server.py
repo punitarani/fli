@@ -7,6 +7,7 @@ travel dates.
 
 import json
 import os
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
 
@@ -195,8 +196,14 @@ class DateSearchParams(BaseModel):
     )
     start_date: str = Field(description="Start of date range in YYYY-MM-DD format")
     end_date: str = Field(description="End of date range in YYYY-MM-DD format")
-    trip_duration: int = Field(
-        3, ge=1, description="Trip duration in days (for round-trip searches)"
+    trip_duration: int | None = Field(
+        None, ge=1, description="Trip duration in days (for round-trip searches)"
+    )
+    min_duration: int | None = Field(
+        None, ge=1, description="Minimum trip duration in days (requires round-trip)"
+    )
+    max_duration: int | None = Field(
+        None, ge=1, description="Maximum trip duration in days (requires round-trip)"
     )
     is_round_trip: bool = Field(False, description="Search for round-trip flights")
     airlines: list[str] | None = Field(
@@ -767,6 +774,15 @@ def _execute_booking_options(
 def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
     """Execute a date search and return formatted results."""
     try:
+        if (params.min_duration is not None or params.max_duration is not None) and params.trip_duration is not None:
+            return {"success": False, "error": "Cannot specify both trip_duration and min/max duration", "dates": []}
+            
+        if params.trip_duration is None and params.min_duration is None and params.max_duration is None:
+            params.trip_duration = 3
+            
+        if (params.min_duration is not None or params.max_duration is not None) and not params.is_round_trip:
+            return {"success": False, "error": "min_duration and max_duration require is_round_trip to be true", "dates": []}
+
         # Parse inputs using shared utilities (supports comma-separated multi-airport)
         origins = _resolve_airports(params.origin)
         destinations = _resolve_airports(params.destination)
@@ -781,16 +797,6 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
         departure_window = params.departure_window or CONFIG.default_departure_window
         time_restrictions = build_time_restrictions(departure_window) if departure_window else None
 
-        # Build flight segments (pass full lists for multi-airport support)
-        segments, trip_type = build_date_search_segments(
-            origin=origins,
-            destination=destinations,
-            start_date=params.start_date,
-            trip_duration=params.trip_duration,
-            is_round_trip=params.is_round_trip,
-            time_restrictions=time_restrictions,
-        )
-
         layover_restrictions = None
         if params.min_layover is not None or params.max_layover is not None:
             from fli.models import LayoverRestrictions
@@ -800,32 +806,78 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
                 max_duration=params.max_layover,
             )
 
-        # Create search filters
-        filters = DateSearchFilters(
-            trip_type=trip_type,
-            passenger_info=PassengerInfo(adults=params.passengers),
-            flight_segments=segments,
-            stops=max_stops,
-            seat_type=cabin_class,
-            airlines=airlines,
-            airlines_exclude=airlines_exclude,
-            alliances=alliances,
-            alliances_exclude=alliances_exclude,
-            layover_restrictions=layover_restrictions,
-            from_date=params.start_date,
-            to_date=params.end_date,
-            duration=params.trip_duration if params.is_round_trip else None,
-        )
+        durations_to_search = []
+        if params.min_duration is not None or params.max_duration is not None:
+            actual_min = params.min_duration if params.min_duration is not None else 1
+            if params.max_duration is not None:
+                actual_max = params.max_duration
+            else:
+                from_dt = datetime.strptime(params.start_date, "%Y-%m-%d")
+                to_dt = datetime.strptime(params.end_date, "%Y-%m-%d")
+                actual_max = max(actual_min, (to_dt - from_dt).days)
+            if actual_min > actual_max:
+                return {
+                    "success": False,
+                    "error": f"min_duration ({actual_min}) must not exceed max_duration ({actual_max})",
+                    "dates": [],
+                }
+            durations_to_search = list(range(actual_min, actual_max + 1))
+        else:
+            durations_to_search = [params.trip_duration] if params.is_round_trip else [None]
 
-        # Perform search
+        trip_type = TripType.ROUND_TRIP if params.is_round_trip else TripType.ONE_WAY
         currency = parse_currency(params.currency)
         search_client = SearchDates()
-        dates = search_client.search(
-            filters,
-            currency=currency,
-            language=params.language,
-            country=params.country,
-        )
+        all_results = []
+        seen_dates = set()
+
+        for idx, current_duration in enumerate(durations_to_search):
+            if idx > 0:
+                time.sleep(1)
+
+            # Build flight segments (pass full lists for multi-airport support)
+            segments, trip_type = build_date_search_segments(
+                origin=origins,
+                destination=destinations,
+                start_date=params.start_date,
+                trip_duration=current_duration if current_duration is not None else 3,
+                is_round_trip=params.is_round_trip,
+                time_restrictions=time_restrictions,
+            )
+
+            # Create search filters
+            filters = DateSearchFilters(
+                trip_type=trip_type,
+                passenger_info=PassengerInfo(adults=params.passengers),
+                flight_segments=segments,
+                stops=max_stops,
+                seat_type=cabin_class,
+                airlines=airlines,
+                airlines_exclude=airlines_exclude,
+                alliances=alliances,
+                alliances_exclude=alliances_exclude,
+                layover_restrictions=layover_restrictions,
+                from_date=params.start_date,
+                to_date=params.end_date,
+                duration=current_duration,
+            )
+
+            # Perform search
+            dates_chunk = search_client.search(
+                filters,
+                currency=currency,
+                language=params.language,
+                country=params.country,
+            )
+
+            if dates_chunk:
+                for d in dates_chunk:
+                    date_tuple = tuple(d.date)
+                    if date_tuple not in seen_dates:
+                        seen_dates.add(date_tuple)
+                        all_results.append(d)
+
+        dates = all_results
 
         if not dates:
             return {
@@ -1042,9 +1094,17 @@ def search_dates(
     start_date: Annotated[str, Field(description="Start of date range in YYYY-MM-DD format")],
     end_date: Annotated[str, Field(description="End of date range in YYYY-MM-DD format")],
     trip_duration: Annotated[
-        int,
+        int | None,
         Field(description="Trip duration in days for round-trips", ge=1),
-    ] = 3,
+    ] = None,
+    min_duration: Annotated[
+        int | None,
+        Field(description="Minimum trip duration in days for round-trips", ge=1),
+    ] = None,
+    max_duration: Annotated[
+        int | None,
+        Field(description="Maximum trip duration in days for round-trips", ge=1),
+    ] = None,
     is_round_trip: Annotated[
         bool,
         Field(description="Search for round-trip flights"),
@@ -1118,6 +1178,8 @@ def search_dates(
         start_date=start_date,
         end_date=end_date,
         trip_duration=trip_duration,
+        min_duration=min_duration,
+        max_duration=max_duration,
         is_round_trip=is_round_trip,
         airlines=airlines,
         cabin_class=cabin_class,

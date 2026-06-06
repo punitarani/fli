@@ -297,3 +297,43 @@ def test_dates_json_empty_results(runner, mock_search_dates, mock_console):
     assert payload["success"] is True
     assert payload["count"] == 0
     assert payload["dates"] == []
+
+
+def test_dates_min_max_duration(runner, mock_search_dates, mock_console):
+    """Test dates search with min and max duration."""
+    mock_search_dates.search.return_value = [
+        DatePrice(
+            date=(
+                datetime.now() + timedelta(days=1),
+                datetime.now() + timedelta(days=5),
+            ),
+            price=599.98,
+        ),
+    ]
+    result = runner.invoke(
+        app,
+        ["dates", "JFK", "LAX", "--round", "--min-duration", "3", "--max-duration", "5"],
+    )
+    assert result.exit_code == 0
+    # Should call search 3 times (durations 3, 4, 5)
+    assert mock_search_dates.search.call_count == 3
+
+
+def test_dates_min_max_duration_without_round(runner, mock_search_dates, mock_console):
+    """Test dates search with min/max duration but without --round fails."""
+    result = runner.invoke(
+        app,
+        ["dates", "JFK", "LAX", "--min-duration", "3"],
+    )
+    assert result.exit_code == 1
+    assert "require --round" in result.stdout
+
+
+def test_dates_conflict_duration(runner, mock_search_dates, mock_console):
+    """Test dates search with both --duration and --min-duration fails."""
+    result = runner.invoke(
+        app,
+        ["dates", "JFK", "LAX", "--round", "--duration", "4", "--min-duration", "3"],
+    )
+    assert result.exit_code == 1
+    assert "Cannot specify both" in result.stdout
