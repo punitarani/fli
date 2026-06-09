@@ -71,6 +71,7 @@ def build_flight_segments(
     departure_date: str,
     return_date: str | None = None,
     time_restrictions: TimeRestrictions | None = None,
+    return_time_restrictions: TimeRestrictions | None | bool = False,
 ) -> tuple[list[FlightSegment], TripType]:
     """Build flight segments for a search request.
 
@@ -80,6 +81,8 @@ def build_flight_segments(
         departure_date: Outbound travel date in YYYY-MM-DD format
         return_date: Return travel date in YYYY-MM-DD format (optional)
         time_restrictions: Time restrictions to apply to segments
+        return_time_restrictions: Time restrictions for the return leg. False (default) inherits
+            outbound restrictions; None means no restriction; a TimeRestrictions object overrides.
 
     Returns:
         Tuple of (list of FlightSegment objects, TripType)
@@ -105,12 +108,13 @@ def build_flight_segments(
     if return_date:
         return_date = normalize_date(return_date)
         trip_type = TripType.ROUND_TRIP
+        ret_r = time_restrictions if return_time_restrictions is False else return_time_restrictions
         segments.append(
             FlightSegment(
                 departure_airport=[[apt, 0] for apt in destinations],
                 arrival_airport=[[apt, 0] for apt in origins],
                 travel_date=return_date,
-                time_restrictions=time_restrictions,
+                time_restrictions=ret_r,
             )
         )
 
@@ -157,6 +161,7 @@ def build_date_search_segments(
     trip_duration: int | None = None,
     is_round_trip: bool = False,
     time_restrictions: TimeRestrictions | None = None,
+    return_time_restrictions: TimeRestrictions | None | bool = False,
 ) -> tuple[list[FlightSegment], TripType]:
     """Build flight segments for a date range search.
 
@@ -167,6 +172,8 @@ def build_date_search_segments(
         trip_duration: Duration of the trip in days (for round trips)
         is_round_trip: Whether to search for round-trip flights
         time_restrictions: Time restrictions to apply to segments
+        return_time_restrictions: Time restrictions for the return leg. False (default) inherits
+            outbound restrictions; None means no restriction; a TimeRestrictions object overrides.
 
     Returns:
         Tuple of (list of FlightSegment objects, TripType)
@@ -195,12 +202,13 @@ def build_date_search_segments(
             datetime.strptime(start_date, "%Y-%m-%d") + timedelta(days=trip_duration or 3)
         ).strftime("%Y-%m-%d")
 
+        ret_r = time_restrictions if return_time_restrictions is False else return_time_restrictions
         segments.append(
             FlightSegment(
                 departure_airport=[[apt, 0] for apt in destinations],
                 arrival_airport=[[apt, 0] for apt in origins],
                 travel_date=return_date,
-                time_restrictions=time_restrictions,
+                time_restrictions=ret_r,
             )
         )
 

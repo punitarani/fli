@@ -1,7 +1,7 @@
 import pytest
 
 from fli.core.builders import build_date_search_segments, build_flight_segments, normalize_date
-from fli.models import Airport, TripType
+from fli.models import Airport, TimeRestrictions, TripType
 
 
 class TestNormalizeDate:
@@ -166,3 +166,89 @@ class TestBuildDateSearchSegmentsMultiAirport:
         assert segments[0].arrival_airport == [[Airport.LHR, 0], [Airport.CDG, 0]]
         assert segments[1].departure_airport == [[Airport.LHR, 0], [Airport.CDG, 0]]
         assert segments[1].arrival_airport == [[Airport.JFK, 0], [Airport.LGA, 0]]
+
+
+class TestReturnTimeRestrictions:
+    """Tests for return_time_restrictions parameter in both builders."""
+
+    OUTBOUND = TimeRestrictions(earliest_departure=6, latest_departure=16)
+    RETURN = TimeRestrictions(earliest_departure=8, latest_departure=22)
+
+    def test_build_flight_segments_default_inherits_outbound(self):
+        """Without return_time_restrictions, return segment mirrors outbound restrictions."""
+        segments, _ = build_flight_segments(
+            origin=Airport.JFK,
+            destination=Airport.LAX,
+            departure_date="2027-03-15",
+            return_date="2027-03-22",
+            time_restrictions=self.OUTBOUND,
+        )
+        assert segments[0].time_restrictions == self.OUTBOUND
+        assert segments[1].time_restrictions == self.OUTBOUND
+
+    def test_build_flight_segments_none_clears_return(self):
+        """return_time_restrictions=None means no filter on the return leg."""
+        segments, _ = build_flight_segments(
+            origin=Airport.JFK,
+            destination=Airport.LAX,
+            departure_date="2027-03-15",
+            return_date="2027-03-22",
+            time_restrictions=self.OUTBOUND,
+            return_time_restrictions=None,
+        )
+        assert segments[0].time_restrictions == self.OUTBOUND
+        assert segments[1].time_restrictions is None
+
+    def test_build_flight_segments_separate_return_window(self):
+        """return_time_restrictions overrides the outbound restrictions for the return leg."""
+        segments, _ = build_flight_segments(
+            origin=Airport.JFK,
+            destination=Airport.LAX,
+            departure_date="2027-03-15",
+            return_date="2027-03-22",
+            time_restrictions=self.OUTBOUND,
+            return_time_restrictions=self.RETURN,
+        )
+        assert segments[0].time_restrictions == self.OUTBOUND
+        assert segments[1].time_restrictions == self.RETURN
+
+    def test_build_date_search_segments_default_inherits_outbound(self):
+        """Without return_time_restrictions, return segment mirrors outbound restrictions."""
+        segments, _ = build_date_search_segments(
+            origin=Airport.JFK,
+            destination=Airport.LAX,
+            start_date="2027-03-15",
+            is_round_trip=True,
+            trip_duration=7,
+            time_restrictions=self.OUTBOUND,
+        )
+        assert segments[0].time_restrictions == self.OUTBOUND
+        assert segments[1].time_restrictions == self.OUTBOUND
+
+    def test_build_date_search_segments_none_clears_return(self):
+        """return_time_restrictions=None means no filter on the return leg."""
+        segments, _ = build_date_search_segments(
+            origin=Airport.JFK,
+            destination=Airport.LAX,
+            start_date="2027-03-15",
+            is_round_trip=True,
+            trip_duration=7,
+            time_restrictions=self.OUTBOUND,
+            return_time_restrictions=None,
+        )
+        assert segments[0].time_restrictions == self.OUTBOUND
+        assert segments[1].time_restrictions is None
+
+    def test_build_date_search_segments_separate_return_window(self):
+        """return_time_restrictions overrides the outbound restrictions for the return leg."""
+        segments, _ = build_date_search_segments(
+            origin=Airport.JFK,
+            destination=Airport.LAX,
+            start_date="2027-03-15",
+            is_round_trip=True,
+            trip_duration=7,
+            time_restrictions=self.OUTBOUND,
+            return_time_restrictions=self.RETURN,
+        )
+        assert segments[0].time_restrictions == self.OUTBOUND
+        assert segments[1].time_restrictions == self.RETURN

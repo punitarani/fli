@@ -346,3 +346,35 @@ def test_flights_json_no_results(runner, mock_search_flights, mock_console):
     assert payload["success"] is True
     assert payload["count"] == 0
     assert payload["flights"] == []
+
+
+def test_flights_return_time_separate_from_outbound(runner, mock_search_flights, mock_console):
+    """--return-time sets a different time window for the return leg."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    return_date = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+    result = runner.invoke(
+        app,
+        [
+            "flights", "JFK", "LAX", today,
+            "--return", return_date,
+            "--time", "6-14",
+            "--return-time", "10-22",
+        ],
+    )
+    assert result.exit_code == 0
+    args, _ = mock_search_flights.search.call_args
+    segments = args[0].flight_segments
+    assert segments[0].time_restrictions.latest_departure == 14
+    assert segments[1].time_restrictions.latest_departure == 22
+
+
+def test_flights_return_time_without_return_date_is_ignored(
+    runner, mock_search_flights, mock_console
+):
+    """--return-time on a one-way search exits cleanly (no return segment to apply it to)."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    result = runner.invoke(
+        app,
+        ["flights", "JFK", "LAX", today, "--time", "6-16", "--return-time", "8-20"],
+    )
+    assert result.exit_code == 0

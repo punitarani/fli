@@ -322,7 +322,7 @@ def test_display_flight_results_no_footer_without_booking_url():
 def test_display_date_results_links_dates_when_route_given():
     """Departure dates become Google Flights hyperlinks when a route is supplied."""
     buf = StringIO()
-    test_console = Console(file=buf, width=120, force_terminal=True)
+    test_console = Console(file=buf, width=120, force_terminal=True, legacy_windows=False)
     dates = [DatePrice(date=(datetime(2026, 7, 15),), price=299.0, currency="USD")]
     with patch("fli.cli.utils.console", test_console):
         display_date_results(

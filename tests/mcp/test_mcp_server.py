@@ -240,7 +240,7 @@ class TestMCPServer:
         assert params.destination == "LHR"
         assert params.start_date == start_date
         assert params.end_date == end_date
-        assert params.trip_duration == 3  # default
+        assert params.trip_duration is None  # default
         assert params.is_round_trip is False  # default
         assert params.cabin_class == "ECONOMY"  # default
         assert params.max_stops == "ANY"  # default

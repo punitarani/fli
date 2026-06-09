@@ -43,6 +43,7 @@ def _search_flights_core(
     departure_date: str,
     return_date: str | None = None,
     departure_window: str | tuple[int, int] | None = None,
+    return_departure_window: str | tuple[int, int] | None = None,
     airlines: list[str] | None = None,
     cabin_class: str = "ECONOMY",
     max_stops: str = "ANY",
@@ -70,6 +71,7 @@ def _search_flights_core(
         "departure_date": departure_date,
         "return_date": return_date,
         "departure_window": None,
+        "return_departure_window": None,
         "airlines": None,
         "cabin_class": cabin_class.upper(),
         "max_stops": max_stops.upper(),
@@ -80,10 +82,16 @@ def _search_flights_core(
         departure_date = normalize_cli_date(departure_date)
         return_date = normalize_cli_date(return_date)
         departure_window = normalize_cli_time_range(departure_window)
+        return_departure_window = normalize_cli_time_range(return_departure_window)
         query["departure_date"] = departure_date
         query["return_date"] = return_date
         query["departure_window"] = (
             f"{departure_window[0]}-{departure_window[1]}" if departure_window else None
+        )
+        query["return_departure_window"] = (
+            f"{return_departure_window[0]}-{return_departure_window[1]}"
+            if return_departure_window
+            else None
         )
 
         # Parse parameters using shared utilities
@@ -119,6 +127,15 @@ def _search_flights_core(
                 earliest_departure=departure_window[0],
                 latest_departure=departure_window[1],
             )
+            
+        return_time_restrictions = False
+        if return_departure_window:
+            from fli.models import TimeRestrictions
+
+            return_time_restrictions = TimeRestrictions(
+                earliest_departure=return_departure_window[0],
+                latest_departure=return_departure_window[1],
+            )
 
         # Create flight segments using shared builder
         segments, trip_type = build_flight_segments(
@@ -127,6 +144,7 @@ def _search_flights_core(
             departure_date=departure_date,
             return_date=return_date,
             time_restrictions=time_restrictions,
+            return_time_restrictions=return_time_restrictions,
         )
 
         # Shareable Google Flights deep link for this search.
@@ -308,6 +326,14 @@ def flights(
             help="Departure time window in 24h format (e.g., 6-20)",
         ),
     ] = None,
+    return_departure_window: Annotated[
+        str | None,
+        typer.Option(
+            "--return-time",
+            "-T",
+            help="Return departure time window in 24h format (e.g., 6-20)",
+        ),
+    ] = None,
     airlines: Annotated[
         list[str] | None,
         typer.Option(
@@ -483,6 +509,7 @@ def flights(
         departure_date=departure_date,
         return_date=return_date,
         departure_window=departure_window,
+        return_departure_window=return_departure_window,
         airlines=airlines,
         cabin_class=cabin_class,
         max_stops=max_stops,

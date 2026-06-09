@@ -595,3 +595,58 @@ class TestExecuteBookingOptions:
         assert "booking_url" in result
         assert "note" in result
         assert "booking_url" in result["note"]
+
+
+class TestExecuteDateSearchMinMaxDuration:
+    @pytest.fixture
+    def valid_params(self):
+        from fli.mcp.server import DateSearchParams
+        return DateSearchParams(
+            origin="JFK",
+            destination="LHR",
+            start_date="2026-12-01",
+            end_date="2026-12-10",
+            trip_duration=None,
+            min_duration=3,
+            max_duration=5,
+            is_round_trip=True,
+        )
+
+    def test_min_max_duration_iteration(self, monkeypatch, valid_params):
+        from fli.mcp.server import _execute_date_search
+        
+        call_count = 0
+        def mock_search(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            dr = MagicMock()
+            dr.date = ("2026-12-01", "2026-12-05")
+            dr.price = 350.0
+            dr.currency = "USD"
+            return [dr]
+
+        monkeypatch.setattr("fli.mcp.server.SearchDates.search", mock_search)
+        
+        result = _execute_date_search(valid_params)
+        
+        assert result["success"] is True
+        assert call_count == 3  # Durations 3, 4, 5
+        assert result["count"] == 1  # Deduplicated because date mocks are identical
+
+    def test_min_max_duration_requires_round_trip(self, valid_params):
+        from fli.mcp.server import _execute_date_search
+        
+        valid_params.is_round_trip = False
+        result = _execute_date_search(valid_params)
+        
+        assert result["success"] is False
+        assert "require is_round_trip" in result["error"]
+
+    def test_min_max_duration_conflicts_with_trip_duration(self, valid_params):
+        from fli.mcp.server import _execute_date_search
+        
+        valid_params.trip_duration = 4
+        result = _execute_date_search(valid_params)
+        
+        assert result["success"] is False
+        assert "Cannot specify both" in result["error"]

@@ -64,6 +64,7 @@ The MCP server provides two main tools:
 | `cabin_class`       | string | ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST                |
 | `max_stops`         | string | ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS                  |
 | `departure_window`  | string | Time window in 'HH-HH' format (e.g., '6-20')                |
+| `return_departure_window` | string | Return leg time window in 'HH-HH' format (e.g., '8-22') — round-trip only |
 | `airlines`          | list   | Filter by airline codes (e.g., ['BA', 'AA'])                |
 | `exclude_airlines`  | list   | Airline IATA codes to **exclude** (e.g., ['DL', 'B6'])      |
 | `alliance`          | list   | Restrict to alliances: ONEWORLD, SKYTEAM, STAR_ALLIANCE     |
@@ -85,10 +86,13 @@ The MCP server provides two main tools:
 | `start_date`        | string | Start of date range in YYYY-MM-DD format                    |
 | `end_date`          | string | End of date range in YYYY-MM-DD format                      |
 | `trip_duration`     | int    | Trip duration in days (for round-trips)                     |
+| `min_duration`      | int    | Minimum trip duration in days                               |
+| `max_duration`      | int    | Maximum trip duration in days                               |
 | `is_round_trip`     | bool   | Whether to search for round-trip flights                    |
 | `cabin_class`       | string | ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST                |
 | `max_stops`         | string | ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS                  |
 | `departure_window`  | string | Time window in 'HH-HH' format (e.g., '6-20')                |
+| `return_departure_window` | string | Return leg time window in 'HH-HH' format (e.g., '8-22') — requires `is_round_trip: true` |
 | `airlines`          | list   | Filter by airline codes (e.g., ['BA', 'AA'])                |
 | `exclude_airlines`  | list   | Airline IATA codes to **exclude**                           |
 | `alliance`          | list   | Restrict to alliances: ONEWORLD, SKYTEAM, STAR_ALLIANCE     |
@@ -223,6 +227,7 @@ fli multi \
 |-------------------------|--------------------------------------------|----------------------------------|
 | `--return, -r`          | Return date                                | `2026-10-30`                     |
 | `--time, -t`            | Departure time window                      | `6-20`                           |
+| `--return-time, -T`     | Return leg departure time window           | `8-22`                           |
 | `--airlines, -a`        | Airline IATA codes                         | `BA,KL`                          |
 | `--exclude-airlines, -A` | Airline IATA codes to **exclude**         | `DL,B6`                          |
 | `--alliance`            | Restrict to alliance(s)                    | `ONEWORLD`, `SKYTEAM`            |
@@ -244,6 +249,8 @@ fli multi \
 | `--from`                | Start date                                 | `2026-01-01`             |
 | `--to`                  | End date                                   | `2026-02-01`             |
 | `--duration, -d`        | Trip duration in days                      | `3`                      |
+| `--min-duration`        | Minimum trip duration in days              | `3`                      |
+| `--max-duration`        | Maximum trip duration in days              | `5`                      |
 | `--round, -R`           | Round-trip search                          | (flag)                   |
 | `--airlines, -a`        | Airline IATA codes                         | `BA,KL`                  |
 | `--exclude-airlines, -A`| Airline IATA codes to **exclude**          | `DL,B6`                  |
@@ -257,6 +264,7 @@ fli multi \
 | `--class, -c`           | Cabin class                                | `ECONOMY`, `BUSINESS`    |
 | `--stops, -s`           | Maximum stops                              | `NON_STOP`, `ONE_STOP`   |
 | `--time`                | Departure time window                      | `6-20`                   |
+| `--return-time, -T`     | Return leg departure time window           | `8-22`                   |
 | `--sort`                | Sort by price                              | (flag)                   |
 | `--[day]`               | Day filters                                | `--monday`, `--friday`   |
 | `--format`              | Output format                              | `text`, `json`           |
