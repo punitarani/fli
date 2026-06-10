@@ -86,9 +86,8 @@ def _search_flights_core(
             f"{departure_window[0]}-{departure_window[1]}" if departure_window else None
         )
 
-        # Parse parameters using shared utilities
-        origin_airport = resolve_airport(origin)
-        destination_airport = resolve_airport(destination)
+        origin_airports = [resolve_airport(c.strip()) for c in origin.split(",") if c.strip()]
+        destination_airports = [resolve_airport(c.strip()) for c in destination.split(",") if c.strip()]
         seat_type = parse_cabin_class(cabin_class)
         stops = parse_max_stops(max_stops)
         parsed_airlines = parse_airlines(airlines)
@@ -122,8 +121,8 @@ def _search_flights_core(
 
         # Create flight segments using shared builder
         segments, trip_type = build_flight_segments(
-            origin=origin_airport,
-            destination=destination_airport,
+            origin=origin_airports,
+            destination=destination_airports,
             departure_date=departure_date,
             return_date=return_date,
             time_restrictions=time_restrictions,
@@ -131,8 +130,8 @@ def _search_flights_core(
 
         # Shareable Google Flights deep link for this search.
         booking_url = google_flights_url(
-            origin_airport.name.lstrip("_"),
-            destination_airport.name.lstrip("_"),
+            origin_airports[0].name.lstrip("_"),
+            destination_airports[0].name.lstrip("_"),
             departure_date,
             return_date,
             currency=currency,

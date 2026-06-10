@@ -346,3 +346,29 @@ def test_flights_json_no_results(runner, mock_search_flights, mock_console):
     assert payload["success"] is True
     assert payload["count"] == 0
     assert payload["flights"] == []
+
+
+def test_given_comma_separated_origin_list_then_returns_flights_from_all(runner, mock_search_flights, mock_console):
+    """Comma-separated origin passes multiple airports to the search segment."""
+    result = runner.invoke(
+        app,
+        ["flights", "JFK,LGA", "LAX", datetime.now().strftime("%Y-%m-%d")],
+    )
+    assert result.exit_code == 0
+    args, _ = mock_search_flights.search.call_args
+    departure_airports = [apt for apt, _ in args[0].flight_segments[0].departure_airport]
+    assert Airport.JFK in departure_airports
+    assert Airport.LGA in departure_airports
+
+
+def test_given_comma_separated_destination_list_then_returns_flights_to_all(runner, mock_search_flights, mock_console):
+    """Comma-separated destination passes multiple airports to the search segment."""
+    result = runner.invoke(
+        app,
+        ["flights", "JFK", "LHR,CDG", datetime.now().strftime("%Y-%m-%d")],
+    )
+    assert result.exit_code == 0
+    args, _ = mock_search_flights.search.call_args
+    arrival_airports = [apt for apt, _ in args[0].flight_segments[0].arrival_airport]
+    assert Airport.LHR in arrival_airports
+    assert Airport.CDG in arrival_airports
