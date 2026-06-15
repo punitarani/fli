@@ -17,7 +17,7 @@ from fli.models.google_flights.base import TripType
 from fli.search._concurrency import parallel_map
 from fli.search._urls import with_locale_params
 from fli.search._wire import parse_first_wrb_payload
-from fli.search.client import get_client
+from fli.search.client import get_client, post_rpc
 
 logger = logging.getLogger(__name__)
 
@@ -174,15 +174,9 @@ class SearchDates:
         encoded_filters = filters.encode()
         url = with_locale_params(self.BASE_URL, currency, language, country)
 
-        response = self.client.post(
-            url=url,
-            data=f"f.req={encoded_filters}",
-            impersonate="chrome",
-            allow_redirects=True,
-        )
-        response.raise_for_status()
+        text = post_rpc(self.client, url, encoded_filters)
 
-        data = parse_first_wrb_payload(response.text)
+        data = parse_first_wrb_payload(text)
         if data is None:
             return None
 

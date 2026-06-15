@@ -2,7 +2,7 @@
 
 import json
 
-from fli.search._wire import iter_wrb_chunks, parse_first_wrb_payload
+from fli.search._wire import iter_wrb_chunks, parse_first_wrb_payload, wrb_error_code
 
 
 def _single_chunk(payload):
@@ -127,6 +127,49 @@ class TestIterWrbChunksEdgeCases:
         body = _multi_chunk([10], [20], [30])
         chunks = list(iter_wrb_chunks(body))
         assert chunks == [[10], [20], [30]]
+
+
+def _error_envelope(code=13, type_url="type.googleapis.com/travel.frontend.flights.ErrorResponse"):
+    """Build a real-shape HTTP-200 ErrorResponse body (see issue #200)."""
+    row = ["wrb.fr", None, None, None, None, [code, None, [[type_url, [[None, [], 0]]]]]]
+    return ")]}'\n\n" + json.dumps([row])
+
+
+class TestWrbErrorCode:
+    def test_detects_internal_error_envelope(self):
+        assert wrb_error_code(_error_envelope(13)) == 13
+
+    def test_detects_unavailable_error_envelope(self):
+        assert wrb_error_code(_error_envelope(14)) == 14
+
+    def test_returns_none_for_normal_data_chunk(self):
+        body = _single_chunk([1, "alpha", [2, 3]])
+        assert wrb_error_code(body) is None
+
+    def test_returns_none_for_empty_body(self):
+        assert wrb_error_code("") is None
+
+    def test_returns_none_when_first_row_is_data_even_if_later_error(self):
+        # A data row first means a successful response; don't misread a
+        # trailing diagnostic row as an error.
+        good = json.dumps([7])
+        body = ")]}'\n\n" + json.dumps([["wrb.fr", None, good]])
+        assert wrb_error_code(body) is None
+
+    def test_non_int_code_returns_sentinel(self):
+        assert wrb_error_code(_error_envelope("oops")) == -1
+
+    def test_error_block_without_error_type_is_ignored(self):
+        body = _error_envelope(13, type_url="type.googleapis.com/travel.frontend.flights.Results")
+        assert wrb_error_code(body) is None
+
+    def test_bytes_input_works(self):
+        body = _error_envelope(13)
+        assert wrb_error_code(body.encode("utf-8")) == 13
+
+    def test_error_envelope_yields_no_data_chunks(self):
+        # The envelope must not leak through as a phantom data chunk.
+        assert list(iter_wrb_chunks(_error_envelope(13))) == []
 
 
 class TestParseFirstWrbPayloadEdgeCases:

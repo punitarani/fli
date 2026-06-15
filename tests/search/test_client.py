@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock
 
 import pytest
+from tenacity import wait_none
 
 import fli.search.client as client_module
-from fli.search.client import _host_from_url, _wrap_request_error, get_client
+from fli.search.client import _host_from_url, _wrap_request_error, get_client, post_rpc
 from fli.search.exceptions import (
+    SearchBackendError,
     SearchClientError,
     SearchConnectionError,
     SearchHTTPError,
@@ -99,6 +102,85 @@ class TestHostFromUrl:
         # Shouldn't raise — empty is a valid degenerate case.
         result = _host_from_url("")
         assert result == ""
+
+
+def _resp(text: str):
+    """Return a minimal stand-in for a curl_cffi Response."""
+    r = MagicMock()
+    r.text = text
+    r.raise_for_status = MagicMock()
+    return r
+
+
+def _ok_body():
+    return ")]}'\n\n" + json.dumps([["wrb.fr", None, json.dumps([[1, "data"]])]])
+
+
+def _error_body(code: int):
+    type_url = "type.googleapis.com/travel.frontend.flights.ErrorResponse"
+    row = ["wrb.fr", None, None, None, None, [code, None, [[type_url, [[None, [], 0]]]]]]
+    return ")]}'\n\n" + json.dumps([row])
+
+
+@pytest.fixture(autouse=True)
+def _no_backoff_sleep():
+    """Strip the exponential wait from post_rpc so retry tests run instantly."""
+    original = post_rpc.retry.wait
+    post_rpc.retry.wait = wait_none()
+    yield
+    post_rpc.retry.wait = original
+
+
+class TestPostRpcBackendErrors:
+    """post_rpc must turn Google's HTTP-200 error envelope into a retryable error (issue #200)."""
+
+    def test_returns_body_text_on_success(self):
+        c = MagicMock()
+        c.post.return_value = _resp(_ok_body())
+        assert post_rpc(c, "https://x/y", "ENC") == _ok_body()
+        assert c.post.call_count == 1
+
+    def test_retries_transient_internal_error_then_succeeds(self):
+        c = MagicMock()
+        c.post.side_effect = [_resp(_error_body(13)), _resp(_error_body(13)), _resp(_ok_body())]
+        assert post_rpc(c, "https://x/y", "ENC") == _ok_body()
+        assert c.post.call_count == 3
+
+    def test_exhausts_retries_and_raises_backend_error(self):
+        c = MagicMock()
+        c.post.return_value = _resp(_error_body(13))
+        with pytest.raises(SearchBackendError) as exc_info:
+            post_rpc(c, "https://x/y", "ENC")
+        assert exc_info.value.code == 13
+        # stop_after_attempt(4) → exactly four POSTs before giving up.
+        assert c.post.call_count == 4
+
+    def test_non_retryable_code_fails_fast(self):
+        c = MagicMock()
+        c.post.return_value = _resp(_error_body(3))  # INVALID_ARGUMENT
+        with pytest.raises(SearchBackendError) as exc_info:
+            post_rpc(c, "https://x/y", "ENC")
+        assert exc_info.value.code == 3
+        assert exc_info.value.retryable is False
+        assert c.post.call_count == 1
+
+    def test_post_receives_freq_body(self):
+        c = MagicMock()
+        c.post.return_value = _resp(_ok_body())
+        post_rpc(c, "https://x/y", "MYENCODED")
+        _, kwargs = c.post.call_args
+        assert kwargs["data"] == "f.req=MYENCODED"
+        assert kwargs["impersonate"] == "chrome"
+
+
+class TestSearchBackendErrorRetryable:
+    def test_transient_codes_are_retryable(self):
+        for code in (13, 14, 4, 8, None, -1):
+            assert SearchBackendError("x", code=code).retryable is True
+
+    def test_bad_request_codes_are_not_retryable(self):
+        for code in (3, 5, 7, 9, 11, 16):
+            assert SearchBackendError("x", code=code).retryable is False
 
 
 class TestGetClientSingleton:

@@ -24,10 +24,12 @@ import os
 import threading
 from typing import TYPE_CHECKING, Any
 
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from fli.search._concurrency import TokenBucketRateLimiter
+from fli.search._wire import wrb_error_code
 from fli.search.exceptions import (
+    SearchBackendError,
     SearchClientError,
     SearchConnectionError,
     SearchHTTPError,
@@ -219,3 +221,44 @@ def get_client() -> Client:
             if client is None:
                 client = Client()
     return client
+
+
+def _is_retryable_backend_error(exc: BaseException) -> bool:
+    """Retry predicate: only transient ``ErrorResponse`` envelopes (see issue #200)."""
+    return isinstance(exc, SearchBackendError) and exc.retryable
+
+
+@retry(
+    retry=retry_if_exception(_is_retryable_backend_error),
+    stop=stop_after_attempt(4),
+    wait=wait_exponential(multiplier=0.5, max=8),
+    reraise=True,
+)
+def post_rpc(client: Client, url: str, encoded: str) -> str:
+    """POST an ``f.req`` body to a FlightsFrontendService endpoint and return the body text.
+
+    Wraps :meth:`Client.post` (which already retries network/HTTP faults)
+    with detection of Google's HTTP-200 ``ErrorResponse`` envelope: when the
+    response carries a gRPC error instead of data, raise
+    :class:`SearchBackendError` so transient codes (INTERNAL, UNAVAILABLE,
+    …) are retried with exponential backoff rather than silently decoding to
+    an empty result. This is the fix for issue #200, where a transient
+    Google-side outage made every search look like "no flights found".
+    """
+    response = client.post(
+        url=url,
+        data=f"f.req={encoded}",
+        impersonate="chrome",
+        allow_redirects=True,
+    )
+    response.raise_for_status()
+
+    code = wrb_error_code(response.text)
+    if code is not None:
+        raise SearchBackendError(
+            f"Google Flights returned a backend error (gRPC status {code}) instead of "
+            "results. This is usually a transient server-side issue — please try again "
+            "in a moment.",
+            code=code,
+        )
+    return response.text

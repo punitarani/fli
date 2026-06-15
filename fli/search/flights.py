@@ -28,7 +28,7 @@ from fli.search._decoders import (
 from fli.search._urls import with_locale_params
 from fli.search._urls import with_locale_params as _with_locale_params  # noqa: F401
 from fli.search._wire import iter_wrb_chunks, parse_first_wrb_payload
-from fli.search.client import get_client
+from fli.search.client import get_client, post_rpc
 
 logger = logging.getLogger(__name__)
 
@@ -163,15 +163,9 @@ class SearchFlights:
         encoded = filters.encode()
         url = with_locale_params(self.BASE_URL, currency, language, country)
 
-        response = self.client.post(
-            url=url,
-            data=f"f.req={encoded}",
-            impersonate="chrome",
-            allow_redirects=True,
-        )
-        response.raise_for_status()
+        text = post_rpc(self.client, url, encoded)
 
-        inner = parse_first_wrb_payload(response.text)
+        inner = parse_first_wrb_payload(text)
         if inner is None:
             return None
 
@@ -328,20 +322,14 @@ class SearchFlights:
 
         encoded = self._encode_booking_payload(token, prepared)
         url = with_locale_params(self.BOOKING_URL, currency, language, country)
-        response = self.client.post(
-            url=url,
-            data=f"f.req={encoded}",
-            impersonate="chrome",
-            allow_redirects=True,
-        )
-        response.raise_for_status()
+        text = post_rpc(self.client, url, encoded)
 
         # Booking responses are typically split into two wrb.fr chunks
         # (vendor list + price refinements). Materialise both before
         # parsing so we can parse them in parallel — each chunk is a few
         # hundred KB of pure-Python tree walking, GIL-bound but cheap to
         # overlap with the next chunk's JSON decode (which releases the GIL).
-        chunks = list(iter_wrb_chunks(response.text))
+        chunks = list(iter_wrb_chunks(text))
         if not chunks:
             return []
         parsed = parallel_map(parse_booking_chunk, chunks)
