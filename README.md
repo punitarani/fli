@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/punitarani-fli-badge.png)](https://mseep.ai/app/punitarani-fli)
+
 # 🛫 Fli - Flight Search MCP Server and Library
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/punitarani/fli)
