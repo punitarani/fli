@@ -305,6 +305,38 @@ class TestSearchParseErrorMessage:
         outer = [["wrb.fr", None, json.dumps(inner, separators=(",", ":"))]]
         return ")]}'\n\n" + json.dumps(outer)
 
+    def _build_google_error_response(self) -> str:
+        """Minimal 200 OK body Google sends for transient shopping errors."""
+        import json
+
+        outer = [
+            [
+                "wrb.fr",
+                None,
+                None,
+                None,
+                None,
+                [
+                    13,
+                    None,
+                    [["type.googleapis.com/travel.frontend.flights.ErrorResponse"]],
+                ],
+            ]
+        ]
+        return ")]}'\n\n" + json.dumps(outer)
+
+    def _filters(self) -> FlightSearchFilters:
+        return FlightSearchFilters(
+            passenger_info=PassengerInfo(adults=1),
+            flight_segments=[
+                FlightSegment(
+                    departure_airport=[[Airport.JFK, 0]],
+                    arrival_airport=[[Airport.LAX, 0]],
+                    travel_date=(datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
+                )
+            ],
+        )
+
     def test_error_includes_sample_failure_reasons(self):
         """When all rows fail, the error message names what went wrong."""
         from fli.search.flights import SearchParseError
@@ -315,18 +347,8 @@ class TestSearchParseErrorMessage:
         body = self._build_response([bad_row, bad_row, bad_row])
 
         sf = self._client_with_canned_response(body)
-        filters = FlightSearchFilters(
-            passenger_info=PassengerInfo(adults=1),
-            flight_segments=[
-                FlightSegment(
-                    departure_airport=[[Airport.JFK, 0]],
-                    arrival_airport=[[Airport.LAX, 0]],
-                    travel_date=(datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
-                )
-            ],
-        )
         with pytest.raises(SearchParseError, match="sample reasons:.*not numeric"):
-            sf.search(filters)
+            sf.search(self._filters())
 
     def test_error_dedups_repeated_reasons(self):
         """Identical failure messages collapse to a single sample."""
@@ -335,19 +357,60 @@ class TestSearchParseErrorMessage:
         bad_row = [None, [[None, "not-a-number"]]]
         body = self._build_response([bad_row] * 10)
         sf = self._client_with_canned_response(body)
-        filters = FlightSearchFilters(
-            passenger_info=PassengerInfo(adults=1),
-            flight_segments=[
-                FlightSegment(
-                    departure_airport=[[Airport.JFK, 0]],
-                    arrival_airport=[[Airport.LAX, 0]],
-                    travel_date=(datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
-                )
-            ],
-        )
         with pytest.raises(SearchParseError) as excinfo:
-            sf.search(filters)
+            sf.search(self._filters())
         # Only one unique reason — appears once in the message.
         msg = str(excinfo.value)
         assert msg.count("not numeric") == 1
         assert "0/10" in msg
+
+    def test_retries_transient_google_error_response(self, monkeypatch):
+        """A transient Google ErrorResponse should not be reported as zero flights."""
+        sf = SearchFlights()
+        bodies = [
+            self._build_google_error_response(),
+            self._build_response([["raw-flight-row"]]),
+        ]
+        calls = []
+
+        def _fake_post(url, data, **kwargs):  # noqa: ANN001
+            body = bodies[len(calls)]
+            calls.append(body)
+            return type(
+                "R",
+                (),
+                {
+                    "content": body.encode("utf-8"),
+                    "text": body,
+                    "raise_for_status": lambda self: None,
+                },
+            )()
+
+        monkeypatch.setattr(sf.client, "post", _fake_post)
+        monkeypatch.setattr("fli.search.flights.parse_flight_row", lambda row: "parsed")
+
+        assert sf.search(self._filters()) == ["parsed"]
+        assert len(calls) == 2
+
+    def test_repeated_google_error_response_raises_parse_error(self, monkeypatch):
+        """Persistent Google ErrorResponses are upstream errors, not empty results."""
+        from fli.search.flights import SearchParseError
+
+        sf = SearchFlights()
+        body = self._build_google_error_response()
+
+        def _fake_post(url, data, **kwargs):  # noqa: ANN001
+            return type(
+                "R",
+                (),
+                {
+                    "content": body.encode("utf-8"),
+                    "text": body,
+                    "raise_for_status": lambda self: None,
+                },
+            )()
+
+        monkeypatch.setattr(sf.client, "post", _fake_post)
+
+        with pytest.raises(SearchParseError, match="internal ErrorResponse"):
+            sf.search(self._filters())

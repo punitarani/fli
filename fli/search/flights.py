@@ -32,6 +32,9 @@ from fli.search.client import get_client
 
 logger = logging.getLogger(__name__)
 
+_GOOGLE_FLIGHTS_ERROR_RESPONSE = "type.googleapis.com/travel.frontend.flights.ErrorResponse"
+_SHOPPING_MAX_ATTEMPTS = 4
+
 
 class SearchParseError(Exception):
     """Raised when a successful HTTP response cannot be parsed into flights.
@@ -163,17 +166,31 @@ class SearchFlights:
         encoded = filters.encode()
         url = with_locale_params(self.BASE_URL, currency, language, country)
 
-        response = self.client.post(
-            url=url,
-            data=f"f.req={encoded}",
-            impersonate="chrome",
-            allow_redirects=True,
-        )
-        response.raise_for_status()
+        for attempt in range(1, _SHOPPING_MAX_ATTEMPTS + 1):
+            response = self.client.post(
+                url=url,
+                data=f"f.req={encoded}",
+                impersonate="chrome",
+                allow_redirects=True,
+            )
+            response.raise_for_status()
 
-        inner = parse_first_wrb_payload(response.text)
-        if inner is None:
-            return None
+            inner = parse_first_wrb_payload(response.text)
+            if inner is not None:
+                break
+            if _GOOGLE_FLIGHTS_ERROR_RESPONSE not in response.text:
+                return None
+            if attempt == _SHOPPING_MAX_ATTEMPTS:
+                raise SearchParseError(
+                    "Google Flights returned an internal ErrorResponse "
+                    f"after {_SHOPPING_MAX_ATTEMPTS} shopping attempts"
+                )
+            logger.debug(
+                "Retrying Google Flights shopping request after internal ErrorResponse "
+                "(attempt %d/%d)",
+                attempt,
+                _SHOPPING_MAX_ATTEMPTS,
+            )
 
         if capture_session:
             self._capture_session_id(inner)
