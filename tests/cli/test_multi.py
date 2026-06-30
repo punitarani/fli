@@ -128,6 +128,28 @@ class TestMultiCityCommand:
         assert args[0].trip_type == TripType.MULTI_CITY
         assert len(args[0].flight_segments) == 3
 
+
+    def test_with_passengers(self, runner, mock_search_flights, mock_console):
+        """Test multi-city search passes adult passenger count into filters."""
+        date1 = _future_date(30)
+        date2 = _future_date(37)
+
+        result = runner.invoke(
+            app,
+            [
+                "multi",
+                "--leg",
+                f"SEA,HKG,{date1}",
+                "--leg",
+                f"HKG,SEA,{date2}",
+                "--passengers",
+                "2",
+            ],
+        )
+        assert result.exit_code == 0
+        args, _ = mock_search_flights.search.call_args
+        assert args[0].passenger_info.adults == 2
+
     def test_with_cabin_class(self, runner, mock_search_flights, mock_console):
         """Test multi-city search with cabin class filter."""
         date1 = _future_date(30)

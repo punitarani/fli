@@ -641,6 +641,7 @@ version = "0.10.0"
 source = { editable = "." }
 dependencies = [
     { name = "babel" },
+    { name = "click" },
     { name = "curl-cffi" },
     { name = "httpx" },
     { name = "plotext" },
@@ -678,6 +679,7 @@ mcp = [
 [package.metadata]
 requires-dist = [
     { name = "babel", specifier = ">=2.17.0" },
+    { name = "click", specifier = ">=8.0.0" },
     { name = "curl-cffi", specifier = ">=0.7.4" },
     { name = "fastapi", marker = "extra == 'mcp'", specifier = ">=0.115.6" },
     { name = "fastmcp", marker = "extra == 'mcp'", specifier = ">=3.2" },
