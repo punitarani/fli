@@ -12,7 +12,7 @@ from typing import Annotated, Any
 
 from fastmcp import FastMCP
 from mcp.types import Icon
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from fli.core import (
@@ -262,6 +262,20 @@ class DateSearchParams(BaseModel):
 # =============================================================================
 # Result Serialization
 # =============================================================================
+
+
+def _format_validation_error(exc: ValidationError) -> str:
+    """Flatten a pydantic ValidationError into one actionable message.
+
+    The underlying validators already say exactly what is wrong ("Travel date
+    cannot be in the past"); callers only ever saw "Invalid parameter value",
+    which gives an agent nothing to correct.
+    """
+    problems = []
+    for error in exc.errors():
+        location = ".".join(str(part) for part in error["loc"]) or "input"
+        problems.append(f"{location}: {error['msg']}")
+    return f"Invalid parameter value - {'; '.join(problems)}"
 
 
 def _airline_code(airline: Any) -> str:
@@ -662,11 +676,10 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
 
     except ParseError as e:
         return {"success": False, "error": str(e), "flights": []}
+    except ValidationError as e:
+        return {"success": False, "error": _format_validation_error(e), "flights": []}
     except Exception as e:
-        error_msg = str(e)
-        if "validation error" in error_msg.lower():
-            return {"success": False, "error": "Invalid parameter value", "flights": []}
-        return {"success": False, "error": f"Search failed: {error_msg}", "flights": []}
+        return {"success": False, "error": f"Search failed: {e}", "flights": []}
 
 
 def _execute_booking_options(
@@ -757,11 +770,10 @@ def _execute_booking_options(
 
     except ParseError as e:
         return {"success": False, "error": str(e), "options": []}
+    except ValidationError as e:
+        return {"success": False, "error": _format_validation_error(e), "options": []}
     except Exception as e:
-        error_msg = str(e)
-        if "validation error" in error_msg.lower():
-            return {"success": False, "error": "Invalid parameter value", "options": []}
-        return {"success": False, "error": f"Booking lookup failed: {error_msg}", "options": []}
+        return {"success": False, "error": f"Booking lookup failed: {e}", "options": []}
 
 
 def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
@@ -857,6 +869,8 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
 
     except ParseError as e:
         return {"success": False, "error": str(e), "dates": []}
+    except ValidationError as e:
+        return {"success": False, "error": _format_validation_error(e), "dates": []}
     except Exception as e:
         return {"success": False, "error": f"Search failed: {str(e)}", "dates": []}
 
