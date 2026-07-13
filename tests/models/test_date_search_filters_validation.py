@@ -1,6 +1,6 @@
 """Tests for DateSearchFilters validation and auto-correction."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -12,6 +12,11 @@ from fli.models import (
     PassengerInfo,
     SeatType,
 )
+
+
+def utc_today():
+    """Today's date in UTC — the anchor the validators reference."""
+    return datetime.now(timezone.utc).date()
 
 
 @pytest.fixture
@@ -59,7 +64,7 @@ def test_date_search_normal_dates(basic_search_params, future_date):
 
 def test_date_search_past_from_date(basic_search_params, future_date):
     """Test DateSearchFilters auto-corrects past from_date to today."""
-    past_date = datetime.now() - timedelta(days=7)
+    past_date = utc_today() - timedelta(days=7)
     to_date = future_date + timedelta(days=7)
 
     filters = DateSearchFilters(
@@ -68,7 +73,7 @@ def test_date_search_past_from_date(basic_search_params, future_date):
         to_date=to_date.strftime("%Y-%m-%d"),
     )
 
-    assert filters.from_date == datetime.now().date().strftime("%Y-%m-%d")
+    assert filters.from_date == utc_today().strftime("%Y-%m-%d")
     assert filters.to_date == to_date.strftime("%Y-%m-%d")
 
 
@@ -91,8 +96,8 @@ def test_date_search_reversed_dates(basic_search_params, future_date):
 
 def test_date_search_past_to_date(basic_search_params):
     """Test DateSearchFilters raises error for past to_date."""
-    from_date = datetime.now() - timedelta(days=7)
-    to_date = datetime.now() - timedelta(days=1)
+    from_date = utc_today() - timedelta(days=7)
+    to_date = utc_today() - timedelta(days=2)
 
     with pytest.raises(ValueError, match="To date must be in the future"):
         DateSearchFilters(
@@ -111,29 +116,26 @@ def test_date_search_past_to_date(basic_search_params):
 
 
 def test_date_search_today_to_date(basic_search_params, future_date):
-    """Test DateSearchFilters raises error for today's to_date."""
-    today = datetime.now()
-    from_date = today - timedelta(days=7)
+    """Test DateSearchFilters accepts a to_date of today.
 
-    with pytest.raises(ValueError, match="To date must be in the future"):
-        DateSearchFilters(
-            **basic_search_params,
-            from_date=from_date.strftime("%Y-%m-%d"),
-            to_date=today.strftime("%Y-%m-%d"),
-        )
+    A range ending "today" is still live for any traveler west of UTC, so the
+    validator anchors to utc_today - 1 rather than the server's naive today.
+    """
+    today = utc_today()
+    from_date = today - timedelta(days=1)
 
-    # Even if the from and to dates are reversed, the to date should still be in the future
-    with pytest.raises(ValueError, match="To date must be in the future"):
-        DateSearchFilters(
-            **basic_search_params,
-            from_date=today.strftime("%Y-%m-%d"),
-            to_date=from_date.strftime("%Y-%m-%d"),
-        )
+    filters = DateSearchFilters(
+        **basic_search_params,
+        from_date=from_date.strftime("%Y-%m-%d"),
+        to_date=today.strftime("%Y-%m-%d"),
+    )
+
+    assert filters.to_date == today.strftime("%Y-%m-%d")
 
 
 def test_date_search_past_from_date_after_swap(basic_search_params, future_date):
     """Test DateSearchFilters bumps up from_date to current date after date swap."""
-    past_date = datetime.now() - timedelta(days=7)
+    past_date = utc_today() - timedelta(days=7)
     later_date = future_date + timedelta(days=7)
 
     # Create with reversed dates where from_date is in the future but will be swapped with past date
@@ -144,5 +146,5 @@ def test_date_search_past_from_date_after_swap(basic_search_params, future_date)
     )
 
     # After swap and adjustment, from_date should be today and to_date should be the later date
-    assert filters.from_date == datetime.now().date().strftime("%Y-%m-%d")
+    assert filters.from_date == utc_today().strftime("%Y-%m-%d")
     assert filters.to_date == later_date.strftime("%Y-%m-%d")
