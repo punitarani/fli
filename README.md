@@ -1,5 +1,7 @@
 # 🛫 Fli - Flight Search MCP Server and Library
 
+[![MCP Toplist](https://mcptoplist.com/badge/smithery%2Fpunitarani%2Ffli.svg)](https://mcptoplist.com/server/smithery%2Fpunitarani%2Ffli)
+
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/punitarani/fli)
 
 A powerful Python library that provides programmatic access to Google Flights data with an elegant CLI interface. Search
