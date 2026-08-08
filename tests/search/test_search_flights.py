@@ -361,7 +361,7 @@ class TestBackendErrorEnvelope:
 
         sf = SearchFlights()
 
-        def _fake_post(url, data, **kwargs):  # noqa: ANN001
+        def _fake_post(url: str, data: object, **kwargs: object) -> object:
             return type(
                 "R",
                 (),

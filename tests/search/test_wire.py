@@ -141,7 +141,7 @@ class TestParseFirstWrbPayloadEdgeCases:
         assert parse_first_wrb_payload(body) == [42]
 
 
-def _google_framed(*payloads):
+def _google_framed(*payloads: object) -> str:
     """Build a multi-chunk response framed the way Google actually frames it.
 
     Measured on a live August 2026 ``GetShoppingResults`` response whose
@@ -160,7 +160,7 @@ def _google_framed(*payloads):
     return "".join(parts)
 
 
-def _error_envelope(code):
+def _error_envelope(code: int) -> str:
     """Build the HTTP 200 error envelope Google returns for a rejected request."""
     outer = [
         ["wrb.fr", None, None, None, None, [code]],
