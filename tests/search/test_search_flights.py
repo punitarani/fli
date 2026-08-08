@@ -351,3 +351,66 @@ class TestSearchParseErrorMessage:
         msg = str(excinfo.value)
         assert msg.count("not numeric") == 1
         assert "0/10" in msg
+
+
+class TestBackendErrorEnvelope:
+    """A rejected request must not read as an empty result set."""
+
+    def _client_with_canned_response(self, body: str) -> SearchFlights:
+        from unittest.mock import patch
+
+        sf = SearchFlights()
+
+        def _fake_post(url, data, **kwargs):  # noqa: ANN001
+            return type(
+                "R",
+                (),
+                {
+                    "content": body.encode("utf-8"),
+                    "text": body,
+                    "raise_for_status": lambda self: None,
+                },
+            )()
+
+        patcher = patch.object(sf.client, "post", side_effect=_fake_post)
+        patcher.start()
+        return sf
+
+    def _filters(self) -> FlightSearchFilters:
+        return FlightSearchFilters(
+            passenger_info=PassengerInfo(adults=1),
+            flight_segments=[
+                FlightSegment(
+                    departure_airport=[[Airport.JFK, 0]],
+                    arrival_airport=[[Airport.LAX, 0]],
+                    travel_date=(datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
+                )
+            ],
+        )
+
+    def test_search_raises_instead_of_returning_none(self):
+        """HTTP 200 + error envelope surfaces the status code, not 'no flights'."""
+        import json
+
+        from fli.search import SearchBackendError
+
+        body = ")]}'\n\n" + json.dumps(
+            [
+                ["wrb.fr", None, None, None, None, [13]],
+                ["di", 39],
+                ["af.httprm", 38, "-1963517503", 5],
+            ]
+        )
+        sf = self._client_with_canned_response(body)
+        with pytest.raises(SearchBackendError, match="13 \\(INTERNAL\\)"):
+            sf.search(self._filters())
+
+    def test_genuinely_empty_response_still_returns_none(self):
+        """A well-formed response with no flight rows keeps returning None."""
+        import json
+
+        inner = [[None, None, None, None, "FAKE_SESSION"], None, [[]], None]
+        outer = [["wrb.fr", None, json.dumps(inner, separators=(",", ":"))]]
+        body = ")]}'\n\n" + json.dumps(outer)
+        sf = self._client_with_canned_response(body)
+        assert sf.search(self._filters()) is None

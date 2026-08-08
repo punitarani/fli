@@ -2,7 +2,10 @@
 
 import json
 
+import pytest
+
 from fli.search._wire import iter_wrb_chunks, parse_first_wrb_payload
+from fli.search.exceptions import SearchBackendError
 
 
 def _single_chunk(payload):
@@ -13,20 +16,17 @@ def _single_chunk(payload):
 
 
 def _multi_chunk(*payloads):
-    """Build a multi-chunk response with explicit length prefixes.
+    """Build a multi-chunk response with byte-counted length prefixes.
 
-    Mirrors Google's actual format: each length header counts both the
-    leading newline that follows the header AND the trailing newline that
-    separates this chunk from the next (i.e. ``len(outer_json) + 1``).
+    Each length header counts the chunk plus its two surrounding newlines,
+    measured in UTF-8 bytes. Google measures in characters instead (see
+    :func:`_google_framed`); both helpers exist so the reader is pinned as
+    working under either convention.
     """
     parts = [")]}'\n\n"]
     for p in payloads:
         inner_json = json.dumps(p, separators=(",", ":"))
         outer_json = json.dumps([["wrb.fr", None, inner_json]], separators=(",", ":"))
-        # The length header counts UTF-8 BYTES (not Python str chars) plus
-        # the two surrounding newlines. Encoding the JSON before measuring
-        # keeps the test correct when payloads contain non-ASCII characters
-        # like accented airport names or Japanese carrier strings.
         byte_len = len(outer_json.encode("utf-8")) + 2
         parts.append(f"{byte_len}\n{outer_json}\n")
     return "".join(parts)
@@ -57,9 +57,7 @@ class TestIterWrbChunks:
         assert list(iter_wrb_chunks(body)) == []
 
     def test_non_ascii_chunk_payload(self):
-        # The length header counts UTF-8 bytes, not characters — confirm a
-        # payload with multi-byte chars round-trips correctly (regression
-        # guard for the byte-vs-char-length bug in the test helper).
+        # Multi-byte payloads round-trip under the byte-counted framing.
         body = _multi_chunk([1, "東京", "café", "résumé"])
         chunks = list(iter_wrb_chunks(body))
         assert chunks == [[1, "東京", "café", "résumé"]]
@@ -141,3 +139,93 @@ class TestParseFirstWrbPayloadEdgeCases:
         outer = [["wrb.fr", None, bad_inner], ["wrb.fr", None, good_inner]]
         body = ")]}'\n\n" + json.dumps(outer)
         assert parse_first_wrb_payload(body) == [42]
+
+
+def _google_framed(*payloads):
+    """Build a multi-chunk response framed the way Google actually frames it.
+
+    Measured on a live August 2026 ``GetShoppingResults`` response whose
+    airport names carry accents: the length header counts the chunk *plus
+    its two surrounding newlines*, in **characters**. On an ASCII-only
+    response that is indistinguishable from a byte count, which is why the
+    checked-in fixtures never exercised the difference.
+    """
+    parts = [")]}'\n\n"]
+    for p in payloads:
+        inner_json = json.dumps(p, separators=(",", ":"), ensure_ascii=False)
+        outer_json = json.dumps(
+            [["wrb.fr", None, inner_json]], separators=(",", ":"), ensure_ascii=False
+        )
+        parts.append(f"{len(outer_json) + 2}\n{outer_json}\n")
+    return "".join(parts)
+
+
+def _error_envelope(code):
+    """Build the HTTP 200 error envelope Google returns for a rejected request."""
+    outer = [
+        ["wrb.fr", None, None, None, None, [code]],
+        ["di", 39],
+        ["af.httprm", 38, "-1963517503", 5],
+    ]
+    return ")]}'\n\n" + json.dumps(outer, separators=(",", ":"))
+
+
+class TestNonAsciiFraming:
+    """Chunks must survive non-ASCII payloads (issue: 'No flights found')."""
+
+    def test_accented_single_chunk_is_not_dropped(self):
+        payload = [None, None, [[["Aéroport de Paris-Charles de Gaulle", "Düsseldorf"]]]]
+        assert parse_first_wrb_payload(_google_framed(payload)) == payload
+
+    def test_accented_chunk_does_not_desync_the_stream(self):
+        body = _google_framed([1, "Aéroport de Paris-Charles de Gaulle"], [2, "beta"])
+        assert list(iter_wrb_chunks(body)) == [
+            [1, "Aéroport de Paris-Charles de Gaulle"],
+            [2, "beta"],
+        ]
+
+    def test_ascii_chunks_still_parse(self):
+        body = _google_framed([1, "Paris Charles de Gaulle Airport"], [2, "beta"])
+        assert list(iter_wrb_chunks(body)) == [
+            [1, "Paris Charles de Gaulle Airport"],
+            [2, "beta"],
+        ]
+
+    def test_length_header_is_not_trusted(self):
+        # A header that matches neither the byte nor the character length
+        # must not affect decoding: chunk boundaries come from the JSON
+        # grammar, not from the announced length.
+        inner_json = json.dumps([1, "café"], separators=(",", ":"), ensure_ascii=False)
+        outer_json = json.dumps(
+            [["wrb.fr", None, inner_json]], separators=(",", ":"), ensure_ascii=False
+        )
+        body = f")]}}'\n\n999999\n{outer_json}\n1\n{outer_json}\n"
+        assert list(iter_wrb_chunks(body)) == [[1, "café"], [1, "café"]]
+
+
+class TestErrorEnvelope:
+    """Payload-less wrb.fr rows carry a status code and must not read as 'no results'."""
+
+    def test_internal_error_raises(self):
+        with pytest.raises(SearchBackendError) as excinfo:
+            parse_first_wrb_payload(_error_envelope(13))
+        assert excinfo.value.error_code == 13
+        assert "13" in str(excinfo.value)
+        assert "INTERNAL" in str(excinfo.value)
+
+    def test_invalid_argument_raises(self):
+        with pytest.raises(SearchBackendError) as excinfo:
+            list(iter_wrb_chunks(_error_envelope(3)))
+        assert excinfo.value.error_code == 3
+        assert "INVALID_ARGUMENT" in str(excinfo.value)
+
+    def test_unknown_code_still_raises_with_the_number(self):
+        with pytest.raises(SearchBackendError) as excinfo:
+            parse_first_wrb_payload(_error_envelope(9999))
+        assert excinfo.value.error_code == 9999
+        assert "9999" in str(excinfo.value)
+
+    def test_payload_less_row_without_status_is_still_skipped(self):
+        # Short rows carry no status code — they stay a silent skip.
+        body = ")]}'\n\n" + json.dumps([["wrb.fr", None, None]])
+        assert list(iter_wrb_chunks(body)) == []

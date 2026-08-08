@@ -28,3 +28,18 @@ class SearchHTTPError(SearchClientError):
         """Store the HTTP status alongside the message for richer logging."""
         super().__init__(message)
         self.status_code = status_code
+
+
+class SearchBackendError(SearchClientError):
+    """Google Flights answered HTTP 200 with an error envelope, not results.
+
+    A rejected request comes back as ``HTTP 200`` carrying a payload-less
+    ``wrb.fr`` row of the shape ``["wrb.fr", null, null, null, null,
+    [code]]``. Without this error the response is indistinguishable from
+    "this route genuinely has no flights".
+    """
+
+    def __init__(self, message: str, *, error_code: int | None = None):
+        """Store the backend status code alongside the message."""
+        super().__init__(message)
+        self.error_code = error_code
