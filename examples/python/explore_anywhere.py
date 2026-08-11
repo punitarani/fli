@@ -10,7 +10,7 @@ from fli.models import Airport, ExploreRegion, ExploreSearchFilters
 from fli.search import SearchExplore
 
 
-def main():
+def main() -> None:
     """Search for the cheapest places to fly from London to anywhere in Europe."""
     departure_date = (datetime.now() + timedelta(days=45)).strftime("%Y-%m-%d")
 
