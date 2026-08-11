@@ -103,7 +103,7 @@ def test_multi_city_rejects_backwards_leg(passengers):
     second = utc_today() + timedelta(days=20)
     third = utc_today() + timedelta(days=15)  # earlier than the second leg
 
-    with pytest.raises(ValueError, match="cannot be before departure date"):
+    with pytest.raises(ValueError, match="Segment 3 .* cannot be before segment 2"):
         FlightSearchFilters(
             trip_type=TripType.MULTI_CITY,
             passenger_info=passengers,

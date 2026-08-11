@@ -65,10 +65,15 @@ class FlightSearchFilters(BaseModel):
             datetime.strptime(segment.travel_date, "%Y-%m-%d").date()
             for segment in self.flight_segments
         ]
-        for previous, current in zip(dates, dates[1:], strict=False):
+        for index, (previous, current) in enumerate(zip(dates, dates[1:], strict=False), start=2):
             if current < previous:
+                if self.trip_type == TripType.ROUND_TRIP:
+                    raise ValueError(
+                        f"Return date ({current}) cannot be before departure date ({previous})"
+                    )
                 raise ValueError(
-                    f"Return date ({current}) cannot be before departure date ({previous})"
+                    f"Segment {index} travel date ({current}) cannot be before "
+                    f"segment {index - 1} travel date ({previous})"
                 )
         return self
 

@@ -12,6 +12,7 @@ from fli.models import (
     PassengerInfo,
     SeatType,
 )
+from fli.models.google_flights.dates import MAX_PAST_FROM_DATE_DAYS
 
 
 def utc_today():
@@ -99,15 +100,15 @@ def test_date_search_past_to_date(basic_search_params):
     from_date = utc_today() - timedelta(days=7)
     to_date = utc_today() - timedelta(days=2)
 
-    with pytest.raises(ValueError, match="To date must be in the future"):
+    with pytest.raises(ValueError, match="To date cannot be in the past"):
         DateSearchFilters(
             **basic_search_params,
             from_date=from_date.strftime("%Y-%m-%d"),
             to_date=to_date.strftime("%Y-%m-%d"),
         )
 
-    # Even if the from and to dates are reversed, the to date should still be in the future
-    with pytest.raises(ValueError, match="To date must be in the future"):
+    # Even if the from and to dates are reversed, the to date must not be in the past
+    with pytest.raises(ValueError, match="To date cannot be in the past"):
         DateSearchFilters(
             **basic_search_params,
             from_date=to_date.strftime("%Y-%m-%d"),
@@ -131,6 +132,25 @@ def test_date_search_today_to_date(basic_search_params, future_date):
     )
 
     assert filters.to_date == today.strftime("%Y-%m-%d")
+
+
+def test_date_search_from_date_clamp_cannot_pass_to_date(basic_search_params):
+    """Test the from_date clamp cannot push from_date past a to_date at the rejection floor.
+
+    to_date may be as early as yesterday UTC, so clamping from_date to plain
+    "today" would invert the range; the clamp must cap at to_date instead.
+    """
+    from_date = utc_today() - timedelta(days=MAX_PAST_FROM_DATE_DAYS + 4)
+    to_date = utc_today() - timedelta(days=1)
+
+    filters = DateSearchFilters(
+        **basic_search_params,
+        from_date=from_date.strftime("%Y-%m-%d"),
+        to_date=to_date.strftime("%Y-%m-%d"),
+    )
+
+    assert filters.from_date == to_date.strftime("%Y-%m-%d")
+    assert filters.parsed_from_date <= filters.parsed_to_date
 
 
 def test_date_search_past_from_date_after_swap(basic_search_params, future_date):
