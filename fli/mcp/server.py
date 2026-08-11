@@ -968,8 +968,17 @@ def _serialize_explore_destination(
     destination: Any,
     origin_label: str | None,
     locale: tuple[str | None, str | None, str | None],
+    exact_nights: int | None = None,
 ) -> dict[str, Any]:
-    """Serialize one explore destination for tool output."""
+    """Serialize one explore destination for tool output.
+
+    ``exact_nights`` is set only when a round-trip search pinned the trip
+    length to a single value — the one case where the return date is
+    derivable as fact. Google's Explore response does not reveal the chosen
+    return date otherwise (verified by live probing: no destination-record
+    slot, price-record slot, or booking-token field moves when the
+    trip-length window changes).
+    """
     currency, language, country = locale
     entry: dict[str, Any] = {
         "name": destination.name,
@@ -989,10 +998,15 @@ def _serialize_explore_destination(
         "image_url": destination.hero_image_url or destination.thumbnail_url,
     }
     if origin_label and destination.destination_airport and destination.departure_date:
+        link_return_date = None
+        if exact_nights is not None:
+            departure = datetime.strptime(destination.departure_date, "%Y-%m-%d")
+            link_return_date = (departure + timedelta(days=exact_nights)).strftime("%Y-%m-%d")
         entry["flights_url"] = google_flights_url(
             origin_label,
             destination.destination_airport,
             destination.departure_date,
+            link_return_date,
             currency=currency,
             language=language,
             country=country,
@@ -1076,7 +1090,19 @@ def _execute_explore_search(params: ExploreSearchParams) -> dict[str, Any]:
             origin.name.removeprefix("_") if isinstance(origin, Airport) else result.origin_name
         )
         locale = (params.currency, params.language, params.country)
-        serialized = [_serialize_explore_destination(d, origin_label, locale) for d in destinations]
+        # The return date is only knowable when the trip length is pinned to
+        # a single value; Google's response never reveals it otherwise.
+        exact_nights = (
+            params.trip_min_nights
+            if params.round_trip
+            and params.trip_min_nights is not None
+            and params.trip_min_nights == params.trip_max_nights
+            else None
+        )
+        serialized = [
+            _serialize_explore_destination(d, origin_label, locale, exact_nights)
+            for d in destinations
+        ]
 
         return {
             "success": True,
@@ -1480,7 +1506,11 @@ def search_explore(
 
     Follow up with `search_flights` using a result's `destination_airport`
     and `departure_date` for bookable itineraries; each priced destination
-    also carries a `flights_url` deep link.
+    also carries a `flights_url` deep link. For round-trip searches the
+    link includes the return date only when the trip length is pinned
+    (trip_min_nights == trip_max_nights); otherwise it pre-fills the
+    outbound date only, because Google's Explore response does not reveal
+    which return date produced the quoted fare.
     """
     params = ExploreSearchParams(
         origin=origin,

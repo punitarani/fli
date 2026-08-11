@@ -183,6 +183,37 @@ class TestExecuteExploreSearch:
         filters = mock_search.return_value.search.call_args.args[0]
         assert filters.trip_length_window == [4, 23, 0, 7]
 
+    def test_exact_trip_length_adds_return_date_to_link(self, mock_search):
+        """When min==max nights the return date is derivable as fact."""
+        params = ExploreSearchParams(
+            origin="JFK",
+            departure_date=DEPARTURE_DATE,
+            round_trip=True,
+            trip_min_nights=7,
+            trip_max_nights=7,
+        )
+        result = _search_explore_from_params(params)
+        expected_return = (
+            datetime.strptime(DEPARTURE_DATE, "%Y-%m-%d") + timedelta(days=7)
+        ).strftime("%Y-%m-%d")
+        malta = result["destinations"][0]
+        assert "through" in malta["flights_url"]
+        assert expected_return in malta["flights_url"]
+
+    def test_ranged_trip_length_keeps_outbound_only_link(self, mock_search):
+        """Google never reveals the chosen return date, so we must not invent one."""
+        params = ExploreSearchParams(
+            origin="JFK",
+            departure_date=DEPARTURE_DATE,
+            round_trip=True,
+            trip_min_nights=7,
+            trip_max_nights=14,
+        )
+        result = _search_explore_from_params(params)
+        malta = result["destinations"][0]
+        assert "flights_url" in malta
+        assert "through" not in malta["flights_url"]
+
     def test_none_result_is_reported_as_error(self, mock_search):
         """An unparseable response is a failed request, not an empty result set."""
         mock_search.return_value.search.return_value = None
