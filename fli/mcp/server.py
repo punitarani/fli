@@ -1018,6 +1018,11 @@ def _execute_explore_search(params: ExploreSearchParams) -> dict[str, Any]:
         if params.round_trip or wants_window:
             min_nights = params.trip_min_nights if params.trip_min_nights is not None else 0
             max_nights = params.trip_max_nights if params.trip_max_nights is not None else 23
+            if min_nights > max_nights:
+                raise ParseError(
+                    f"trip_min_nights ({min_nights}) cannot exceed "
+                    f"trip_max_nights ({max_nights})"
+                )
             trip_length_window = [4, 23, min_nights, max_nights]
 
         filters = ExploreSearchFilters(

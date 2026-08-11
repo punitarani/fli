@@ -157,6 +157,32 @@ class TestExecuteExploreSearch:
         filters = mock_search.return_value.search.call_args.args[0]
         assert filters.trip_length_window == [4, 23, 7, 14]
 
+    def test_trip_window_min_exceeding_max_is_rejected(self, mock_search):
+        """An inverted nights window must fail locally, not reach Google."""
+        params = ExploreSearchParams(
+            origin="JFK",
+            departure_date=DEPARTURE_DATE,
+            trip_min_nights=14,
+            trip_max_nights=7,
+        )
+        result = _search_explore_from_params(params)
+        assert result["success"] is False
+        assert "trip_min_nights" in result["error"]
+        mock_search.return_value.search.assert_not_called()
+
+    def test_window_without_round_trip_is_allowed(self, mock_search):
+        """Google accepts a trip-length window on one-way searches (HAR-observed)."""
+        params = ExploreSearchParams(
+            origin="JFK",
+            departure_date=DEPARTURE_DATE,
+            trip_min_nights=0,
+            trip_max_nights=7,
+        )
+        result = _search_explore_from_params(params)
+        assert result["success"] is True
+        filters = mock_search.return_value.search.call_args.args[0]
+        assert filters.trip_length_window == [4, 23, 0, 7]
+
     def test_none_result_is_reported_as_error(self, mock_search):
         """An unparseable response is a failed request, not an empty result set."""
         mock_search.return_value.search.return_value = None
