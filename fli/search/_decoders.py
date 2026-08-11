@@ -22,6 +22,8 @@ from fli.models import (
     Airport,
     Amenities,
     BookingOption,
+    ExploreDestination,
+    ExploreResult,
     FlightLeg,
     FlightResult,
     Layover,
@@ -468,3 +470,156 @@ def _extract_fare_name(row: list) -> str | None:
         if isinstance(label, str) and label:
             return label
     return None
+
+
+# ---------------------------------------------------------------------------
+# Explore (GetExploreDestinations) decoding
+# ---------------------------------------------------------------------------
+#
+# One GetExploreDestinations HTTP response streams SEVERAL ``wrb.fr`` chunks:
+# destination chunks carry geo/name/image records at chunk[3][0] plus response
+# metadata, price chunks carry fare records at chunk[4][0]. Large regions
+# split both kinds across many chunks (24 observed for Oceania), and chunk
+# order is not guaranteed — callers must classify every chunk by shape and
+# accumulate, then left-join prices onto destinations on the knowledge-graph
+# mid at record[0].
+
+_KG_PREFIXES = ("/m/", "/g/")
+
+
+def _get_path(node: Any, *path: int) -> Any:
+    """Chain :func:`safe_get` over a positional path."""
+    for idx in path:
+        node = safe_get(node, idx)
+    return node
+
+
+def _is_mid(v: Any) -> bool:
+    return isinstance(v, str) and v.startswith(_KG_PREFIXES)
+
+
+def _as_float(v: Any) -> float | None:
+    if isinstance(v, bool):
+        return None
+    return float(v) if isinstance(v, int | float) else None
+
+
+def _explore_destination_records(chunk: Any) -> list:
+    """Return the destination records in a chunk (may be empty)."""
+    records = _get_path(chunk, 3, 0)
+    if not isinstance(records, list):
+        return []
+    return [
+        r
+        for r in records
+        if isinstance(r, list) and _is_mid(safe_get(r, 0)) and as_str(safe_get(r, 2))
+    ]
+
+
+def _explore_price_records(chunk: Any) -> list:
+    """Return the price records in a chunk (may be empty)."""
+    records = _get_path(chunk, 4, 0)
+    if not isinstance(records, list):
+        return []
+    return [r for r in records if isinstance(r, list) and _is_mid(safe_get(r, 0))]
+
+
+def is_explore_destinations_chunk(chunk: Any) -> bool:
+    """Return True when the chunk carries Explore destination records."""
+    return bool(_explore_destination_records(chunk))
+
+
+def is_explore_prices_chunk(chunk: Any) -> bool:
+    """Return True when the chunk carries Explore price records."""
+    return bool(_explore_price_records(chunk))
+
+
+def parse_explore_destinations_chunk(chunk: Any) -> tuple[dict[str, Any], list[ExploreDestination]]:
+    """Decode a destinations chunk into (metadata, partial destinations).
+
+    The returned :class:`ExploreDestination` objects carry only the
+    destination-side fields; price-side fields are filled in later by
+    :func:`merge_explore_payloads`. Malformed records are skipped with a
+    logged warning, mirroring :func:`parse_flight_row`'s philosophy.
+    """
+    meta: dict[str, Any] = {
+        "region_name": as_str(_get_path(chunk, 2, 0)),
+        "origin_name": as_str(_get_path(chunk, 6, 0, 0)),
+        "price_slider_min": _as_float(_get_path(chunk, 5, 0, 0, 1)),
+        "price_slider_max": _as_float(_get_path(chunk, 5, 0, 1, 1)),
+    }
+
+    destinations: list[ExploreDestination] = []
+    for record in _explore_destination_records(chunk):
+        try:
+            destinations.append(
+                ExploreDestination(
+                    mid=record[0],
+                    name=record[2],
+                    country=as_str(safe_get(record, 4)),
+                    latitude=_as_float(_get_path(record, 1, 0)),
+                    longitude=_as_float(_get_path(record, 1, 1)),
+                    thumbnail_url=as_str(safe_get(record, 3)),
+                    hero_image_url=as_str(safe_get(record, 7)),
+                    departure_date=as_str(safe_get(record, 11)),
+                    arrival_date=as_str(safe_get(record, 28)),
+                )
+            )
+        except (ValueError, TypeError, IndexError):
+            logger.warning("Skipping malformed explore destination record", exc_info=True)
+    return meta, destinations
+
+
+def parse_explore_prices_chunk(
+    chunk: Any, default_currency: str | None = None
+) -> dict[str, dict[str, Any]]:
+    """Decode a prices chunk into ``{mid: price fields}``.
+
+    Records without a numeric fare (Google keeps a placeholder row when no
+    itinerary satisfies the filters) are omitted, so destinations they refer
+    to surface as unpriced after the merge.
+    """
+    prices: dict[str, dict[str, Any]] = {}
+    for record in _explore_price_records(chunk):
+        price = _as_float(_get_path(record, 1, 0, 1))
+        if price is None:
+            continue
+        token = as_str(_get_path(record, 1, 1))
+        summary = safe_get(record, 6)
+        duration = as_int(_get_path(summary, 3))
+        prices[record[0]] = {
+            "price": price,
+            "currency": extract_currency_from_price_token(token) or default_currency,
+            "booking_token": token,
+            "airline": as_str(_get_path(summary, 0)),
+            "airline_name": as_str(_get_path(summary, 1)),
+            "stops": as_non_negative_int(_get_path(summary, 2)),
+            "duration_minutes": duration if duration and duration > 0 else None,
+            "layover_minutes": as_non_negative_int(_get_path(summary, 8)),
+            "destination_airport": as_str(_get_path(summary, 5)),
+            "origin_mid": as_str(_get_path(summary, 6)),
+        }
+    return prices
+
+
+def merge_explore_payloads(
+    meta: dict[str, Any],
+    destinations: list[ExploreDestination],
+    prices: dict[str, dict[str, Any]],
+) -> ExploreResult:
+    """Left-join price fields onto destinations and build the final result.
+
+    Destinations without a matching price record are kept with
+    ``price=None`` — a typical response prices only ~75% of destinations.
+    """
+    merged = [
+        dest.model_copy(update=prices[dest.mid]) if dest.mid in prices else dest
+        for dest in destinations
+    ]
+    return ExploreResult(
+        region_name=meta.get("region_name"),
+        origin_name=meta.get("origin_name"),
+        price_slider_min=meta.get("price_slider_min"),
+        price_slider_max=meta.get("price_slider_max"),
+        destinations=merged,
+    )

@@ -64,6 +64,7 @@ uv run mkdocs build         # Build static docs
 3. **Search Engine** (`fli/search/`)
    - `SearchFlights`: Core flight search using Google Flights API
    - `SearchDates`: Find cheapest dates within date ranges
+   - `SearchExplore`: Discover cheap destinations from an origin (Google Flights Explore)
    - Direct API integration (no web scraping)
 
 4. **Data Models** (`fli/models/`)
@@ -73,7 +74,7 @@ uv run mkdocs build         # Build static docs
    - All models use Pydantic for validation
 
 5. **MCP Server** (`fli/mcp/`)
-   - FastMCP-based server with four tools: `search_flights`, `search_dates`, `get_booking_options`, `find_airports`
+   - FastMCP-based server with five tools: `search_flights`, `search_dates`, `search_explore`, `get_booking_options`, `find_airports`
    - Industry-standard parameter naming: `origin`, `destination`, `cabin_class`, `max_stops`
    - Per-flight booking deep-link URLs (`tfs` protobuf) in every search result
    - Prompt templates for guided searches
@@ -96,7 +97,7 @@ uv run mkdocs build         # Build static docs
 ## Key Files and Entry Points
 
 - `fli/cli/main.py` - CLI entry point and command registration
-- `fli/mcp/server.py` - MCP server with `search_flights` and `search_dates` tools
+- `fli/mcp/server.py` - MCP server with `search_flights`, `search_dates`, and `search_explore` tools
 - `fli/core/parsers.py` - Shared parsing utilities
 - `fli/core/builders.py` - Shared filter building utilities
 - `fli/search/flights.py` - Core flight search implementation
@@ -144,6 +145,28 @@ Find cheapest travel dates within a range.
 
 **Response:** Each date result carries a `booking_url` deep-linking to Google
 Flights for that specific date (and return date for round trips).
+
+### `search_explore`
+Discover where you can fly cheaply when the destination is flexible
+(Google Flights Explore / `GetExploreDestinations`). One call returns dozens
+of destinations with their cheapest fares.
+
+**Key Parameters:**
+- `origin` - Airport IATA code (e.g. 'JFK') or a city knowledge-graph mid (e.g. '/m/04jpl')
+- `departure_date` - Date in YYYY-MM-DD format (required — the endpoint errors without one)
+- `destination` - ANYWHERE (default), EUROPE, SOUTHERN_EUROPE, ASIA, AFRICA,
+  NORTH_AMERICA, SOUTH_AMERICA, OCEANIA, a raw `/m/...` mid, or an IATA code
+- `round_trip` / `trip_min_nights` / `trip_max_nights` - Round-trip pricing with a
+  trip-length window (nights, 0-23)
+- `max_price`, `cabin_class`, `max_stops`, `airlines`, `exclude_airlines`,
+  `alliance`, `exclude_alliance`, `max_flight_duration` - Same semantics as `search_flights`
+- `currency` / `language` / `country` - Same locale knobs as `search_flights`
+- `sort_by_price` (default true), `limit`
+
+**Response:** `destinations[]` with name, country, price (null when Google
+found no fare), airline, stops, duration, `destination_airport`, dates,
+coordinates, an image URL, and a `flights_url` deep link. Chain a result's
+`destination_airport` into `search_flights` for bookable itineraries.
 
 ### `get_booking_options`
 Get bookable fares (vendor names, prices, and direct booking URLs) for a

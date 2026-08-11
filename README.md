@@ -46,12 +46,13 @@ fli-mcp-http  # serves at http://127.0.0.1:8000/mcp/
 
 ### MCP Tools Available
 
-The MCP server provides two main tools:
+The MCP server provides these main tools:
 
 | Tool                 | Description                                                 |
 |----------------------|-------------------------------------------------------------|
 | **`search_flights`** | Search for flights on a specific date with detailed filters |
 | **`search_dates`**   | Find the cheapest travel dates across a flexible date range |
+| **`search_explore`** | Discover cheap destinations from an origin ("fly anywhere") |
 
 #### `search_flights` Parameters
 
@@ -100,6 +101,38 @@ The MCP server provides two main tools:
 | `country`           | string | ISO 3166-1 alpha-2 country code (e.g. 'GB')                 |
 | `sort_by_price`     | bool   | Sort results by price (lowest first)                        |
 | `passengers`        | int    | Number of adult passengers                                  |
+
+#### `search_explore` Parameters
+
+Powered by Google Flights Explore (`GetExploreDestinations`): one call returns
+dozens of destinations with their cheapest fares when the destination is
+flexible.
+
+| Parameter             | Type   | Description                                                  |
+|-----------------------|--------|--------------------------------------------------------------|
+| `origin`              | string | Airport IATA code (e.g. 'JFK') or a city mid (e.g. '/m/04jpl') |
+| `destination`         | string | ANYWHERE (default), EUROPE, SOUTHERN_EUROPE, ASIA, AFRICA, NORTH_AMERICA, SOUTH_AMERICA, OCEANIA, a knowledge-graph mid, or an IATA code |
+| `departure_date`      | string | Departure date in YYYY-MM-DD format (required)               |
+| `round_trip`          | bool   | Price round trips instead of one-ways                        |
+| `trip_min_nights`     | int    | Minimum trip length in nights (round trips, 0-23)            |
+| `trip_max_nights`     | int    | Maximum trip length in nights (round trips, 0-23)            |
+| `max_price`           | int    | Maximum fare cap                                             |
+| `cabin_class`         | string | ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST                 |
+| `max_stops`           | string | ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS                   |
+| `airlines`            | list   | Filter by airline codes (e.g., ['BA', 'AA'])                 |
+| `exclude_airlines`    | list   | Airline IATA codes to **exclude**                            |
+| `alliance`            | list   | Restrict to alliances: ONEWORLD, SKYTEAM, STAR_ALLIANCE      |
+| `exclude_alliance`    | list   | Alliance names to **exclude**                                |
+| `max_flight_duration` | int    | Maximum flight duration in minutes                           |
+| `currency`            | string | ISO 4217 currency code (e.g. 'EUR', 'JPY')                   |
+| `language`            | string | BCP-47 language code (e.g. 'en-GB')                          |
+| `country`             | string | ISO 3166-1 alpha-2 country code (e.g. 'GB')                  |
+| `sort_by_price`       | bool   | Sort destinations by price (default true)                    |
+| `limit`               | int    | Maximum number of destinations to return                     |
+
+Each priced destination includes the airline, stops, duration, destination
+airport, and a `flights_url` deep link; pass the `destination_airport` to
+`search_flights` for bookable itineraries.
 
 ## Quick Start
 
