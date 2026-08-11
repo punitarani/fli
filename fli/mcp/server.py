@@ -1045,13 +1045,18 @@ def _execute_explore_search(params: ExploreSearchParams) -> dict[str, Any]:
         )
 
         if result is None:
+            # A valid explore request always returns destinations, so an
+            # unparseable response means the request failed (e.g. Google's
+            # HTTP-200 error envelope) — report it as such rather than as an
+            # empty result set.
             return {
-                "success": True,
+                "success": False,
+                "error": (
+                    "Explore search returned no parseable response from Google. "
+                    "This usually indicates a rejected request rather than zero "
+                    "matching destinations; check the filters and try again."
+                ),
                 "destinations": [],
-                "count": 0,
-                "priced_count": 0,
-                "origin": params.origin,
-                "destination": params.destination,
             }
 
         destinations = list(result.destinations)

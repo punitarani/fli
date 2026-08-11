@@ -157,12 +157,13 @@ class TestExecuteExploreSearch:
         filters = mock_search.return_value.search.call_args.args[0]
         assert filters.trip_length_window == [4, 23, 7, 14]
 
-    def test_none_result_is_empty_success(self, mock_search):
+    def test_none_result_is_reported_as_error(self, mock_search):
+        """An unparseable response is a failed request, not an empty result set."""
         mock_search.return_value.search.return_value = None
         params = ExploreSearchParams(origin="JFK", departure_date=DEPARTURE_DATE)
         result = _search_explore_from_params(params)
-        assert result["success"] is True
-        assert result["count"] == 0
+        assert result["success"] is False
+        assert "no parseable response" in result["error"]
         assert result["destinations"] == []
 
     def test_search_exception_reported(self, mock_search):
