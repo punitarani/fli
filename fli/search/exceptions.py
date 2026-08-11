@@ -37,9 +37,23 @@ class SearchBackendError(SearchClientError):
     ``wrb.fr`` row of the shape ``["wrb.fr", null, null, null, null,
     [code]]``. Without this error the response is indistinguishable from
     "this route genuinely has no flights".
+
+    Richer rejections carry a status message and/or a ``google.rpc``-style
+    detail block after the code, which is preserved verbatim (truncated) in
+    ``error_detail`` — the code alone is often too coarse to debug with. An
+    ``INTERNAL`` (13), for instance, can mean either "Google declined to
+    serve this" or "a required request header was missing", and only the
+    detail block tells the two apart.
     """
 
-    def __init__(self, message: str, *, error_code: int | None = None):
-        """Store the backend status code alongside the message."""
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: int | None = None,
+        error_detail: str | None = None,
+    ):
+        """Store the backend status code and detail alongside the message."""
         super().__init__(message)
         self.error_code = error_code
+        self.error_detail = error_detail

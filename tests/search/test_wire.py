@@ -170,6 +170,21 @@ def _error_envelope(code: int) -> str:
     return ")]}'\n\n" + json.dumps(outer, separators=(",", ":"))
 
 
+def _error_status_row(status: object) -> list[object]:
+    """Build a payload-less ``wrb.fr`` row carrying an arbitrary status field."""
+    return ["wrb.fr", None, None, None, None, status]
+
+
+def _rows_body(*rows: object) -> str:
+    """Wrap already-built outer rows into a single-chunk response body."""
+    return ")]}'\n\n" + json.dumps(list(rows), separators=(",", ":"))
+
+
+def _payload_row(payload: object) -> list[object]:
+    """Build a normal ``wrb.fr`` row carrying an inner JSON payload."""
+    return ["wrb.fr", None, json.dumps(payload, separators=(",", ":"))]
+
+
 class TestNonAsciiFraming:
     """Chunks must survive non-ASCII payloads (issue: 'No flights found')."""
 
@@ -229,3 +244,94 @@ class TestErrorEnvelope:
         # Short rows carry no status code — they stay a silent skip.
         body = ")]}'\n\n" + json.dumps([["wrb.fr", None, None]])
         assert list(iter_wrb_chunks(body)) == []
+
+    def test_ok_status_zero_is_not_an_error(self):
+        # 0 is gRPC's OK; it must not surface as "error 0".
+        assert list(iter_wrb_chunks(_rows_body(_error_status_row([0])))) == []
+
+    def test_boolean_status_is_not_an_error(self):
+        # bool subclasses int — True must not be read as error 1 (CANCELLED).
+        assert list(iter_wrb_chunks(_rows_body(_error_status_row([True])))) == []
+
+    def test_negative_status_is_not_an_error(self):
+        assert list(iter_wrb_chunks(_rows_body(_error_status_row([-1])))) == []
+
+
+class TestErrorEnvelopeDetail:
+    """The status may carry a message and detail block worth surfacing."""
+
+    def test_detail_block_reaches_the_exception(self):
+        # Shape captured live from GetExploreDestinations: the request id and
+        # type URL are the debugging hint, not the bare code.
+        status = [
+            13,
+            None,
+            [
+                [
+                    "type.googleapis.com/travel.frontend.flights.ErrorResponse",
+                    [[None, None, 0, "req-abc123"], 0],
+                ]
+            ],
+        ]
+        with pytest.raises(SearchBackendError) as excinfo:
+            list(iter_wrb_chunks(_rows_body(_error_status_row(status))))
+        assert excinfo.value.error_code == 13
+        assert "req-abc123" in excinfo.value.error_detail
+        assert "ErrorResponse" in excinfo.value.error_detail
+        assert "req-abc123" in str(excinfo.value)
+
+    def test_status_message_is_surfaced(self):
+        status = [7, "missing x-same-domain header"]
+        with pytest.raises(SearchBackendError) as excinfo:
+            list(iter_wrb_chunks(_rows_body(_error_status_row(status))))
+        assert excinfo.value.error_detail == "missing x-same-domain header"
+        assert "missing x-same-domain header" in str(excinfo.value)
+
+    def test_bare_code_has_no_detail(self):
+        with pytest.raises(SearchBackendError) as excinfo:
+            list(iter_wrb_chunks(_error_envelope(13)))
+        assert excinfo.value.error_detail is None
+
+    def test_oversized_detail_is_truncated(self):
+        status = [13, None, [["type.googleapis.com/x", ["y" * 5000]]]]
+        with pytest.raises(SearchBackendError) as excinfo:
+            list(iter_wrb_chunks(_rows_body(_error_status_row(status))))
+        assert len(excinfo.value.error_detail) == 200
+        assert excinfo.value.error_detail.endswith("…")
+
+
+class TestErrorEnvelopeWithPartialResults:
+    """An error row must not destroy chunks Google already sent."""
+
+    def test_error_after_a_valid_chunk_keeps_the_chunk(self):
+        body = _rows_body(_payload_row([1, "alpha"]), _error_status_row([13]))
+        assert list(iter_wrb_chunks(body)) == [[1, "alpha"]]
+
+    def test_error_before_a_valid_chunk_keeps_the_chunk(self):
+        # Position must not decide the outcome: same body, rows swapped.
+        body = _rows_body(_error_status_row([13]), _payload_row([1, "alpha"]))
+        assert list(iter_wrb_chunks(body)) == [[1, "alpha"]]
+
+    def test_error_in_a_later_chunk_of_a_multi_chunk_body(self):
+        good = json.dumps([_payload_row([1, "alpha"])], separators=(",", ":"))
+        bad = json.dumps([_error_status_row([13])], separators=(",", ":"))
+        body = f")]}}'\n\n{len(good) + 2}\n{good}\n{len(bad) + 2}\n{bad}\n"
+        assert list(iter_wrb_chunks(body)) == [[1, "alpha"]]
+
+    def test_first_payload_is_returned_despite_a_trailing_error(self):
+        body = _rows_body(_payload_row([1, "alpha"]), _error_status_row([13]))
+        assert parse_first_wrb_payload(body) == [1, "alpha"]
+
+    def test_error_only_body_still_raises_for_both_consumers(self):
+        body = _rows_body(_error_status_row([13]))
+        with pytest.raises(SearchBackendError):
+            list(iter_wrb_chunks(body))
+        with pytest.raises(SearchBackendError):
+            parse_first_wrb_payload(body)
+
+    def test_undecodable_inner_json_does_not_count_as_a_chunk(self):
+        # The only payload row is unusable, so the error must still surface.
+        body = _rows_body(["wrb.fr", None, "{not valid"], _error_status_row([13]))
+        with pytest.raises(SearchBackendError) as excinfo:
+            list(iter_wrb_chunks(body))
+        assert excinfo.value.error_code == 13
