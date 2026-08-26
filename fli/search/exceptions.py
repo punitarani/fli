@@ -28,3 +28,25 @@ class SearchHTTPError(SearchClientError):
         """Store the HTTP status alongside the message for richer logging."""
         super().__init__(message)
         self.status_code = status_code
+
+
+class SearchRejectedError(SearchClientError):
+    """Google answered HTTP 200 but declined to serve results.
+
+    The response carries a ``wrb.fr`` row with no payload and an error
+    code (13 = INTERNAL). Since 2026-08 ``GetShoppingResults`` requires an
+    ``x-goog-batchexecute-bgr`` header signed by the page's own JavaScript
+    over the exact request bytes, so a plain HTTP client always lands here.
+    Without this error the caller saw an empty list and reported "no
+    flights found", which is indistinguishable from a route with no service.
+    """
+
+    def __init__(self, code: int | None = None):
+        """Record the numeric error code alongside the user-facing message."""
+        self.code = code
+        suffix = f" (error {code})" if code is not None else ""
+        super().__init__(
+            f"Google Flights declined the request{suffix} and returned no data. "
+            "Its API now requires a browser-signed x-goog-batchexecute-bgr header, "
+            "which this client cannot produce. See github.com/punitarani/fli#223."
+        )

@@ -18,16 +18,23 @@ from fli.models import (
     FlightResult,
     FlightSearchFilters,
 )
-from fli.models.google_flights.base import TripType
+from fli.models.google_flights.base import SortBy, TripType
 from fli.search._concurrency import parallel_map
 from fli.search._decoders import (
     _try_parse_booking_row,  # noqa: F401 — back-compat re-export for tests
     parse_booking_chunk,
     parse_flight_row,
 )
+from fli.search._tfs import (
+    apply_client_side_filters,
+    build_tfs,
+    extract_payload,
+    page_url,
+    unsupported_filters,
+)
 from fli.search._urls import with_locale_params
 from fli.search._urls import with_locale_params as _with_locale_params  # noqa: F401
-from fli.search._wire import iter_wrb_chunks, parse_first_wrb_payload
+from fli.search._wire import iter_wrb_chunks
 from fli.search.client import get_client
 
 logger = logging.getLogger(__name__)
@@ -40,6 +47,25 @@ class SearchParseError(Exception):
     use this to tell "Google responded but the shape changed" apart from
     "Google didn't respond at all".
     """
+
+
+def _sort_key(sort_by: SortBy):
+    """Return the result-ordering key for ``sort_by``.
+
+    The search page serves Google's own default order, so the sort the
+    caller asked for is applied here instead of in the request.
+    ``TOP_FLIGHTS`` / ``BEST`` are Google's own blended rankings, which we
+    can't reproduce — those keep the page's order.
+    """
+    if sort_by == SortBy.CHEAPEST:
+        return lambda f: (f.price is None, f.price)
+    if sort_by == SortBy.DURATION:
+        return lambda f: (f.duration is None, f.duration)
+    if sort_by == SortBy.DEPARTURE_TIME:
+        return lambda f: f.legs[0].departure_datetime
+    if sort_by == SortBy.ARRIVAL_TIME:
+        return lambda f: f.legs[-1].arrival_datetime
+    return lambda f: 0
 
 
 class SearchFlights:
@@ -160,20 +186,23 @@ class SearchFlights:
         because the user-visible session id should describe the original
         shopping query, not whichever expansion completed last.
         """
-        encoded = filters.encode()
-        url = with_locale_params(self.BASE_URL, currency, language, country)
+        dropped = unsupported_filters(filters)
+        if dropped:
+            logger.warning(
+                "Filters not supported by the search-page transport, ignored: %s",
+                ", ".join(dropped),
+            )
 
-        response = self.client.post(
-            url=url,
-            data=f"f.req={encoded}",
-            impersonate="chrome",
-            allow_redirects=True,
-        )
+        url = page_url(build_tfs(filters), currency, language, country)
+        response = self.client.get(url, impersonate="chrome", allow_redirects=True)
         response.raise_for_status()
 
-        inner = parse_first_wrb_payload(response.text)
+        inner = extract_payload(response.text)
         if inner is None:
-            return None
+            raise SearchParseError(
+                "Search page carried no ds:1 payload — Google may have changed "
+                "the page shape, or served a consent/blocked page instead."
+            )
 
         if capture_session:
             self._capture_session_id(inner)
@@ -216,6 +245,8 @@ class SearchFlights:
                 f"Google response shape may have changed (sample reasons: {sample})"
             )
 
+        flights = apply_client_side_filters(flights, filters)
+        flights.sort(key=_sort_key(filters.sort_by))
         return flights or None
 
     def get_booking_options(

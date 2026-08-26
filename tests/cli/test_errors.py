@@ -81,10 +81,13 @@ def test_multi_command_handles_timeout_cleanly(runner, monkeypatch, tmp_path):
     """A curl timeout inside `multi` should produce a clean message + log file."""
     from curl_cffi.requests import exceptions as curl_exc
 
-    def fake_post(self, url, **kwargs):
+    def fake_request(self, url, **kwargs):
         raise curl_exc.Timeout("curl: (28) timed out", 28, None)
 
-    monkeypatch.setattr("curl_cffi.requests.Session.post", fake_post)
+    # Search reads the public page over GET; booking calls still POST. Stub
+    # both so the test covers the failure wherever the request is made.
+    monkeypatch.setattr("curl_cffi.requests.Session.get", fake_request)
+    monkeypatch.setattr("curl_cffi.requests.Session.post", fake_request)
 
     result = runner.invoke(
         app,
@@ -198,10 +201,11 @@ def test_flights_command_json_error_includes_log_path(runner, monkeypatch, tmp_p
 
     from curl_cffi.requests import exceptions as curl_exc
 
-    def fake_post(self, url, **kwargs):
+    def fake_request(self, url, **kwargs):
         raise curl_exc.ConnectionError("dns lookup failed", 6, None)
 
-    monkeypatch.setattr("curl_cffi.requests.Session.post", fake_post)
+    monkeypatch.setattr("curl_cffi.requests.Session.get", fake_request)
+    monkeypatch.setattr("curl_cffi.requests.Session.post", fake_request)
 
     result = runner.invoke(
         app,

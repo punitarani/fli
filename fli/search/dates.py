@@ -15,8 +15,8 @@ from fli.core import extract_currency_from_price_token
 from fli.models import DateSearchFilters
 from fli.models.google_flights.base import TripType
 from fli.search._concurrency import parallel_map
-from fli.search._urls import with_locale_params
-from fli.search._wire import parse_first_wrb_payload
+from fli.search._decoders import parse_flight_row
+from fli.search._tfs import build_tfs, extract_payload, page_url, unsupported_filters
 from fli.search.client import get_client
 
 logger = logging.getLogger(__name__)
@@ -156,7 +156,15 @@ class SearchDates:
         language: str | None = None,
         country: str | None = None,
     ) -> list[DatePrice] | None:
-        """Search for flight prices for a single date range chunk.
+        """Price every date in one chunk's range and return the cheapest per date.
+
+        Google's ``GetCalendarGraph`` RPC used to hand back a whole date
+        grid in one call, but it now requires a browser-signed
+        ``x-goog-batchexecute-bgr`` header (see :mod:`fli.search._tfs`).
+        The public search page has no such grid, so each date is priced by
+        its own page fetch instead. The requests run concurrently under the
+        shared rate limiter, so a 61-day chunk costs one round trip's
+        latency plus the 10 req/sec drain, not 61 serial fetches.
 
         Args:
             filters: Search parameters including date range, airports, and preferences
@@ -167,44 +175,78 @@ class SearchDates:
         Returns:
             List of DatePrice objects containing date and price pairs, or None if no results
 
-        Raises:
-            Exception: If the search fails or returns invalid data
-
         """
-        encoded_filters = filters.encode()
-        url = with_locale_params(self.BASE_URL, currency, language, country)
-
-        response = self.client.post(
-            url=url,
-            data=f"f.req={encoded_filters}",
-            impersonate="chrome",
-            allow_redirects=True,
-        )
-        response.raise_for_status()
-
-        data = parse_first_wrb_payload(response.text)
-        if data is None:
-            return None
-
-        try:
-            items = data[-1]
-        except (IndexError, TypeError):
-            logger.warning("Date search response shape unexpected: no terminal array")
-            return None
-
-        if not isinstance(items, list):
-            return None
-
-        dates_data = [
-            DatePrice(
-                date=self.__parse_date(item, filters.trip_type),
-                price=self.__parse_price(item),
-                currency=self.__parse_currency(item),
+        dropped = unsupported_filters(filters)
+        if dropped:
+            logger.warning(
+                "Filters not supported by the search-page transport, ignored: %s",
+                ", ".join(dropped),
             )
-            for item in items
-            if self.__parse_price(item)
+
+        from_date = datetime.strptime(filters.from_date, "%Y-%m-%d")
+        to_date = datetime.strptime(filters.to_date, "%Y-%m-%d")
+        days = [
+            from_date + timedelta(days=offset) for offset in range((to_date - from_date).days + 1)
         ]
-        return dates_data
+
+        priced = parallel_map(
+            lambda day: self._price_one_date(
+                filters, day, currency=currency, language=language, country=country
+            ),
+            days,
+        )
+        results = [p for p in priced if p is not None]
+        return results or None
+
+    def _price_one_date(
+        self,
+        filters: DateSearchFilters,
+        day: datetime,
+        *,
+        currency: str | None,
+        language: str | None,
+        country: str | None,
+    ) -> DatePrice | None:
+        """Return the cheapest itinerary price for one departure date."""
+        dates = [day]
+        if filters.trip_type == TripType.ROUND_TRIP:
+            dates.append(day + timedelta(days=filters.duration))
+        travel_dates = [d.strftime("%Y-%m-%d") for d in dates]
+
+        # A date sweep can straddle today, and past dates are simply not
+        # bookable — skip them rather than letting the segment validator
+        # abort the whole chunk.
+        if day.date() < datetime.now().date():
+            return None
+
+        url = page_url(build_tfs(filters, travel_dates=travel_dates), currency, language, country)
+        try:
+            response = self.client.get(url, impersonate="chrome", allow_redirects=True)
+            response.raise_for_status()
+            payload = extract_payload(response.text)
+        except Exception:  # noqa: BLE001 — one bad date must not sink the sweep
+            logger.warning("Pricing %s failed", travel_dates[0], exc_info=True)
+            return None
+        if payload is None:
+            return None
+
+        prices = []
+        for index in (2, 3):
+            if index < len(payload) and isinstance(payload[index], list):
+                for row in payload[index][0]:
+                    try:
+                        prices.append(parse_flight_row(row).price)
+                    except (AttributeError, KeyError, ValueError, TypeError):
+                        continue
+        prices = [p for p in prices if p]
+        if not prices:
+            return None
+
+        return DatePrice(
+            date=tuple(dates),
+            price=min(prices),
+            currency=currency,
+        )
 
     @staticmethod
     def __parse_date(

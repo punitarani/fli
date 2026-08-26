@@ -273,7 +273,7 @@ class TestSearchParseErrorMessage:
 
         sf = SearchFlights()
 
-        def _fake_post(url, data, **kwargs):  # noqa: ANN001
+        def _fake_get(url, **kwargs):  # noqa: ANN001
             return type(
                 "R",
                 (),
@@ -284,26 +284,29 @@ class TestSearchParseErrorMessage:
                 },
             )()
 
-        patcher = patch.object(sf.client, "post", side_effect=_fake_post)
+        patcher = patch.object(sf.client, "get", side_effect=_fake_get)
         patcher.start()
         return sf
 
     def _build_response(self, rows: list) -> str:
-        """Wrap ``rows`` in a minimal but parser-valid wrb.fr response."""
+        """Wrap ``rows`` in a minimal but parser-valid search page."""
         import json
 
-        # ``_capture_session_id`` reads ``inner[0][4]`` — give it a
+        # ``_capture_session_id`` reads ``payload[0][4]`` — give it a
         # plausible 5-element list. ``_fetch_flights`` reads
-        # ``inner[2]`` and ``inner[3]`` — index 3 must exist (any list
+        # ``payload[2]`` and ``payload[3]`` — index 3 must exist (any list
         # value is fine; we put the rows on index 2).
-        inner = [
+        payload = [
             [None, None, None, None, "FAKE_SESSION"],
             None,
             [[*rows]],
             None,
         ]
-        outer = [["wrb.fr", None, json.dumps(inner, separators=(",", ":"))]]
-        return ")]}'\n\n" + json.dumps(outer)
+        return (
+            "<script>AF_initDataCallback({key: 'ds:1', hash: '1', data:"
+            + json.dumps(payload, separators=(",", ":"))
+            + ", sideChannel: {}});</script>"
+        )
 
     def test_error_includes_sample_failure_reasons(self):
         """When all rows fail, the error message names what went wrong."""
