@@ -42,6 +42,11 @@ TFS_ROUND_TRIP = (
     "BwgBEgNKRktAAUgBcAGYAQE"
 )
 
+TFS_MULTI_AIRPORT = (
+    "CBwQAho5EgoyMDI2LTEwLTE1agcIARIDQk9NagcIARIDREVMagcIARIDQU1EcgcIARIDT1JEcgcIARIDRFRX"
+    "QAFIAXABmAEC"
+)
+
 OUTBOUND_DATE = "2026-09-15"
 RETURN_DATE = "2026-09-19"
 
@@ -76,7 +81,12 @@ def _decode(tfs: str) -> bytes:
     return base64.urlsafe_b64decode(tfs + "=" * (-len(tfs) % 4))
 
 
-def _flight(airline: Airline = Airline.AA, price: float = 300, duration: int = 180, hour: int = 9):
+def _flight(
+    airline: Airline = Airline.AA,
+    price: float = 300,
+    duration: int = 180,
+    hour: int = 9,
+) -> FlightResult:
     return FlightResult(
         legs=[
             FlightLeg(
@@ -125,10 +135,51 @@ class TestBuildTfs:
             (MaxStops.TWO_OR_FEWER_STOPS, 2),
         ],
     )
-    def test_stop_ceiling_is_zero_based(self, stops, expected_ceiling):
+    def test_stop_ceiling_is_zero_based(self, stops: MaxStops, expected_ceiling: int) -> None:
         raw = _decode(build_tfs(_filters([("JFK", "LAX", OUTBOUND_DATE)], stops=stops)))
         # Field 5, varint: tag 0x28 followed by the ceiling.
         assert bytes([0x28, expected_ceiling]) in raw
+
+    def test_every_airport_reaches_the_request(self):
+        """All origins and destinations must survive encoding.
+
+        Serializing only entry zero still produces a valid, successful search
+        for the first pair, so a truncated request looks like a working one and
+        the missing city pairs never surface as an error.
+        """
+        spec = FlightSearchFilters(
+            trip_type=TripType.ONE_WAY,
+            passenger_info=PassengerInfo(adults=1),
+            flight_segments=[
+                FlightSegment(
+                    departure_airport=[[Airport.BOM, 0], [Airport.DEL, 0], [Airport.AMD, 0]],
+                    arrival_airport=[[Airport.ORD, 0], [Airport.DTW, 0]],
+                    travel_date=OUTBOUND_DATE,
+                )
+            ],
+            stops=MaxStops.ANY,
+            seat_type=SeatType.ECONOMY,
+        )
+        raw = _decode(build_tfs(spec))
+        for code in (b"BOM", b"DEL", b"AMD", b"ORD", b"DTW"):
+            assert code in raw, f"{code.decode()} was dropped from the request"
+
+    def test_multi_airport_matches_google(self):
+        """Byte-for-byte against a tfs Google issued for the same query."""
+        spec = FlightSearchFilters(
+            trip_type=TripType.ONE_WAY,
+            passenger_info=PassengerInfo(adults=1),
+            flight_segments=[
+                FlightSegment(
+                    departure_airport=[[Airport.BOM, 0], [Airport.DEL, 0], [Airport.AMD, 0]],
+                    arrival_airport=[[Airport.ORD, 0], [Airport.DTW, 0]],
+                    travel_date="2026-10-15",
+                )
+            ],
+            stops=MaxStops.ANY,
+            seat_type=SeatType.ECONOMY,
+        )
+        assert build_tfs(spec) == TFS_MULTI_AIRPORT
 
     def test_travel_dates_override_segment_dates(self):
         spec = _filters([("JFK", "LAX", OUTBOUND_DATE)])
@@ -234,6 +285,65 @@ class TestClientSideFilters:
         )
         kept = apply_client_side_filters(flights, spec)
         assert [f.legs[0].departure_datetime.hour for f in kept] == [20]
+
+    def test_window_follows_the_segment_being_chosen(self):
+        """Return-leg candidates honour the return window, not the outbound one.
+
+        During round-trip expansion the outbound is already pinned and the
+        rows coming back are return options. Filtering them against segment
+        zero's window drops valid returns and keeps invalid ones without ever
+        raising.
+        """
+        spec = FlightSearchFilters(
+            trip_type=TripType.ROUND_TRIP,
+            passenger_info=PassengerInfo(adults=1),
+            flight_segments=[
+                FlightSegment(
+                    departure_airport=[[Airport.JFK, 0]],
+                    arrival_airport=[[Airport.LAX, 0]],
+                    travel_date=OUTBOUND_DATE,
+                    time_restrictions=TimeRestrictions(earliest_departure=5, latest_departure=9),
+                    selected_flight=_flight(hour=6),
+                ),
+                FlightSegment(
+                    departure_airport=[[Airport.LAX, 0]],
+                    arrival_airport=[[Airport.JFK, 0]],
+                    travel_date=RETURN_DATE,
+                    time_restrictions=TimeRestrictions(earliest_departure=18, latest_departure=23),
+                ),
+            ],
+            stops=MaxStops.ANY,
+            seat_type=SeatType.ECONOMY,
+        )
+        returns = [_flight(hour=6), _flight(hour=20)]
+        kept = apply_client_side_filters(returns, spec)
+        hours = [f.legs[0].departure_datetime.hour for f in kept]
+        assert hours == [20], f"expected the 20:00 return to survive, got {hours}"
+
+    def test_window_applies_to_outbound_before_anything_is_pinned(self):
+        """With nothing selected yet, segment zero's window is the right one."""
+        spec = FlightSearchFilters(
+            trip_type=TripType.ROUND_TRIP,
+            passenger_info=PassengerInfo(adults=1),
+            flight_segments=[
+                FlightSegment(
+                    departure_airport=[[Airport.JFK, 0]],
+                    arrival_airport=[[Airport.LAX, 0]],
+                    travel_date=OUTBOUND_DATE,
+                    time_restrictions=TimeRestrictions(earliest_departure=5, latest_departure=9),
+                ),
+                FlightSegment(
+                    departure_airport=[[Airport.LAX, 0]],
+                    arrival_airport=[[Airport.JFK, 0]],
+                    travel_date=RETURN_DATE,
+                    time_restrictions=TimeRestrictions(earliest_departure=18, latest_departure=23),
+                ),
+            ],
+            stops=MaxStops.ANY,
+            seat_type=SeatType.ECONOMY,
+        )
+        kept = apply_client_side_filters([_flight(hour=6), _flight(hour=20)], spec)
+        assert [f.legs[0].departure_datetime.hour for f in kept] == [6]
 
     def test_no_filters_keeps_everything(self):
         flights = [_flight(Airline.AA), _flight(Airline.DL)]

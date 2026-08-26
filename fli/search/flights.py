@@ -11,7 +11,9 @@ from __future__ import annotations
 import json
 import logging
 import urllib.parse
+from collections.abc import Callable
 from copy import deepcopy
+from typing import Any
 
 from fli.models import (
     BookingOption,
@@ -49,7 +51,7 @@ class SearchParseError(Exception):
     """
 
 
-def _sort_key(sort_by: SortBy):
+def _sort_key(sort_by: SortBy) -> Callable[[FlightResult], Any]:
     """Return the result-ordering key for ``sort_by``.
 
     The search page serves Google's own default order, so the sort the

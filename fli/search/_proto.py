@@ -298,8 +298,10 @@ def encode_tfs_segment(
             + _length_delim(5, leg.airline.encode())
             + _length_delim(6, leg.flight_number.encode()),
         )
-    body += _length_delim(13, _varint_field(1, 1) + _length_delim(2, origin.encode()))
-    body += _length_delim(14, _varint_field(1, 1) + _length_delim(2, dest.encode()))
+    for code in [origin] if isinstance(origin, str) else origin:
+        body += _length_delim(13, _varint_field(1, 1) + _length_delim(2, code.encode()))
+    for code in [dest] if isinstance(dest, str) else dest:
+        body += _length_delim(14, _varint_field(1, 1) + _length_delim(2, code.encode()))
     return _length_delim(3, body)
 
 

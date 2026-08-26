@@ -106,8 +106,8 @@ def build_tfs(filters: Any, *, travel_dates: list[str] | None = None) -> str:
     for index, segment in enumerate(filters.flight_segments):
         selected = segment.selected_flight
         segments += encode_tfs_segment(
-            _iata(segment.departure_airport[0][0]),
-            _iata(segment.arrival_airport[0][0]),
+            [_iata(entry[0]) for entry in segment.departure_airport],
+            [_iata(entry[0]) for entry in segment.arrival_airport],
             travel_dates[index] if travel_dates else segment.travel_date,
             legs=_legs_of(selected) if selected is not None else (),
             # MaxStops.ANY (0) must leave the field out — writing 0 for it
@@ -185,11 +185,22 @@ def apply_client_side_filters(flights: list[Any], filters: Any) -> list[Any]:
     price_limit = getattr(filters, "price_limit", None)
     max_price = getattr(price_limit, "max_price", None)
 
-    windows = {}
-    for index, segment in enumerate(filters.flight_segments):
-        restrictions = getattr(segment, "time_restrictions", None)
-        if restrictions is not None:
-            windows[index] = restrictions
+    # These rows describe whichever segment the caller is still choosing, not
+    # necessarily the outbound one. `_expand_multi_leg` pins a segment by
+    # setting its `selected_flight` and re-fetches, so the flights coming back
+    # belong to the first segment that is still unpinned. Filtering a return
+    # leg against the outbound window drops valid evening returns and keeps
+    # invalid ones, silently and in the caller's favour-looking direction.
+    active = next(
+        (
+            index
+            for index, segment in enumerate(filters.flight_segments)
+            if getattr(segment, "selected_flight", None) is None
+        ),
+        max(0, len(filters.flight_segments) - 1),
+    )
+    segments = filters.flight_segments
+    window = getattr(segments[active], "time_restrictions", None) if segments else None
 
     out = []
     for flight in flights:
@@ -202,7 +213,7 @@ def apply_client_side_filters(flights: list[Any], filters: Any) -> list[Any]:
             continue
         if max_price is not None and flight.price and flight.price > max_price:
             continue
-        if not _within_window(flight, windows.get(0)):
+        if not _within_window(flight, window):
             continue
         out.append(flight)
     return out
