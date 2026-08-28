@@ -14,10 +14,11 @@ return — so :mod:`fli.search._decoders` keeps working untouched. The page is
 addressed by a ``tfs`` protobuf parameter instead of the ``f.req`` JSON
 struct, which is what this module builds.
 
-Scope note: ``tfs`` carries trip type, segments, stop limit, cabin and
-passengers. Filters with no known ``tfs`` field (airline include/exclude,
-price cap, duration, departure window) are applied to the decoded results
-instead — see :func:`apply_client_side_filters`. Anything that can be
+Scope note: ``tfs`` carries trip type, segments, stop limit, cabin,
+passengers, alliances and layover restrictions. Filters with no known
+``tfs`` field (airline include/exclude, price cap, duration, departure
+window) are applied to the decoded results instead — see
+:func:`apply_client_side_filters`. Anything that can be
 neither encoded nor filtered after the fact is reported by
 :func:`unsupported_filters` so the caller can warn rather than silently
 return results that ignore it.
@@ -51,11 +52,8 @@ _PASSENGER_FIELDS = ("adults", "children", "infants_in_seat", "infants_on_lap")
 # Filters with no ``tfs`` encoding and no reliable post-hoc equivalent —
 # the decoded rows don't carry the data needed to apply them locally.
 _UNSUPPORTED = (
-    "alliances",
-    "alliances_exclude",
     "emissions",
     "bags",
-    "layover_restrictions",
     "exclude_basic_economy",
 )
 
@@ -102,6 +100,11 @@ def build_tfs(filters: Any, *, travel_dates: list[str] | None = None) -> str:
         for _ in range(getattr(filters.passenger_info, kind, 0))
     ]
 
+    # Google reads alliances out of the same carrier lists as airline codes.
+    carriers = [a.value for a in (getattr(filters, "alliances", None) or [])]
+    carriers_exclude = [a.value for a in (getattr(filters, "alliances_exclude", None) or [])]
+    layovers = getattr(filters, "layover_restrictions", None)
+
     segments = b""
     for index, segment in enumerate(filters.flight_segments):
         selected = segment.selected_flight
@@ -113,6 +116,11 @@ def build_tfs(filters: Any, *, travel_dates: list[str] | None = None) -> str:
             # MaxStops.ANY (0) must leave the field out — writing 0 for it
             # would silently pin every search to non-stop.
             max_stops=stops - 1 if stops else None,
+            carriers=carriers,
+            carriers_exclude=carriers_exclude,
+            layover_airports=[_iata(a) for a in (getattr(layovers, "airports", None) or [])],
+            min_layover=getattr(layovers, "min_duration", None),
+            max_layover=getattr(layovers, "max_duration", None),
         )
 
     return encode_tfs_payload(

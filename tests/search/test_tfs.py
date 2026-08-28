@@ -14,10 +14,12 @@ import pytest
 from fli.models import (
     Airline,
     Airport,
+    Alliance,
     FlightLeg,
     FlightResult,
     FlightSearchFilters,
     FlightSegment,
+    LayoverRestrictions,
     MaxStops,
     PassengerInfo,
     PriceLimit,
@@ -359,3 +361,46 @@ class TestUnsupportedFilters:
         spec = _filters([("JFK", "LAX", OUTBOUND_DATE)])
         spec.exclude_basic_economy = True
         assert "exclude_basic_economy" in unsupported_filters(spec)
+
+
+class TestAllianceAndLayoverEncoding:
+    """Alliances and layover bounds ride in the request, not a post-filter.
+
+    Google reads both out of the segment, so a search that sets them comes
+    back already filtered — and back-filled, which a client-side filter
+    can't do.
+    """
+
+    def test_alliances_ride_in_the_carrier_include_list(self):
+        spec = _filters([("JFK", "LAX", OUTBOUND_DATE)])
+        spec.alliances = [Alliance.STAR_ALLIANCE]
+        raw = _decode(build_tfs(spec))
+        # Field 6, length-delimited: tag 0x32, length 13, then the name.
+        assert b"\x32\x0dSTAR_ALLIANCE" in raw
+
+    def test_alliances_exclude_uses_the_exclude_list(self):
+        spec = _filters([("JFK", "LAX", OUTBOUND_DATE)])
+        spec.alliances_exclude = [Alliance.ONEWORLD]
+        raw = _decode(build_tfs(spec))
+        # Field 7, length-delimited: tag 0x3a, length 8, then the name.
+        assert b"\x3a\x08ONEWORLD" in raw
+
+    def test_layover_restrictions_are_encoded(self):
+        spec = _filters([("JFK", "LAX", OUTBOUND_DATE)])
+        spec.layover_restrictions = LayoverRestrictions(
+            airports=[Airport.ORD], min_duration=120, max_duration=300
+        )
+        raw = _decode(build_tfs(spec))
+        assert b"\x7a\x03ORD" in raw, "layover airport should sit in field 15"
+        assert b"\x88\x01\x78" in raw, "min layover should sit in field 17"
+        assert b"\x90\x01\xac\x02" in raw, "max layover should sit in field 18"
+
+    def test_unset_filters_leave_the_bytes_alone(self):
+        """A plain search must still match the tfs Google issues for it."""
+        assert build_tfs(_filters([("JFK", "LAX", OUTBOUND_DATE)])) == TFS_ONE_WAY
+
+    def test_alliances_and_layovers_are_no_longer_unsupported(self):
+        spec = _filters([("JFK", "LAX", OUTBOUND_DATE)])
+        spec.alliances = [Alliance.SKYTEAM]
+        spec.layover_restrictions = LayoverRestrictions(min_duration=90)
+        assert unsupported_filters(spec) == []

@@ -253,7 +253,11 @@ def _to_urlsafe_b64(data: bytes) -> str:
 #   3.2  = departure date       16 = max-uint64 pin (deep links only)
 #   3.4  = selected leg, rep.   19 = 2 one-way / multi-city, 1 round-trip
 #   3.5  = stop ceiling
+#   3.6  = carrier include, repeated (IATA code or alliance name)
+#   3.7  = carrier exclude, repeated (same values as 3.6)
 #   3.13 = origin  3.14 = destination
+#   3.15 = layover airport include, repeated
+#   3.17 = min layover minutes  3.18 = max layover minutes
 #
 # Reverse-engineered from live browser captures; see
 # ``.reverse-eng/notes/booking_results.md``.
@@ -267,6 +271,11 @@ def encode_tfs_segment(
     date: str,
     legs: Sequence[LegSpec] = (),
     max_stops: int | None = None,
+    carriers: Sequence[str] = (),
+    carriers_exclude: Sequence[str] = (),
+    layover_airports: Sequence[str] = (),
+    min_layover: int | None = None,
+    max_layover: int | None = None,
 ) -> bytes:
     """Encode one travel direction of a ``tfs`` itinerary.
 
@@ -281,6 +290,13 @@ def encode_tfs_segment(
         max_stops: Stop ceiling, zero-based (``0`` = non-stop, ``1`` = one
             stop or fewer). ``None`` leaves the search unconstrained;
             passing ``0`` for "any" would pin it to non-stop instead.
+        carriers: Only itineraries on these carriers. Google takes airline
+            IATA codes and alliance names (``"STAR_ALLIANCE"``) in the same
+            list.
+        carriers_exclude: The same values, as an exclude list.
+        layover_airports: Only these airports may be used as layover stops.
+        min_layover: Minimum layover wait, in minutes.
+        max_layover: Maximum layover wait, in minutes.
 
     Returns:
         The length-delimited field 3 bytes for this segment.
@@ -289,6 +305,10 @@ def encode_tfs_segment(
     body = _length_delim(2, date.encode())
     if max_stops is not None:
         body += _varint_field(5, max_stops)
+    for code in carriers:
+        body += _length_delim(6, code.encode())
+    for code in carriers_exclude:
+        body += _length_delim(7, code.encode())
     for leg in legs:
         body += _length_delim(
             4,
@@ -302,6 +322,12 @@ def encode_tfs_segment(
         body += _length_delim(13, _varint_field(1, 1) + _length_delim(2, code.encode()))
     for code in [dest] if isinstance(dest, str) else dest:
         body += _length_delim(14, _varint_field(1, 1) + _length_delim(2, code.encode()))
+    for code in layover_airports:
+        body += _length_delim(15, code.encode())
+    if min_layover is not None:
+        body += _varint_field(17, min_layover)
+    if max_layover is not None:
+        body += _varint_field(18, max_layover)
     return _length_delim(3, body)
 
 
