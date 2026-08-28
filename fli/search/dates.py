@@ -210,7 +210,14 @@ class SearchDates:
         """Return the cheapest itinerary price for one departure date."""
         dates = [day]
         if filters.trip_type == TripType.ROUND_TRIP:
-            dates.append(day + timedelta(days=filters.duration))
+            # ``duration`` is optional (its validator doesn't run on the
+            # default), so fall back to the gap between the two segments —
+            # which the filter model already keeps consistent with it.
+            trip_days = filters.duration
+            if trip_days is None:
+                segments = filters.flight_segments
+                trip_days = (segments[1].parsed_travel_date - segments[0].parsed_travel_date).days
+            dates.append(day + timedelta(days=trip_days))
         travel_dates = [d.strftime("%Y-%m-%d") for d in dates]
 
         # A date sweep can straddle today, and past dates are simply not
