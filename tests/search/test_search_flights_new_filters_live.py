@@ -267,6 +267,14 @@ class TestBookingOptionsAutoSession:
     cached session — no `tfu` URL extraction, no browser involvement.
     """
 
+    # ``GetBookingResults`` is still an RPC endpoint, so it still needs the
+    # browser-signed ``x-goog-batchexecute-bgr`` header this client cannot
+    # produce (#223) and answers with error 13. The search-page transport
+    # does not cover it. Non-strict so the test reports a pass the day
+    # booking options come back.
+    @pytest.mark.xfail(
+        reason="GetBookingResults still requires the bgr header (#223)", strict=False
+    )
     def test_round_trip_zero_friction_booking_options(self, client):
         filters = FlightSearchFilters(
             trip_type=TripType.ROUND_TRIP,

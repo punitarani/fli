@@ -9,7 +9,6 @@ total request count matches what the search code is expected to issue.
 
 from __future__ import annotations
 
-import json
 import threading
 import time
 from copy import deepcopy
@@ -32,6 +31,8 @@ from fli.models import (
     TripType,
 )
 from fli.search import SearchDates, SearchFlights
+from fli.search._wire import iter_wrb_chunks
+from tests.search._pages import as_search_page
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
@@ -84,19 +85,20 @@ class FakeClient:
         return self._do()
 
 
-def _date_fixture(days: int = 61) -> str:
-    """Minimal ``GetCalendarGraph`` body for the date-search parser."""
-    base = datetime(2026, 7, 1)
-    entries = [
-        [
-            (base + timedelta(days=i)).strftime("%Y-%m-%d"),
-            None,
-            [[None, 200.0 + i], "USD0.000"],
-        ]
-        for i in range(days)
-    ]
-    inner = json.dumps([None, None, entries])
-    return ")]}'\n" + json.dumps([["wrb.fr", None, inner]])
+# Segment travel dates are validated against today, so keep the fixtures
+# relative — hardcoded dates rot the suite the moment they go past.
+DEPART = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=30)
+RETURN = DEPART + timedelta(days=7)
+
+
+def _page_fixture(name: str = "flight_search_jfk_lax_oneway_usd") -> str:
+    """Re-serve a captured response as the search page the client now reads.
+
+    The page's ``ds:1`` payload carries the flight rows at the same
+    positions the RPC body used, so the captured fixtures stay usable.
+    """
+    raw = (FIXTURE_DIR / f"{name}.bin").read_text()
+    return as_search_page(next(iter_wrb_chunks(raw)))
 
 
 # ---------------------------------------------------------------------------
@@ -112,12 +114,12 @@ def _round_trip_filters() -> FlightSearchFilters:
             FlightSegment(
                 departure_airport=[[Airport.JFK, 0]],
                 arrival_airport=[[Airport.LAX, 0]],
-                travel_date="2026-08-01",
+                travel_date=DEPART.strftime("%Y-%m-%d"),
             ),
             FlightSegment(
                 departure_airport=[[Airport.LAX, 0]],
                 arrival_airport=[[Airport.JFK, 0]],
-                travel_date="2026-08-08",
+                travel_date=RETURN.strftime("%Y-%m-%d"),
             ),
         ],
     )
@@ -131,11 +133,11 @@ def _date_filters(days: int) -> DateSearchFilters:
             FlightSegment(
                 departure_airport=[[Airport.JFK, 0]],
                 arrival_airport=[[Airport.LAX, 0]],
-                travel_date="2026-08-01",
+                travel_date=DEPART.strftime("%Y-%m-%d"),
             )
         ],
-        from_date="2026-08-01",
-        to_date=(datetime(2026, 8, 1) + timedelta(days=days - 1)).strftime("%Y-%m-%d"),
+        from_date=DEPART.strftime("%Y-%m-%d"),
+        to_date=(DEPART + timedelta(days=days - 1)).strftime("%Y-%m-%d"),
     )
 
 
@@ -149,7 +151,7 @@ class TestRoundTripParallel:
 
     @pytest.fixture
     def fixture_text(self) -> str:
-        return (FIXTURE_DIR / "flight_search_jfk_lax_oneway_usd.bin").read_text()
+        return _page_fixture()
 
     def test_peak_in_flight_matches_top_n(self, fixture_text):
         fake = FakeClient(fixture_text, latency_ms=60.0)
@@ -205,8 +207,8 @@ class TestRoundTripParallel:
                         flight_number=tag,
                         departure_airport=Airport.JFK,
                         arrival_airport=Airport.LAX,
-                        departure_datetime=datetime(2026, 7, 15, 9, 0),
-                        arrival_datetime=datetime(2026, 7, 15, 12, 0),
+                        departure_datetime=DEPART.replace(hour=9),
+                        arrival_datetime=DEPART.replace(hour=12),
                         duration=180,
                     )
                 ],
@@ -256,31 +258,32 @@ class TestRoundTripParallel:
 
 
 class TestDateChunkParallel:
-    def test_three_chunks_overlap(self):
-        fake = FakeClient(_date_fixture(days=61), latency_ms=60.0)
+    # The page transport has no calendar grid, so a date sweep costs one
+    # page fetch per date rather than one per 61-day chunk.
+    def test_every_date_priced_in_parallel(self):
+        fake = FakeClient(_page_fixture(), latency_ms=10.0)
         search = SearchDates()
         search.client = fake
 
-        # 180 days / 61 = 3 chunks.
+        # 180 days / 61 = 3 chunks, each pricing its dates concurrently.
         results = search.search(_date_filters(days=180))
 
-        assert results is not None and len(results) > 0
-        assert fake.calls == 3
+        assert results is not None and len(results) == 180
+        assert fake.calls == 180
         assert fake.peak_in_flight >= 2, (
-            f"Date chunks did not parallelise (peak={fake.peak_in_flight})"
+            f"Date pricing did not parallelise (peak={fake.peak_in_flight})"
         )
 
-    def test_single_chunk_skips_executor(self):
-        """Sub-61-day ranges still take the synchronous fast path."""
-        fake = FakeClient(_date_fixture(days=30), latency_ms=10.0)
+    def test_single_chunk_still_prices_each_date(self):
+        """Sub-61-day ranges skip the chunk split but still price per date."""
+        fake = FakeClient(_page_fixture(), latency_ms=10.0)
         search = SearchDates()
         search.client = fake
 
         results = search.search(_date_filters(days=30))
 
-        assert results is not None
-        assert fake.calls == 1
-        assert fake.peak_in_flight == 1
+        assert results is not None and len(results) == 30
+        assert fake.calls == 30
 
     def test_chunk_filters_advance_segment_dates(self):
         """Each chunk's segment ``travel_date`` is offset by N×61 days."""
@@ -295,7 +298,7 @@ class TestDateChunkParallel:
         first = chunks[0].flight_segments[0].travel_date
         second = chunks[1].flight_segments[0].travel_date
         third = chunks[2].flight_segments[0].travel_date
-        assert first == "2026-08-01"
+        assert first == DEPART.strftime("%Y-%m-%d")
         # Shifted by exactly 61 and 122 days.
         assert datetime.strptime(second, "%Y-%m-%d") - datetime.strptime(
             first, "%Y-%m-%d"
