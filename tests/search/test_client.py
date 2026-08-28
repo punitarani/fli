@@ -118,3 +118,17 @@ class TestGetClientSingleton:
         client_module.client = None
         c2 = get_client()
         assert c1 is not c2
+
+
+class TestConsentCookie:
+    """EU/EEA IPs hit Google's consent interstitial without a SOCS cookie."""
+
+    def test_session_carries_socs_cookie_for_google(self, monkeypatch):
+        monkeypatch.setattr(client_module, "SOCS_COOKIE", "TESTSOCS")
+        session = get_client()._session()
+        assert session.cookies.get("SOCS", domain=".google.com") == "TESTSOCS"
+
+    def test_empty_env_value_sends_no_cookie(self, monkeypatch):
+        monkeypatch.setattr(client_module, "SOCS_COOKIE", "")
+        session = get_client()._session()
+        assert session.cookies.get("SOCS", domain=".google.com") is None
