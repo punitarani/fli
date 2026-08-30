@@ -77,8 +77,8 @@ def test_report_cli_error_returns_typer_exit_and_writes_log(tmp_path, capsys):
     assert len(log_files) == 1
 
 
-def test_multi_command_handles_timeout_cleanly(runner, monkeypatch, tmp_path):
-    """A curl timeout inside `multi` should produce a clean message + log file."""
+def test_search_command_handles_timeout_cleanly(runner, monkeypatch, tmp_path):
+    """A curl timeout inside a search should produce a clean message + log file."""
     from curl_cffi.requests import exceptions as curl_exc
 
     def fake_request(self, url, **kwargs):
@@ -89,6 +89,21 @@ def test_multi_command_handles_timeout_cleanly(runner, monkeypatch, tmp_path):
     monkeypatch.setattr("curl_cffi.requests.Session.get", fake_request)
     monkeypatch.setattr("curl_cffi.requests.Session.post", fake_request)
 
+    result = runner.invoke(app, ["flights", "SEA", "NRT", "2026-12-26"])
+
+    assert result.exit_code == 1
+    # Friendly message — no raw curl traceback in the output.
+    assert "Error" in result.output
+    assert "Timed out talking to Google Flights" in result.output
+    assert "Full traceback written to" in result.output
+    assert "Traceback (most recent call last)" not in result.output
+
+    log_files = list((tmp_path / "fli-logs").glob("fli-error-*.log"))
+    assert len(log_files) >= 1
+
+
+def test_multi_command_reports_unsupported(runner, tmp_path):
+    """Multi-city has no search-page transport — say so instead of pricing one leg."""
     result = runner.invoke(
         app,
         [
@@ -103,14 +118,8 @@ def test_multi_command_handles_timeout_cleanly(runner, monkeypatch, tmp_path):
     )
 
     assert result.exit_code == 1
-    # Friendly message — no raw curl traceback in the output.
-    assert "Error" in result.output
-    assert "Timed out talking to Google Flights" in result.output
-    assert "Full traceback written to" in result.output
+    assert "Multi-city search is not available" in result.output
     assert "Traceback (most recent call last)" not in result.output
-
-    log_files = list((tmp_path / "fli-logs").glob("fli-error-*.log"))
-    assert len(log_files) >= 1
 
 
 @pytest.mark.parametrize(

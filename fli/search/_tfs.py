@@ -22,6 +22,10 @@ window) are applied to the decoded results instead — see
 neither encoded nor filtered after the fact is reported by
 :func:`unsupported_filters` so the caller can warn rather than silently
 return results that ignore it.
+
+Multi-city is out of reach here entirely: the page inlines no rows for it,
+so :func:`build_tfs` refuses those searches rather than returning the first
+leg's one-way board.
 """
 
 from __future__ import annotations
@@ -33,6 +37,7 @@ from typing import TYPE_CHECKING, Any
 
 from fli.models.google_flights.base import TripType
 from fli.search._proto import LegSpec, encode_tfs_payload, encode_tfs_segment
+from fli.search.exceptions import SearchUnsupportedError
 
 if TYPE_CHECKING:
     from fli.models import FlightResult
@@ -92,7 +97,24 @@ def build_tfs(filters: Any, *, travel_dates: list[str] | None = None) -> str:
     Returns:
         The base64url ``tfs`` value, unpadded, as Google's own URLs carry it.
 
+    Raises:
+        SearchUnsupportedError: For multi-city trips, which this transport
+            cannot serve at all.
+
     """
+    # Field 19 is the trip type. Multi-city is 3, but sending 2 (one-way)
+    # makes Google ignore every segment past the first and serve the first
+    # leg's one-way board, which decodes cleanly into wrong results; sending
+    # 3 renders the right board in a browser but inlines no flight rows —
+    # multi-city is fetched client-side through the RPC gated since 2026-08.
+    if filters.trip_type == TripType.MULTI_CITY:
+        raise SearchUnsupportedError(
+            "Multi-city search is not available through the search-page transport: "
+            "Google loads those results client-side through the gated RPC, so the "
+            "page carries no rows to read. Search each leg separately. "
+            "See github.com/punitarani/fli#223."
+        )
+
     stops = filters.stops.value
     passengers = [
         code
@@ -125,7 +147,7 @@ def build_tfs(filters: Any, *, travel_dates: list[str] | None = None) -> str:
 
     return encode_tfs_payload(
         segments,
-        is_one_way=filters.trip_type != TripType.ROUND_TRIP,
+        is_one_way=filters.trip_type == TripType.ONE_WAY,
         passengers=passengers or [1],
         seat=filters.seat_type.value,
     )

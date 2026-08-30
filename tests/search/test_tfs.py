@@ -34,6 +34,7 @@ from fli.search._tfs import (
     page_url,
     unsupported_filters,
 )
+from fli.search.exceptions import SearchUnsupportedError
 
 # Captured from Google's own search-page URLs (2026-08-26) for
 # JFK -> LAX on 2026-09-15, returning 2026-09-19.
@@ -219,6 +220,33 @@ class TestBuildTfs:
         economy = build_tfs(_filters([("JFK", "LAX", OUTBOUND_DATE)]))
         business = build_tfs(_filters([("JFK", "LAX", OUTBOUND_DATE)], seat_type=SeatType.BUSINESS))
         assert economy != business
+
+    def test_trip_type_field_19(self):
+        """Field 19 must say one-way (2) or round trip (1), never anything else."""
+        one_way = _decode(build_tfs(_filters([("JFK", "LAX", OUTBOUND_DATE)])))
+        round_trip = _decode(
+            build_tfs(
+                _filters(
+                    [("JFK", "LAX", OUTBOUND_DATE), ("LAX", "JFK", RETURN_DATE)],
+                    trip_type=TripType.ROUND_TRIP,
+                )
+            )
+        )
+        assert one_way.endswith(b"\x98\x01\x02")
+        assert round_trip.endswith(b"\x98\x01\x01")
+
+    def test_multi_city_is_refused(self):
+        """Encoding it as one-way would return the first leg's board as the trip."""
+        spec = _filters(
+            [
+                ("MNL", "DXB", "2026-10-12"),
+                ("DXB", "FCO", "2026-10-16"),
+                ("FCO", "MNL", "2026-10-25"),
+            ],
+            trip_type=TripType.MULTI_CITY,
+        )
+        with pytest.raises(SearchUnsupportedError, match="Multi-city"):
+            build_tfs(spec)
 
 
 class TestPageUrl:

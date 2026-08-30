@@ -50,3 +50,12 @@ class SearchRejectedError(SearchClientError):
             "Its API now requires a browser-signed x-goog-batchexecute-bgr header, "
             "which this client cannot produce. See github.com/punitarani/fli#223."
         )
+
+
+class SearchUnsupportedError(SearchClientError):
+    """The requested search cannot be served by the current transport.
+
+    Distinct from an empty result: the query is well formed and Google
+    would answer it in a browser, but the public search page carries no
+    inline payload for it, so this client has nothing to read.
+    """

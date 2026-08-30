@@ -343,8 +343,9 @@ def encode_tfs_payload(
 
     Args:
         segments: Concatenated output of :func:`encode_tfs_segment`.
-        is_one_way: ``True`` for one-way and multi-city, ``False`` for
-            round-trip. Controls field 19.
+        is_one_way: ``True`` for one-way, ``False`` for round-trip.
+            Controls field 19. Multi-city is a third value (3) that the
+            search page cannot serve — see :func:`fli.search._tfs.build_tfs`.
         passengers: Passenger kind codes, one entry per traveller
             (1 = adult, 2 = child, 3 = infant in seat, 4 = infant on lap).
         seat: Cabin class (1 = economy, 2 = premium, 3 = business, 4 = first).
@@ -385,8 +386,8 @@ def build_tfs_token(
         segments: Ordered list of travel directions.  Each element is a list
             of :class:`LegSpec` describing every physical leg in that
             direction (one leg for nonstop, two or more for connections).
-        is_one_way: ``True`` for one-way (including multi-city); ``False``
-            for round-trip.  Controls the ``f19`` constant.
+        is_one_way: ``True`` for one-way; ``False`` for round-trip.
+            Controls the ``f19`` constant.
 
     Returns:
         URL-safe base64 string (no ``=`` padding) suitable for use as the
