@@ -764,12 +764,30 @@ def _execute_booking_options(
         return {"success": False, "error": f"Booking lookup failed: {error_msg}", "options": []}
 
 
+def _serialized_leg_parts(leg: dict[str, Any]) -> tuple[str, str]:
+    """Split a serialized leg into ``(airline_code, bare_flight_number)``."""
+    number = str(leg.get("flight_number", "")).upper().replace(" ", "")
+    code = str(leg.get("airline_code", "")).upper()
+    # Strip a leading airline-code prefix if the flight_number already carries
+    # it, so we never produce a double-prefixed token ("BABA178").
+    bare = number[len(code) :] if code and number.startswith(code) else number
+    return code, bare
+
+
+def _serialized_leg_identifiers(leg: dict[str, Any]) -> set[str]:
+    """Return the accepted identifier spellings for a serialized leg.
+
+    Yields both '178' and 'BA178' so callers may name a leg either way,
+    mirroring :func:`_leg_identifiers`, which does the same for raw
+    result objects.
+    """
+    code, bare = _serialized_leg_parts(leg)
+    return {bare, f"{code}{bare}"}
+
+
 def _serialized_flight_idents(flight: dict[str, Any]) -> list[str]:
-    """Airline+number labels for each leg of an already-serialized result."""
-    return [
-        f"{leg.get('airline_code', '')}{leg.get('flight_number', '')}".upper()
-        for leg in flight.get("legs", [])
-    ]
+    """Canonical airline+number label for each leg of a serialized result."""
+    return [f"{code}{bare}" for code, bare in map(_serialized_leg_parts, flight.get("legs", []))]
 
 
 def _probe_party_size(
@@ -791,8 +809,18 @@ def _probe_party_size(
     if not flight_numbers:
         return (flights[0] if flights else None), None
 
+    # Match each leg against either spelling ('178' or 'BA178'), order
+    # sensitive, exactly as _match_flight does for raw result objects.
     want = [fn.upper().replace(" ", "") for fn in flight_numbers]
-    return next((f for f in flights if _serialized_flight_idents(f) == want), None), None
+    for flight in flights:
+        legs = flight.get("legs", [])
+        if len(legs) != len(want):
+            continue
+        if all(
+            token in _serialized_leg_identifiers(leg) for token, leg in zip(want, legs, strict=True)
+        ):
+            return flight, None
+    return None, None
 
 
 def _execute_seat_availability(
@@ -815,8 +843,10 @@ def _execute_seat_availability(
     ladder: list[dict[str, Any]] = []
     idents = flight_numbers
     max_bookable = 0
+    probed_up_to = 0
 
     for passengers in range(1, max_passengers + 1):
+        probed_up_to = passengers
         flight, error = _probe_party_size(params, passengers, idents)
         if flight is None and error is None:
             flight, error = _probe_party_size(params, passengers, idents)
@@ -848,7 +878,7 @@ def _execute_seat_availability(
         "success": True,
         "flight": idents,
         "max_bookable": max_bookable,
-        "probed_up_to": max_passengers,
+        "probed_up_to": probed_up_to,
         "capped_by_probe_limit": max_bookable == max_passengers,
         "fare_ladder": ladder,
         "note": (
@@ -1467,6 +1497,52 @@ def get_seat_availability(
         str | None,
         Field(description="Optional ISO 3166-1 alpha-2 country code (e.g., 'GB')."),
     ] = None,
+    departure_window: Annotated[
+        str | None,
+        Field(description="Departure time window in 'HH-HH' 24h format (e.g., '6-20')"),
+    ] = None,
+    sort_by: Annotated[
+        str,
+        Field(
+            description=(
+                "Sort order: TOP_FLIGHTS, BEST, CHEAPEST, DEPARTURE_TIME, ARRIVAL_TIME, "
+                "DURATION, EMISSIONS. Matters when flight_numbers is omitted, since the "
+                "probe locks onto the top result."
+            )
+        ),
+    ] = CONFIG.default_sort_by,
+    exclude_airlines: Annotated[
+        list[str] | None,
+        Field(description="Airline IATA codes to EXCLUDE from results."),
+    ] = None,
+    alliance: Annotated[
+        list[str] | None,
+        Field(description="Restrict to alliances: ONEWORLD, SKYTEAM, STAR_ALLIANCE."),
+    ] = None,
+    exclude_alliance: Annotated[
+        list[str] | None,
+        Field(description="Alliance names to EXCLUDE from results."),
+    ] = None,
+    min_layover: Annotated[
+        int | None,
+        Field(description="Minimum layover duration in minutes.", ge=1),
+    ] = None,
+    max_layover: Annotated[
+        int | None,
+        Field(description="Maximum layover duration in minutes.", ge=1),
+    ] = None,
+    emissions: Annotated[
+        str,
+        Field(description="Filter by emissions level: ALL or LESS"),
+    ] = "ALL",
+    checked_bags: Annotated[
+        int,
+        Field(description="Number of checked bags to include in price (0, 1, or 2)", ge=0, le=2),
+    ] = 0,
+    carry_on: Annotated[
+        bool,
+        Field(description="Include carry-on bag fee in displayed price"),
+    ] = False,
 ) -> dict[str, Any]:
     """Find how many seats one itinerary can still be booked for, and at what fares.
 
@@ -1484,16 +1560,31 @@ def get_seat_availability(
     and it is capped at 9 by Google Flights itself. Costs up to
     ``max_passengers`` searches, so it is markedly slower than
     ``search_flights``.
+
+    Pass the **same filters used for search_flights**. Each probe re-runs the
+    search and looks for the itinerary in its results, so a flight discovered
+    under narrower filters can be missing here and be reported as
+    ``max_bookable: 0``.
     """
     params = FlightSearchParams(
         origin=origin,
         destination=destination,
         departure_date=departure_date,
         return_date=return_date,
+        departure_window=departure_window,
         cabin_class=cabin_class,
         max_stops=max_stops,
+        sort_by=sort_by,
         airlines=airlines,
+        exclude_airlines=exclude_airlines,
+        alliance=alliance,
+        exclude_alliance=exclude_alliance,
+        min_layover=min_layover,
+        max_layover=max_layover,
         exclude_basic_economy=exclude_basic_economy,
+        emissions=emissions,
+        checked_bags=checked_bags,
+        carry_on=carry_on,
         currency=currency,
         language=language,
         country=country,

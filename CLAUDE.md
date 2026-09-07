@@ -181,6 +181,12 @@ size the itinerary can no longer be booked for.
 - `max_passengers` - Highest party size to probe (default and ceiling `9`,
   which is Google's own per-booking limit)
 - `cabin_class`, `max_stops`, `airlines`, `exclude_basic_economy` - Same as `search_flights`
+- `departure_window`, `sort_by`, `exclude_airlines`, `alliance`, `exclude_alliance`,
+  `min_layover`, `max_layover`, `emissions`, `checked_bags`, `carry_on` - Same as
+  `search_flights`. Pass the **same filters used for `search_flights`**: each
+  probe re-runs the search and looks for the itinerary among its results, so a
+  flight found under narrower filters can be absent here and be reported as
+  `max_bookable: 0`.
 - `currency`, `language`, `country` - Same locale knobs as `search_flights`
 
 **Response:** `max_bookable` is the largest party size that still priced, and
@@ -188,7 +194,8 @@ size the itinerary can no longer be booked for.
 All passengers on one booking share the cheapest fare bucket large enough for
 the party, so a jump in the ladder marks where a cheaper bucket ran out.
 `capped_by_probe_limit` is true when the probe hit `max_passengers` rather than
-running out of seats.
+running out of seats, and `probed_up_to` reports the last party size actually
+attempted rather than the configured cap.
 
 Two caveats worth surfacing to users: `max_bookable` is a **confirmed floor**
 observed by probing, not true airline inventory; and the tool costs up to
