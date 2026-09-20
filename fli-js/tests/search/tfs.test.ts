@@ -30,6 +30,7 @@ import { FlightSearchFilters } from "../../src/models/google-flights/flights.ts"
 import { Client } from "../../src/search/client.ts";
 import { SearchUnsupportedError } from "../../src/search/exceptions.ts";
 import { setSearchLogger } from "../../src/search/logging.ts";
+import { buildTfsToken, passengerCodes as passengerCodesFromInfo } from "../../src/search/proto.ts";
 import {
   _setPageRetrySleep,
   applyClientSideFilters,
@@ -639,6 +640,27 @@ describe("passenger wire codes", () => {
       passenger_info: { adults: 0, children: 0, infants_in_seat: 0, infants_on_lap: 0 },
     });
     expect(passengerCodes(buildTfs(spec))).toEqual([1]);
+  });
+});
+
+describe("passenger codes parity with buildTfsToken", () => {
+  // Drift guard: buildTfs (search token) and buildTfsToken (booking-URL
+  // token) must encode the identical field-8 sequence for the same
+  // PassengerInfo — both are built from proto.ts's passengerCodes helper.
+  test("family mix matches between the search token and the booking token", () => {
+    const info = pax({ adults: 2, children: 1, infants_on_lap: 1 });
+    const spec = filters([[["JFK"], ["LAX"], OUT]], { passenger_info: info });
+    const searchCodes = passengerCodes(buildTfs(spec));
+
+    const bookingToken = buildTfsToken(
+      [[{ origin: "JFK", depDate: OUT, dest: "LAX", airline: "AA", flightNumber: "171" }]],
+      { passengers: passengerCodesFromInfo(info) },
+    );
+    const bookingCodes = passengerCodes(bookingToken);
+
+    expect(searchCodes).toEqual([1, 1, 2, 3]);
+    expect(bookingCodes).toEqual([1, 1, 2, 3]);
+    expect(searchCodes).toEqual(bookingCodes);
   });
 });
 

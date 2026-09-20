@@ -12,9 +12,11 @@ import { Airport } from "../../src/models/airport.ts";
 import {
   type FlightLeg,
   type FlightResult,
+  type PassengerInfo,
   SeatType,
 } from "../../src/models/google-flights/base.ts";
 import { SearchFlights } from "../../src/search/flights.ts";
+import { _readVarint } from "../../src/search/proto.ts";
 
 /** Build a leg with a LOCAL departure datetime (matches the decoder). */
 function makeLeg(
@@ -212,5 +214,68 @@ describe("buildFlightBookingUrl", () => {
     expect(economy).not.toBe(business);
     const raw = tfsBytes(business);
     expect(Buffer.from(raw).includes(Buffer.from([0x48, 0x03]))).toBe(true);
+  });
+
+  /** Walk the top-level message and collect every field-8 (passenger) code. */
+  function field8Codes(raw: Uint8Array): number[] {
+    const codes: number[] = [];
+    let offset = 0;
+    while (offset < raw.length) {
+      const [tagVal, afterTag] = _readVarint(raw, offset);
+      offset = afterTag;
+      const field = tagVal >> 3;
+      const wire = tagVal & 0x7;
+      if (wire === 0) {
+        const [value, afterVal] = _readVarint(raw, offset);
+        offset = afterVal;
+        if (field === 8) codes.push(value);
+      } else if (wire === 2) {
+        const [length, afterLen] = _readVarint(raw, offset);
+        offset = afterLen + length;
+      } else {
+        throw new Error(`unexpected wire type ${wire} at offset ${offset}`);
+      }
+    }
+    return codes;
+  }
+
+  test("passengerInfo defaults to a single adult (field 8 = [1])", () => {
+    const raw = tfsBytes(search.buildFlightBookingUrl(oneWay()));
+    expect(field8Codes(raw)).toEqual([1]);
+  });
+
+  test("passengerInfo family mix encodes one field-8 entry per traveller", () => {
+    const passengerInfo: PassengerInfo = {
+      adults: 2,
+      children: 1,
+      infants_in_seat: 0,
+      infants_on_lap: 0,
+    };
+    const raw = tfsBytes(search.buildFlightBookingUrl(oneWay(), { passengerInfo }));
+    expect(field8Codes(raw)).toEqual([1, 1, 2]);
+  });
+
+  test("garbage passengerInfo still returns a URL (never throws)", () => {
+    const url = search.buildFlightBookingUrl(oneWay(), {
+      passengerInfo: "not-a-passenger-info" as unknown as PassengerInfo,
+    });
+    expect(typeof url).toBe("string");
+    expect(url.startsWith("https://www.google.com/travel/flights/booking?tfs=")).toBe(true);
+  });
+
+  test("a duck-typed count in the millions falls back quickly, not after building a giant token", () => {
+    // passengerCodes rejects a count this large before building any array,
+    // so the existing catch-all below still returns the generic fallback
+    // URL — quickly, not after tens of seconds spent building a
+    // multi-megabyte token.
+    const start = performance.now();
+    const url = search.buildFlightBookingUrl(oneWay(), {
+      passengerInfo: { adults: 1_000_000 } as PassengerInfo,
+    });
+    const elapsed = performance.now() - start;
+
+    expect(elapsed).toBeLessThan(1000);
+    expect(url.length).toBeLessThan(200);
+    expect(url.startsWith("https://www.google.com/travel/flights")).toBe(true);
   });
 });

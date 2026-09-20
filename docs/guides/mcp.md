@@ -138,10 +138,12 @@ Search for flights between two airports on a specific date.
 
 Each flight in `flights[]` carries a `booking_url` that deep-links directly to
 that specific flight's booking page on Google Flights (pre-loaded itinerary, no
-search step required). The top-level `booking_url` is a broader search-page
-link (route + date pre-filled) and is a reliable fallback. To retrieve
-per-vendor prices and airline-direct booking links, pass the flight's
-`flight_number` (e.g. `BA178`) to [`get_booking_options`](#get_booking_options).
+search step required). It carries the search's cabin class and passenger mix
+too, so it opens priced for the same travelers as the search results. The
+top-level `booking_url` is a broader search-page link (route + date
+pre-filled) and is a reliable fallback. To retrieve per-vendor prices and
+airline-direct booking links, pass the flight's `flight_number` (e.g.
+`BA178`) to [`get_booking_options`](#get_booking_options).
 
 ### `search_dates`
 

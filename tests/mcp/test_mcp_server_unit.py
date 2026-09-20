@@ -45,6 +45,27 @@ def _make_raiser(exc: BaseException):
     return _raiser
 
 
+def _field_8_codes(raw: bytes) -> list[int]:
+    """Walk the top-level tfs message and collect every field-8 (passenger) code."""
+    from fli.search._proto import _read_varint
+
+    codes: list[int] = []
+    offset = 0
+    while offset < len(raw):
+        tag, offset = _read_varint(raw, offset)
+        field, wire = tag >> 3, tag & 0x7
+        if wire == 0:
+            value, offset = _read_varint(raw, offset)
+            if field == 8:
+                codes.append(value)
+        elif wire == 2:
+            length, offset = _read_varint(raw, offset)
+            offset += length
+        else:  # pragma: no cover - the encoder emits only wire types 0 and 2
+            raise AssertionError(f"unexpected wire type {wire} at offset {offset}")
+    return codes
+
+
 class TestAirlineCode:
     def test_enum_with_leading_underscore_stripped(self):
         airline = MagicMock()
@@ -511,6 +532,84 @@ class TestSearchReturnsBookingUrl:
             "https://www.google.com/travel/flights/booking?tfs=TEST"
         )
 
+    def test_per_flight_booking_url_carries_search_passenger_mix(self, monkeypatch, params):
+        """A family search's passenger_info reaches build_flight_booking_url.
+
+        Otherwise the flights array shows a family-priced result but every
+        booking_url opens Google's page priced for a single adult.
+        """
+        flight = _make_bookable_flight()
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.search",
+            lambda self, *a, **k: [flight],
+        )
+        captured_kwargs: dict = {}
+
+        def _capture(self, f, **kw):
+            captured_kwargs.update(kw)
+            return "https://www.google.com/travel/flights/booking?tfs=TEST"
+
+        monkeypatch.setattr("fli.mcp.server.SearchFlights.build_flight_booking_url", _capture)
+
+        family_params = params.model_copy(
+            update={"passengers": 2, "children": 1, "infants_on_lap": 1}
+        )
+        result = _execute_flight_search(family_params)
+        assert result["success"] is True
+        passenger_info = captured_kwargs["passenger_info"]
+        assert passenger_info.adults == 2
+        assert passenger_info.children == 1
+        assert passenger_info.infants_on_lap == 1
+
+    def test_booking_url_token_decodes_to_the_requested_mix(self, monkeypatch, params):
+        """One un-patched assertion: decode the real booking_url token.
+
+        Every other passenger-mix test at this layer monkeypatches
+        ``build_flight_booking_url`` and asserts on the captured
+        ``PassengerInfo`` object. Here only ``SearchFlights.search`` is
+        stubbed, so ``build_flight_booking_url`` runs for real and produces
+        an actual ``tfs`` token — a bug in the token builder itself, not
+        just in how this call site passes ``passenger_info``, would be
+        caught here too.
+        """
+        import base64
+        import urllib.parse
+        from datetime import datetime
+
+        from fli.models import Airline, Airport, FlightLeg, FlightResult
+
+        flight = FlightResult(
+            price=342.0,
+            currency="USD",
+            duration=420,
+            stops=0,
+            legs=[
+                FlightLeg(
+                    airline=Airline.BA,
+                    flight_number="178",
+                    departure_airport=Airport.JFK,
+                    arrival_airport=Airport.LHR,
+                    departure_datetime=datetime(2026, 12, 1, 20, 30),
+                    arrival_datetime=datetime(2026, 12, 2, 8, 30),
+                    duration=420,
+                )
+            ],
+        )
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.search",
+            lambda self, *a, **k: [flight],
+        )
+        family_params = params.model_copy(update={"passengers": 2, "children": 1})
+
+        result = _execute_flight_search(family_params)
+        assert result["success"] is True
+        booking_url = result["flights"][0]["booking_url"]
+
+        tfs = urllib.parse.parse_qs(urllib.parse.urlparse(booking_url).query)["tfs"][0]
+        pad = "=" * ((4 - len(tfs) % 4) % 4)
+        raw = base64.urlsafe_b64decode(tfs + pad)
+        assert _field_8_codes(raw) == [1, 1, 2]
+
     def test_top_level_search_booking_url_still_present(self, monkeypatch, params):
         """The top-level search booking_url (q= link) is kept alongside per-flight links."""
         flight = _make_bookable_flight()
@@ -577,6 +676,32 @@ class TestExecuteBookingOptions:
         assert result["selected_flight"]["booking_url"] == (
             "https://www.google.com/travel/flights/booking?tfs=SEL"
         )
+
+    def test_selected_flight_booking_url_carries_search_passenger_mix(self, monkeypatch, params):
+        """get_booking_options forwards the search's passenger_info too."""
+        flight = _make_bookable_flight()
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.search",
+            lambda self, *a, **k: [flight],
+        )
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.get_booking_options",
+            lambda self, *a, **k: [_make_option_helper()],
+        )
+        captured_kwargs: dict = {}
+
+        def _capture(self, f, **kw):
+            captured_kwargs.update(kw)
+            return "https://www.google.com/travel/flights/booking?tfs=SEL"
+
+        monkeypatch.setattr("fli.mcp.server.SearchFlights.build_flight_booking_url", _capture)
+
+        family_params = params.model_copy(update={"passengers": 2, "children": 1})
+        result = _execute_booking_options(family_params, ["BA178"])
+        assert result["success"] is True
+        passenger_info = captured_kwargs["passenger_info"]
+        assert passenger_info.adults == 2
+        assert passenger_info.children == 1
 
     def test_no_match_lists_available_flights(self, monkeypatch, params):
         flight = _make_bookable_flight()

@@ -216,10 +216,13 @@ Search for flights on a specific date.
 **Response:** Each flight in `flights[]` carries its own `booking_url` — a
 `tfs` protobuf deep link that opens the specific itinerary's booking page
 (vendor fares + "Continue" CTA) on Google Flights. The token is deterministic
-(no session id), so the same itinerary always yields the same URL. The
-top-level `booking_url` is a broader search-page link (route + dates
-pre-filled) kept as a reliable fallback. Each flight's `flight_number` can be
-passed to `get_booking_options` for per-vendor pricing.
+(no session id), so the same itinerary always yields the same URL, and it
+carries the search's cabin class and passenger mix (adults, children,
+infants) so the booking page opens priced for the same travelers as the
+search results. The top-level `booking_url` is a broader search-page link
+(route + dates pre-filled) kept as a reliable fallback. Each flight's
+`flight_number` can be passed to `get_booking_options` for per-vendor
+pricing.
 
 ### `search_dates`
 Find cheapest travel dates within a range.

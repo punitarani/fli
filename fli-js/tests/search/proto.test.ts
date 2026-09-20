@@ -7,6 +7,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { Buffer } from "node:buffer";
+import type { PassengerInfo } from "../../src/models/google-flights/base.ts";
 import {
   _readVarint,
   buildBookingToken,
@@ -15,6 +16,7 @@ import {
   extractBookingTokenFromTfu,
   extractSessionIdFromTfu,
   type LegSpec,
+  passengerCodes,
 } from "../../src/search/proto.ts";
 
 // Captured live 2026-05-14 (JFK → LAX outbound AA171, return AA28, RT $346.80).
@@ -375,4 +377,139 @@ describe("buildTfsToken", () => {
     expect(Buffer.from(business).includes(Buffer.from([0x48, 0x03]))).toBe(true);
     expect(Buffer.from(economy).equals(Buffer.from(business))).toBe(false);
   });
+
+  /** Walk the top-level message and collect every field-8 (passenger) code. */
+  function field8Codes(raw: Uint8Array): number[] {
+    const codes: number[] = [];
+    let offset = 0;
+    while (offset < raw.length) {
+      const [tagVal, afterTag] = _readVarint(raw, offset);
+      offset = afterTag;
+      const field = tagVal >> 3;
+      const wire = tagVal & 0x7;
+      if (wire === 0) {
+        const [value, afterVal] = _readVarint(raw, offset);
+        offset = afterVal;
+        if (field === 8) codes.push(value);
+      } else if (wire === 2) {
+        const [length, afterLen] = _readVarint(raw, offset);
+        offset = afterLen + length;
+      } else {
+        throw new Error(`unexpected wire type ${wire} at offset ${offset}`);
+      }
+    }
+    return codes;
+  }
+
+  test("passengers defaults to a single adult", () => {
+    const built = buildTfsToken([
+      [{ origin: "SFO", depDate: "2026-09-01", dest: "PHX", airline: "AA", flightNumber: "100" }],
+    ]);
+    expect(field8Codes(tfsBytes(built))).toEqual([1]);
+  });
+
+  test("passengers=[1,1,2] (2 adults, 1 child) encodes one entry per traveller", () => {
+    const built = buildTfsToken(
+      [[{ origin: "SFO", depDate: "2026-09-01", dest: "PHX", airline: "AA", flightNumber: "100" }]],
+      { passengers: [1, 1, 2] },
+    );
+    expect(field8Codes(tfsBytes(built))).toEqual([1, 1, 2]);
+  });
+
+  test("passengers do not disturb the seat or trip-type fields", () => {
+    const segs: LegSpec[][] = [
+      [{ origin: "SFO", depDate: "2026-09-01", dest: "PHX", airline: "AA", flightNumber: "100" }],
+    ];
+    const built = buildTfsToken(segs, { passengers: [1, 1, 2], seat: 3 });
+    const raw = tfsBytes(built);
+    const text = Buffer.from(raw);
+    // Three f8 entries, then f9=3 (business), then f14=1 — same layout as
+    // the single-passenger case, just with more f8 entries ahead of f9.
+    expect(
+      text.includes(Buffer.from([0x40, 0x01, 0x40, 0x01, 0x40, 0x02, 0x48, 0x03, 0x70, 0x01])),
+    ).toBe(true);
+    // f19 (trip type) is unaffected by the passenger count.
+    expect(Array.from(raw.slice(-3))).toEqual([0x98, 0x01, 0x02]);
+  });
+});
+
+describe("passengerCodes", () => {
+  // Maps a PassengerInfo to `tfs` field-8 codes — extracted out of
+  // `tfs.ts::buildTfs` so the search token and the booking token
+  // (buildTfsToken) cannot drift on how they encode the passenger mix.
+
+  test("family mix", () => {
+    expect(passengerCodes({ adults: 2, children: 1, infants_on_lap: 1 })).toEqual([1, 1, 2, 3]);
+  });
+
+  test("infant in seat is code 4", () => {
+    expect(passengerCodes({ adults: 1, infants_in_seat: 1 })).toEqual([1, 4]);
+  });
+
+  test("null/undefined defaults to a single adult", () => {
+    expect(passengerCodes(null)).toEqual([1]);
+    expect(passengerCodes(undefined)).toEqual([1]);
+  });
+
+  test("object with no passenger fields defaults to a single adult", () => {
+    expect(passengerCodes({})).toEqual([1]);
+  });
+
+  test("exactly nine travellers is accepted", () => {
+    const info = { adults: 4, children: 2, infants_in_seat: 2, infants_on_lap: 1 };
+    expect(passengerCodes(info)).toHaveLength(9);
+  });
+
+  test("ten travellers, one over the ceiling, throws", () => {
+    expect(() => passengerCodes({ adults: 10, children: 0 })).toThrow(RangeError);
+  });
+
+  test("ten travellers spread across two fields throws", () => {
+    expect(() => passengerCodes({ adults: 5, children: 5 })).toThrow(RangeError);
+  });
+
+  test("a negative count throws, naming the field", () => {
+    expect(() => passengerCodes({ adults: -1 })).toThrow(/adults/);
+  });
+
+  test.each([2.5, "3", true])("a non-integer count (%p) throws", (bad) => {
+    expect(() => passengerCodes({ adults: bad as unknown as number })).toThrow(RangeError);
+  });
+
+  test("a duck-typed count in the millions throws immediately, not after building a list", () => {
+    // Before this guard, an `adults: 1_000_000`-shaped object made this
+    // function (and everything downstream, including the booking token)
+    // spend tens of seconds building a multi-megabyte array instead of
+    // rejecting the obviously-impossible count up front.
+    const start = performance.now();
+    expect(() => passengerCodes({ adults: 1_000_000 })).toThrow(RangeError);
+    expect(performance.now() - start).toBeLessThan(1000);
+  });
+});
+
+describe("passengerCodes accept/reject table", () => {
+  // Same table as Python's `TestPassengerCodesAcceptRejectTable` in
+  // tests/search/test_proto.py — both languages must reach the same
+  // accept/reject verdict for each row. Keep the two in sync.
+  const cases: Array<[string, { adults: unknown; children?: unknown }, boolean]> = [
+    ["baseline single adult", { adults: 1 }, true],
+    ["all-zero mix still books one adult", { adults: 0, children: 0 }, true],
+    ["exactly Google's ceiling", { adults: 9 }, true],
+    ["one over the ceiling", { adults: 10 }, false],
+    ["ceiling crossed by summing two fields", { adults: 5, children: 5 }, false],
+    ["negative count", { adults: -1 }, false],
+    ["non-integer count (float)", { adults: 2.5 }, false],
+    ["non-integer count (numeric string)", { adults: "3" }, false],
+    ["boolean count", { adults: true }, false],
+  ];
+
+  for (const [label, info, accepted] of cases) {
+    test(`${label} -> ${accepted ? "accepted" : "rejected"}`, () => {
+      if (accepted) {
+        expect(() => passengerCodes(info as Partial<PassengerInfo>)).not.toThrow();
+      } else {
+        expect(() => passengerCodes(info as Partial<PassengerInfo>)).toThrow(RangeError);
+      }
+    });
+  }
 });

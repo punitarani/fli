@@ -320,6 +320,203 @@ class TestBuildTfsToken:
         assert b"\x48\x03" not in economy
         assert economy != business
 
+    def _field_8_codes(self, raw: bytes) -> list[int]:
+        """Walk the top-level message and collect every field-8 (passenger) code.
+
+        Mirrors ``_passenger_codes`` in ``tests/search/test_tfs.py`` — a proper
+        walk instead of scanning for the 0x40 tag byte, which also occurs
+        inside length-delimited payloads (e.g. flight numbers).
+        """
+        from fli.search._proto import _read_varint
+
+        codes: list[int] = []
+        offset = 0
+        while offset < len(raw):
+            tag, offset = _read_varint(raw, offset)
+            field, wire = tag >> 3, tag & 0x7
+            if wire == 0:
+                value, offset = _read_varint(raw, offset)
+                if field == 8:
+                    codes.append(value)
+            elif wire == 2:
+                length, offset = _read_varint(raw, offset)
+                offset += length
+            else:  # pragma: no cover - the encoder emits only wire types 0 and 2
+                raise AssertionError(f"unexpected wire type {wire} at offset {offset}")
+        return codes
+
+    def test_passengers_defaults_to_single_adult(self):
+        """Omitted ``passengers`` still encodes field 8 as one adult (1)."""
+        built = build_tfs_token([[LegSpec("SFO", "2026-09-01", "PHX", "AA", "100")]])
+        raw = _b64url_to_bytes(built)
+        assert self._field_8_codes(raw) == [1]
+
+    def test_passengers_family_mix_encodes_one_entry_per_traveller(self):
+        """``passengers=(1, 1, 2)`` (2 adults, 1 child) encodes three field-8 entries."""
+        built = build_tfs_token(
+            [[LegSpec("SFO", "2026-09-01", "PHX", "AA", "100")]],
+            passengers=(1, 1, 2),
+        )
+        raw = _b64url_to_bytes(built)
+        assert self._field_8_codes(raw) == [1, 1, 2]
+
+    def test_passengers_do_not_disturb_seat_or_trip_type_fields(self):
+        """Field 9 (seat) and field 19 (trip type) keep their own values and position."""
+        segs = [[LegSpec("SFO", "2026-09-01", "PHX", "AA", "100")]]
+        built = build_tfs_token(segs, passengers=(1, 1, 2), seat=3)
+        raw = _b64url_to_bytes(built)
+        # Three f8 entries, then f9=3 (business), then f14=1 — same layout as
+        # the single-passenger case, just with more f8 entries ahead of f9.
+        assert b"\x40\x01\x40\x01\x40\x02\x48\x03\x70\x01" in raw
+        # f19 (trip type) is unaffected by the passenger count.
+        assert raw.endswith(bytes([0x98, 0x01, 0x02]))
+
+
+class TestPassengerCodes:
+    """``passenger_codes`` maps a ``PassengerInfo`` to ``tfs`` field-8 codes.
+
+    This is the helper extracted out of ``fli.search._tfs.build_tfs`` so the
+    search token and the booking token (:func:`build_tfs_token`) cannot drift
+    on how they encode the passenger mix.
+    """
+
+    def test_family_mix(self):
+        from fli.models import PassengerInfo
+        from fli.search._proto import passenger_codes
+
+        info = PassengerInfo(adults=2, children=1, infants_on_lap=1)
+        assert passenger_codes(info) == [1, 1, 2, 3]
+
+    def test_infant_in_seat_is_code_four(self):
+        from fli.models import PassengerInfo
+        from fli.search._proto import passenger_codes
+
+        info = PassengerInfo(adults=1, infants_in_seat=1)
+        assert passenger_codes(info) == [1, 4]
+
+    def test_none_defaults_to_single_adult(self):
+        from fli.search._proto import passenger_codes
+
+        assert passenger_codes(None) == [1]
+
+    def test_duck_typed_object_with_no_passenger_attrs_defaults_to_single_adult(self):
+        """A non-``PassengerInfo`` object with none of the expected attributes.
+
+        Mirrors the ``getattr(..., 0)`` tolerance ``build_tfs`` already
+        relies on — malformed input degrades to "one adult" rather than
+        raising, matching :meth:`SearchFlights.build_flight_booking_url`'s
+        "never raises" contract.
+        """
+        from fli.search._proto import passenger_codes
+
+        assert passenger_codes(object()) == [1]
+
+    def test_total_at_the_nine_traveller_ceiling_is_accepted(self):
+        from fli.models import PassengerInfo
+        from fli.search._proto import passenger_codes
+
+        info = PassengerInfo(adults=4, children=2, infants_in_seat=2, infants_on_lap=1)
+        assert len(passenger_codes(info)) == 9
+
+    @pytest.mark.parametrize(
+        "counts",
+        [
+            {"adults": 10, "children": 0},  # total 10, one over the ceiling
+            {"adults": 5, "children": 5},  # total 10 spread across two fields
+        ],
+    )
+    def test_total_over_nine_travellers_raises(self, counts):
+        from fli.search._proto import passenger_codes
+
+        class _Duck:
+            def __init__(self, **kw):
+                for k, v in kw.items():
+                    setattr(self, k, v)
+
+        with pytest.raises(ValueError, match="9"):
+            passenger_codes(_Duck(**counts))
+
+    @pytest.mark.parametrize(
+        "bad_value",
+        [2.5, "3", True],
+    )
+    def test_non_integer_count_raises(self, bad_value):
+        from fli.search._proto import passenger_codes
+
+        class _Duck:
+            adults = bad_value
+
+        with pytest.raises(ValueError, match="adults"):
+            passenger_codes(_Duck())
+
+    def test_negative_count_raises(self):
+        from fli.search._proto import passenger_codes
+
+        class _Duck:
+            adults = -1
+
+        with pytest.raises(ValueError, match="adults"):
+            passenger_codes(_Duck())
+
+    def test_huge_count_raises_immediately_instead_of_building_a_giant_list(self):
+        """A duck-typed count in the millions must fail fast, not build a list that big.
+
+        Before this guard, an ``adults=10**6``-shaped object made this
+        function (and everything downstream of it, including the booking
+        URL) spend seconds building a multi-megabyte result instead of
+        rejecting the obviously-impossible passenger count up front.
+        """
+        import time
+
+        from fli.search._proto import passenger_codes
+
+        class _Duck:
+            adults = 10**6
+
+        start = time.monotonic()
+        with pytest.raises(ValueError, match="9"):
+            passenger_codes(_Duck())
+        assert time.monotonic() - start < 1.0
+
+
+class TestPassengerCodesAcceptRejectTable:
+    """Which duck-typed inputs `passenger_codes` accepts or rejects.
+
+    The TypeScript port (`fli-js/tests/search/proto.test.ts`,
+    `describe("passengerCodes accept/reject table")`) runs this same table of
+    inputs against its own `passengerCodes` and must reach the same
+    accept/reject verdict for each row — keep the two in sync.
+    """
+
+    @pytest.mark.parametrize(
+        ("adults", "children", "accepted"),
+        [
+            (1, 0, True),
+            (0, 0, True),  # all-zero mix still books one adult
+            (9, 0, True),  # exactly Google's ceiling
+            (10, 0, False),  # one over the ceiling
+            (5, 5, False),  # ceiling crossed by summing two fields
+            (-1, 0, False),
+            (2.5, 0, False),
+            ("3", 0, False),
+            (True, 0, False),
+        ],
+    )
+    def test_accept_reject(self, adults, children, accepted):
+        from fli.search._proto import passenger_codes
+
+        class _Duck:
+            def __init__(self, adults, children):
+                self.adults = adults
+                self.children = children
+
+        info = _Duck(adults, children)
+        if accepted:
+            passenger_codes(info)  # must not raise
+        else:
+            with pytest.raises(ValueError):
+                passenger_codes(info)
+
 
 class TestToUrlsafeB64:
     def test_converts_standard_to_urlsafe(self):

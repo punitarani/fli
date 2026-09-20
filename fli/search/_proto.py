@@ -35,6 +35,7 @@ import base64
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -264,6 +265,80 @@ def _to_urlsafe_b64(data: bytes) -> str:
 
 _MAX_U64 = (1 << 64) - 1
 
+# Passenger kinds, in the order Google's repeated field 8 numbers them:
+# 1 = adult, 2 = child, 3 = infant on lap, 4 = infant in own seat.
+#
+# The two infant codes are easy to transpose and the mistake is expensive
+# rather than loud: on an international route a lap infant prices at ~10% of
+# the adult fare and an infant in its own seat at ~100%, so a swap quotes a
+# plausible but wrong fare instead of erroring. Pricing one fixed itinerary
+# (BA178 JFK->LHR, economy) confirms the mapping — $295 for ``[1]``, $324 for
+# ``[1, 3]`` (+10%, lap), $589 for ``[1, 4]`` (+100%, own seat, same as the
+# ``[1, 2]`` child fare). The legacy RPC struct orders the same four counts
+# ``[adults, children, infants_on_lap, infants_in_seat]``; see
+# ``FlightSearchFilters.format`` in :mod:`fli.models.google_flights.flights`.
+_PASSENGER_FIELDS = ("adults", "children", "infants_on_lap", "infants_in_seat")
+
+# Google's own per-booking limit — the same ceiling ``PassengerInfo`` enforces
+# in ``validate_passenger_counts`` (``fli.models.google_flights.base``).
+# ``PassengerInfo`` has no public constant for it (just the literal in that
+# validator), so this is a second copy of the same number rather than an
+# import; keep the two in sync if Google's limit ever changes.
+_MAX_TOTAL_PASSENGERS = 9
+
+
+def passenger_codes(passenger_info: Any) -> list[int]:
+    """Convert a ``PassengerInfo`` into ``tfs`` field-8 codes, one per traveller.
+
+    Shared by :func:`fli.search._tfs.build_tfs` (the search token) and
+    :func:`build_tfs_token` (the per-flight booking token) so the two cannot
+    drift on how they encode the passenger mix — see ``_PASSENGER_FIELDS``
+    above for why getting the codes right (especially the two infant kinds)
+    matters.
+
+    Args:
+        passenger_info: A ``PassengerInfo``, or any duck-typed object
+            exposing some subset of ``adults``/``children``/
+            ``infants_on_lap``/``infants_in_seat`` as attributes (missing
+            ones count as zero). ``None`` is treated as an all-zero mix.
+
+    Returns:
+        One code per traveller, in field order. Falls back to ``[1]`` (a
+        single adult) when the mix would otherwise be empty — Google's
+        booking page requires at least one traveller, and that is also the
+        implicit default callers got before this helper existed.
+
+    Raises:
+        ValueError: Any count is not a non-negative ``int`` (``bool``
+            included — it is an ``int`` subclass but not a traveller count),
+            or the total exceeds :data:`_MAX_TOTAL_PASSENGERS`. Checked
+            before building the result list, so a wildly out-of-range count
+            (a duck-typed ``adults=10**6``, say) fails immediately instead of
+            allocating a list that size — callers that pass a validated
+            ``PassengerInfo`` never hit this; it exists for the duck-typed
+            callers this function otherwise tolerates.
+
+    """
+    total = 0
+    counts: list[tuple[int, int]] = []  # (code, count), one pair per field
+    for kind, code in zip(_PASSENGER_FIELDS, (1, 2, 3, 4), strict=False):
+        count = getattr(passenger_info, kind, 0)
+        # `bool` is a subclass of `int` in Python, so `isinstance(True, int)`
+        # is true — excluded explicitly, since `True` is not a traveller count.
+        if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+            raise ValueError(f"passenger_info.{kind} must be a non-negative int, got {count!r}")
+        total += count
+        counts.append((code, count))
+
+    if total > _MAX_TOTAL_PASSENGERS:
+        raise ValueError(
+            f"passenger_info totals {total} travellers, over the "
+            f"{_MAX_TOTAL_PASSENGERS}-traveller limit Google's booking page enforces"
+        )
+
+    codes = [code for code, count in counts for _ in range(count)]
+    return codes or [1]
+
 
 def encode_tfs_segment(
     origin: str,
@@ -351,8 +426,8 @@ def encode_tfs_payload(
             seat). The two infant codes are the ones to get right: a lap
             infant prices at ~10% of the adult fare and an infant in its own
             seat at ~100%, and transposing them produces a plausible wrong
-            quote rather than an error. See ``_PASSENGER_FIELDS`` in
-            :mod:`fli.search._tfs` for the live fare evidence.
+            quote rather than an error. See ``_PASSENGER_FIELDS`` above (and
+            :func:`passenger_codes`) for the live fare evidence.
         seat: Cabin class (1 = economy, 2 = premium, 3 = business, 4 = first).
         pin_max_u64: Emit the field 16 constant that booking deep links
             carry. The search page does not need it.
@@ -375,6 +450,7 @@ def build_tfs_token(
     segments: list[list[LegSpec]],
     *,
     is_one_way: bool = True,
+    passengers: Sequence[int] = (1,),
     seat: int = 1,
 ) -> str:
     """Build the ``tfs`` query parameter for a Google Flights deep-link URL.
@@ -394,6 +470,10 @@ def build_tfs_token(
             direction (one leg for nonstop, two or more for connections).
         is_one_way: ``True`` for one-way; ``False`` for round-trip.
             Controls the ``f19`` constant.
+        passengers: Passenger kind codes, one entry per traveller (field 8).
+            Build these from a search's ``PassengerInfo`` with
+            :func:`passenger_codes`. Defaults to a single adult so existing
+            callers keep producing the captured tokens.
         seat: Cabin class encoded in field 9.  ``1`` = economy, ``2`` =
             premium economy, ``3`` = business, ``4`` = first.  Defaults to
             economy so existing callers keep producing the captured tokens.
@@ -416,4 +496,6 @@ def build_tfs_token(
         encode_tfs_segment(seg[0].origin, seg[-1].dest, seg[0].dep_date, legs=seg)
         for seg in segments
     )
-    return encode_tfs_payload(encoded, is_one_way=is_one_way, seat=seat, pin_max_u64=True)
+    return encode_tfs_payload(
+        encoded, is_one_way=is_one_way, passengers=passengers, seat=seat, pin_max_u64=True
+    )

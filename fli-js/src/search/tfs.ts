@@ -43,7 +43,7 @@ import type { Client } from "./client.ts";
 import { sleep, throwIfAborted } from "./concurrency.ts";
 import { SearchUnsupportedError } from "./exceptions.ts";
 import { getSearchLogger } from "./logging.ts";
-import { encodeTfsPayload, encodeTfsSegment, type LegSpec } from "./proto.ts";
+import { encodeTfsPayload, encodeTfsSegment, type LegSpec, passengerCodes } from "./proto.ts";
 
 /** Filter objects this transport can encode — both carry the same core fields. */
 export type TfsFilters = FlightSearchFilters | DateSearchFilters;
@@ -88,26 +88,6 @@ export function _setPageRetrySleep(fn: SleepFn | null): void {
 const DS_BLOB = /AF_initDataCallback\((\{[\s\S]*?\})\);/g;
 const DS_KEY = /key:\s*'([^']+)'/;
 const DS_DATA = /data:([\s\S]*?), sideChannel/;
-
-/**
- * Passenger kinds, in the order Google's repeated field 8 numbers them:
- * 1 = adult, 2 = child, 3 = infant on lap, 4 = infant in own seat.
- *
- * The two infant codes are easy to transpose and the mistake is expensive
- * rather than loud: on an international route a lap infant prices at ~10%
- * of the adult fare and an infant in its own seat at ~100%, so a swap
- * quotes a plausible but wrong fare instead of erroring. Pricing one fixed
- * itinerary (BA178 JFK->LHR, economy) confirms the mapping — $295 for
- * `[1]`, $324 for `[1, 3]` (+10%, lap), $589 for `[1, 4]` (+100%, own
- * seat, same as the `[1, 2]` child fare). The legacy RPC struct orders the
- * same four counts `[adults, children, infants_on_lap, infants_in_seat]`.
- */
-const PASSENGER_FIELDS = [
-  ["adults", 1],
-  ["children", 2],
-  ["infants_on_lap", 3],
-  ["infants_in_seat", 4],
-] as const;
 
 /**
  * Filters with no `tfs` encoding and no reliable post-hoc equivalent —
@@ -182,11 +162,7 @@ export function buildTfs(filters: TfsFilters, options: BuildTfsOptions = {}): st
 
   const travelDates = options.travelDates ?? null;
   const stops = filters.stops;
-  const passengers: number[] = [];
-  for (const [field, code] of PASSENGER_FIELDS) {
-    const count = filters.passenger_info[field] ?? 0;
-    for (let i = 0; i < count; i++) passengers.push(code);
-  }
+  const passengers = passengerCodes(filters.passenger_info);
 
   // Google reads alliances out of the same carrier lists as airline codes.
   const carriers = (filters.alliances ?? []).map((a) => String(a));
@@ -231,7 +207,7 @@ export function buildTfs(filters: TfsFilters, options: BuildTfsOptions = {}): st
 
   return encodeTfsPayload(segments, {
     isOneWay: filters.trip_type === TripType.ONE_WAY,
-    passengers: passengers.length > 0 ? passengers : [1],
+    passengers,
     seat: filters.seat_type,
   });
 }

@@ -248,6 +248,7 @@ def _search_flights_core(
                 language=language,
                 country=country,
                 seat_type=seat_type,
+                passenger_info=filters.passenger_info,
             )
             for result in results
         ]

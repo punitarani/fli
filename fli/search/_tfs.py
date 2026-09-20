@@ -37,7 +37,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from fli.models.google_flights.base import TripType
-from fli.search._proto import LegSpec, encode_tfs_payload, encode_tfs_segment
+from fli.search._proto import LegSpec, encode_tfs_payload, encode_tfs_segment, passenger_codes
 from fli.search.exceptions import SearchUnsupportedError
 
 if TYPE_CHECKING:
@@ -68,20 +68,6 @@ _sleep = time.sleep
 _DS_BLOB = re.compile(r"AF_initDataCallback\((\{.*?\})\);", re.S)
 _DS_KEY = re.compile(r"key:\s*'([^']+)'")
 _DS_DATA = re.compile(r"data:(.*?), sideChannel", re.S)
-
-# Passenger kinds, in the order Google's repeated field 8 numbers them:
-# 1 = adult, 2 = child, 3 = infant on lap, 4 = infant in own seat.
-#
-# The two infant codes are easy to transpose and the mistake is expensive
-# rather than loud: on an international route a lap infant prices at ~10% of
-# the adult fare and an infant in its own seat at ~100%, so a swap quotes a
-# plausible but wrong fare instead of erroring. Pricing one fixed itinerary
-# (BA178 JFK->LHR, economy) confirms the mapping — $295 for ``[1]``, $324 for
-# ``[1, 3]`` (+10%, lap), $589 for ``[1, 4]`` (+100%, own seat, same as the
-# ``[1, 2]`` child fare). The legacy RPC struct orders the same four counts
-# ``[adults, children, infants_on_lap, infants_in_seat]``; see
-# ``FlightSearchFilters.format`` in :mod:`fli.models.google_flights.flights`.
-_PASSENGER_FIELDS = ("adults", "children", "infants_on_lap", "infants_in_seat")
 
 # Filters with no ``tfs`` encoding and no reliable post-hoc equivalent —
 # the decoded rows don't carry the data needed to apply them locally.
@@ -145,11 +131,7 @@ def build_tfs(filters: Any, *, travel_dates: list[str] | None = None) -> str:
         )
 
     stops = filters.stops.value
-    passengers = [
-        code
-        for kind, code in zip(_PASSENGER_FIELDS, (1, 2, 3, 4), strict=False)
-        for _ in range(getattr(filters.passenger_info, kind, 0))
-    ]
+    passengers = passenger_codes(filters.passenger_info)
 
     # Google reads alliances out of the same carrier lists as airline codes.
     carriers = [a.value for a in (getattr(filters, "alliances", None) or [])]
@@ -177,7 +159,7 @@ def build_tfs(filters: Any, *, travel_dates: list[str] | None = None) -> str:
     return encode_tfs_payload(
         segments,
         is_one_way=filters.trip_type == TripType.ONE_WAY,
-        passengers=passengers or [1],
+        passengers=passengers,
         seat=filters.seat_type.value,
     )
 

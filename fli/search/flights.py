@@ -19,6 +19,7 @@ from fli.models import (
     BookingOption,
     FlightResult,
     FlightSearchFilters,
+    PassengerInfo,
     SeatType,
 )
 from fli.models.google_flights.base import SortBy, TripType
@@ -405,6 +406,7 @@ class SearchFlights:
         language: str | None = None,
         country: str | None = None,
         seat_type: SeatType = SeatType.ECONOMY,
+        passenger_info: PassengerInfo | None = None,
     ) -> str:
         """Build a Google Flights deep-link URL for a specific itinerary.
 
@@ -427,12 +429,16 @@ class SearchFlights:
             country: ISO 3166-1 alpha-2 country code appended as ``gl=``.
             seat_type: Cabin class encoded into the ``tfs`` token (field 9).
                 Defaults to economy for backward compatibility.
+            passenger_info: Passenger mix encoded into the ``tfs`` token
+                (field 8, one entry per traveller). ``None`` defaults to a
+                single adult, matching this method's output before this
+                parameter existed.
 
         Returns:
             A ``https://www.google.com/travel/flights/booking?tfs=…`` URL.
 
         """
-        from fli.search._proto import LegSpec, build_tfs_token
+        from fli.search._proto import LegSpec, build_tfs_token, passenger_codes
 
         def _iata(airport: object) -> str:
             # Handle both Airport enum (has .name) and plain strings.
@@ -455,7 +461,12 @@ class SearchFlights:
                     for leg in result.legs
                 ]
                 segments.append(seg_legs)
-            tfs = build_tfs_token(segments, is_one_way=is_one_way, seat=seat_type.value)
+            tfs = build_tfs_token(
+                segments,
+                is_one_way=is_one_way,
+                passengers=passenger_codes(passenger_info),
+                seat=seat_type.value,
+            )
             url = f"https://www.google.com/travel/flights/booking?tfs={tfs}"
         except Exception:
             logger.debug("build_flight_booking_url: tfs construction failed", exc_info=True)
