@@ -47,6 +47,12 @@ def _future(days: int) -> str:
 def _result(dep: Airport, arr: Airport, hour: int = 9) -> FlightResult:
     # hour stays well under 24 for every caller below (max 6 + 9 = 15), so a
     # plain ``hour + 3`` arrival never needs to roll over into the next day.
+    # Relative to "now" (fix round 1, I3) — this is leg metadata for a
+    # fabricated FlightResult, not a search filter's travel_date, but the
+    # file's own rule (never a literal calendar date) still applies to it.
+    departure = (datetime.now() + timedelta(days=35)).replace(
+        hour=hour, minute=0, second=0, microsecond=0
+    )
     return FlightResult(
         legs=[
             FlightLeg(
@@ -54,8 +60,8 @@ def _result(dep: Airport, arr: Airport, hour: int = 9) -> FlightResult:
                 flight_number="100",
                 departure_airport=dep,
                 arrival_airport=arr,
-                departure_datetime=datetime(2026, 7, 15, hour, 0),
-                arrival_datetime=datetime(2026, 7, 15, hour + 3, 0),
+                departure_datetime=departure,
+                arrival_datetime=departure + timedelta(hours=3),
                 duration=180,
             )
         ],
@@ -128,6 +134,44 @@ class TestTopNBoundsValidation:
         monkeypatch.setattr(SearchFlights, "_fetch_flights", _unexpected_call)
         with pytest.raises(ValueError):
             client.search(_round_trip_filters(), top_n=bad_top_n)
+
+
+class TestTopNTypeValidation:
+    """Fix round 1, C1/I2: non-int top_n (and bool) must raise ValueError, not TypeError.
+
+    A bare ``if not 1 <= top_n <= 10:`` comparison against a non-comparable
+    type (``"5"``, ``None``) raises ``TypeError`` from Python itself, which
+    ``classify_error()`` does NOT map to ``validation_error`` (it only
+    matches ``ValidationError | ValueError``) — so it would have surfaced as
+    ``unexpected_error`` instead. ``bool`` is an ``int`` subclass in Python
+    (``True == 1``), so it silently passed the old bound check too; the
+    ruling for this fix is to reject it explicitly rather than accept it as
+    1.
+    """
+
+    @pytest.mark.parametrize("bad_top_n", ["5", 5.0, None, True, False])
+    def test_non_int_or_bool_raises_value_error_not_type_error(self, bad_top_n):
+        client = SearchFlights()
+        with pytest.raises(ValueError, match="top_n"):
+            client.search(_round_trip_filters(), top_n=bad_top_n)
+
+    @pytest.mark.parametrize("bad_top_n", ["5", 5.0, None, True, False])
+    def test_non_int_or_bool_never_reaches_the_network(self, bad_top_n, monkeypatch):
+        client = SearchFlights()
+
+        def _unexpected_call(*_args, **_kwargs):
+            raise AssertionError("_fetch_flights should not be called for a non-int/bool top_n")
+
+        monkeypatch.setattr(SearchFlights, "_fetch_flights", _unexpected_call)
+        with pytest.raises(ValueError):
+            client.search(_round_trip_filters(), top_n=bad_top_n)
+
+    @pytest.mark.parametrize("good_top_n", [1, 10])
+    def test_valid_edge_ints_still_pass(self, good_top_n, monkeypatch):
+        """1 and 10 are valid int boundaries — must not be caught by the new type check."""
+        client = SearchFlights()
+        monkeypatch.setattr(SearchFlights, "_fetch_flights", lambda self, *a, **k: None)
+        assert client.search(_round_trip_filters(), top_n=good_top_n) is None
 
 
 class TestTopNFetchCount:

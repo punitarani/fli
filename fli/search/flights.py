@@ -152,15 +152,19 @@ class SearchFlights:
             when no results.
 
         Raises:
-            ValueError: ``top_n`` is outside ``1..10`` inclusive.
+            ValueError: ``top_n`` is not an ``int`` (``bool`` included — a
+                Python ``int`` subclass, rejected explicitly rather than
+                silently treated as ``0``/``1``) or is outside ``1..10``
+                inclusive.
             Exception: HTTP failure or unparseable response.
 
         """
-        if not 1 <= top_n <= 10:
+        if not isinstance(top_n, int) or isinstance(top_n, bool) or not 1 <= top_n <= 10:
             raise ValueError(
-                f"top_n must be between 1 and 10 (inclusive); got {top_n}. It controls "
-                "how many outbound options a round-trip search expands into return-flight "
-                "combinations — cost is `1 + top_n` page fetches, hence the cap."
+                f"top_n must be an integer between 1 and 10 (inclusive); got {top_n!r} "
+                f"({type(top_n).__name__}). It controls how many outbound options a "
+                "round-trip search expands into return-flight combinations — cost is "
+                "`1 + top_n` page fetches, hence the cap."
             )
         flights = self._fetch_flights(
             filters,
