@@ -14,6 +14,13 @@ class TestFindAirports:
         assert top["match_type"] == "iata_exact"
         assert "name" in top and isinstance(top["name"], str)
 
+    def test_icao_code_returns_the_iata_airport(self):
+        result = _find_airports_impl("KJFK")
+        assert result["success"] is True
+        top = result["airports"][0]
+        assert top["code"] == "JFK"
+        assert top["match_type"] == "icao_exact"
+
     def test_city_query_returns_multiple_airports(self):
         result = _find_airports_impl("new york")
         codes = {a["code"] for a in result["airports"]}

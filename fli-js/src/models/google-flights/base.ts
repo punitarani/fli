@@ -173,6 +173,50 @@ export const LayoverRestrictionsSchema = z.object({
 });
 export type LayoverRestrictions = z.infer<typeof LayoverRestrictionsSchema>;
 
+/** In-seat power flavour decoded from the leg[12] power slot group. */
+export const POWER_TYPES = ["plug_and_usb", "plug", "usb"] as const;
+export type PowerType = (typeof POWER_TYPES)[number];
+
+/** In-flight entertainment flavour decoded from the leg[12] video group. */
+export const VIDEO_TYPES = ["live_tv", "on_demand", "stream_to_device"] as const;
+export type VideoType = (typeof VIDEO_TYPES)[number];
+
+/** Whether Google flags the leg's Wi-Fi as complimentary or chargeable. */
+export const WIFI_TIERS = ["free", "paid"] as const;
+export type WifiTier = (typeof WIFI_TIERS)[number];
+
+/**
+ * Human-readable label for Google's leg[13] seat-quality code.
+ *
+ * These are labels, not an ordered score: "average"/"below_average"/
+ * "above_average" describe an economy-style pitch, while the remaining four
+ * name a seat *product*. The code tracks the fare's cabin rather than the
+ * airframe — in the captured fixtures AA 1209 (ORD-LAX, 737 MAX 8) appears
+ * twice, as "average" in economy and "recliner" in first.
+ */
+export const SEAT_QUALITIES = [
+  "average",
+  "below_average",
+  "above_average",
+  "extra_reclining",
+  "lie_flat",
+  "lie_flat_suite_with_door",
+  "recliner",
+] as const;
+export type SeatQuality = (typeof SEAT_QUALITIES)[number];
+
+/**
+ * Per-leg amenities reported by Google Flights. Booleans are tri-state
+ * (true / false / null when Google did not publish that signal).
+ *
+ * Google never publishes an explicit "no" for any of these amenities — the
+ * wire format only ever sets a flag or omits it — so `false` is always an
+ * inference and is used exactly once: `in_seat_video` is false when
+ * `video_type === "stream_to_device"`, which is Google's way of saying the
+ * aircraft has no seatback screen. Every other unknown stays null,
+ * including `usb_power` for a plug-only cabin and `on_demand_video` for a
+ * live-TV or stream-to-device leg.
+ */
 export const AmenitiesSchema = z.object({
   wifi: z.boolean().nullable().optional(),
   power: z.boolean().nullable().optional(),
@@ -180,6 +224,13 @@ export const AmenitiesSchema = z.object({
   in_seat_video: z.boolean().nullable().optional(),
   on_demand_video: z.boolean().nullable().optional(),
   legroom_rating: z.number().int().nonnegative().nullable().optional(),
+  // Optional detail — populated only for slot values confirmed against
+  // captured responses, so callers never see a confidently wrong label.
+  wifi_tier: z.enum(WIFI_TIERS).nullable().optional(),
+  power_type: z.enum(POWER_TYPES).nullable().optional(),
+  video_type: z.enum(VIDEO_TYPES).nullable().optional(),
+  seat_quality: z.enum(SEAT_QUALITIES).nullable().optional(),
+  legroom_inches: z.number().int().positive().nullable().optional(),
 });
 export type Amenities = z.infer<typeof AmenitiesSchema>;
 
@@ -210,6 +261,11 @@ export interface FlightLeg {
   amenities?: Amenities | null;
   overnight?: boolean;
   co2_emissions_g?: number | null;
+  /**
+   * Cabin actually flown on this leg, from leg[16]. Per-leg, so a business
+   * itinerary can still show an economy connecting leg.
+   */
+  cabin?: SeatType | null;
 }
 
 export interface BookingOption {

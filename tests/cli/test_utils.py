@@ -579,3 +579,12 @@ def test_serialize_flight_result_extracted_currency_takes_precedence():
     payload = serialize_flight_result(flight, default_currency="CAD")
 
     assert payload["currency"] == "GBP"
+
+
+def test_format_airport_does_not_repeat_the_disambiguation_code():
+    """Disambiguated names (e.g. "Naha Airport (OKA)") must not render the code twice."""
+    from fli.cli.utils import format_airport
+    from fli.models import Airport
+
+    assert format_airport(Airport.OKA) == "OKA (Naha Airport)"
+    assert format_airport(Airport.JFK).startswith("JFK (John F Kennedy")

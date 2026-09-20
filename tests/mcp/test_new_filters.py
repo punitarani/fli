@@ -308,3 +308,72 @@ class TestPassengerMix:
         assert info.children == 1
         assert info.infants_in_seat == 1
         assert info.infants_on_lap == 1
+
+
+# ---------------------------------------------------------------------------
+# passenger mix — invalid combinations surface as clean success:false errors
+# ---------------------------------------------------------------------------
+
+
+class TestPassengerMixValidation:
+    """A passenger mix Google Flights would reject returns ``success: false``.
+
+    ``PassengerInfo`` raises a pydantic ``ValidationError`` for these; the
+    tool layer already turns any ``ValidationError`` into a
+    ``success: False`` payload with the specific pydantic message (see
+    ``_format_validation_error`` usage introduced by #215) — these tests
+    confirm that also covers the new passenger-count validator.
+    """
+
+    def test_search_flights_rejects_too_many_total_passengers(self):
+        params = FlightSearchParams(
+            origin="JFK",
+            destination="LAX",
+            departure_date=_future(30),
+            passengers=9,
+            children=1,
+        )
+        result = _search_flights_from_params(params)
+        assert result["success"] is False
+        assert "Total passengers must be between 1 and 9" in result["error"]
+        assert result["flights"] == []
+
+    def test_search_flights_rejects_lap_infants_over_adults(self):
+        params = FlightSearchParams(
+            origin="JFK",
+            destination="LAX",
+            departure_date=_future(30),
+            passengers=1,
+            infants_on_lap=3,
+        )
+        result = _search_flights_from_params(params)
+        assert result["success"] is False
+        assert "infants_on_lap" in result["error"]
+        assert result["flights"] == []
+
+    def test_search_dates_rejects_too_many_total_passengers(self):
+        params = DateSearchParams(
+            origin="JFK",
+            destination="LAX",
+            start_date=_future(30),
+            end_date=_future(60),
+            passengers=9,
+            children=1,
+        )
+        result = _search_dates_from_params(params)
+        assert result["success"] is False
+        assert "Total passengers must be between 1 and 9" in result["error"]
+        assert result["dates"] == []
+
+    def test_get_booking_options_rejects_lap_infants_over_adults(self):
+        params = FlightSearchParams(
+            origin="JFK",
+            destination="LAX",
+            departure_date=_future(30),
+            passengers=1,
+            infants_on_lap=3,
+        )
+        result = _get_booking_options_from_params(params)
+        assert result["success"] is False
+        assert "infants_on_lap" in result["error"]
+        assert result["options"] == []

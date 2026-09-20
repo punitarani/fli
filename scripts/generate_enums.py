@@ -28,9 +28,56 @@ iteration) is identical to the previous form.
 """
 
 import csv
+from collections import Counter
 from pathlib import Path
 
 PROJECT_DIR = Path(__file__).parents[1].resolve()
+
+
+def _disambiguate_names(entries: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Append IATA codes to duplicate names so every Enum value is unique.
+
+    Python's ``Enum`` treats members with the same value as aliases — the
+    second silently becomes an alias for the first.  This function detects
+    duplicate human-readable names and appends `` (CODE)`` to *all*
+    members of each duplicate group (including the first) so every entry
+    gets its own distinct Enum member.
+
+    Entries with unique names are left untouched.
+    """
+    name_counts = Counter(name for _, name in entries)
+    duplicates = {name for name, count in name_counts.items() if count > 1}
+    if not duplicates:
+        return entries
+    return [(code, f"{name} ({code})" if name in duplicates else name) for code, name in entries]
+
+
+def _assert_unique(entries: list[tuple[str, str]], enum_name: str) -> None:
+    """Raise ``ValueError`` if any sanitized code or final name repeats.
+
+    Must run *after* :func:`_disambiguate_names` so it validates exactly
+    what :func:`_write_enum_module` is about to emit as
+    ``Enum(name, mapping)``: duplicate sanitized identifiers collide as
+    dict keys (the later entry silently overwrites the earlier one), and
+    duplicate names collide as dict values (Python's ``Enum`` silently
+    turns the second member into an alias of the first — the original bug
+    this script exists to prevent).
+    """
+    allow_digit_prefix = enum_name == "Airline"
+    sanitized_codes = [_sanitize_code(code, allow_digit_prefix) for code, _ in entries]
+    code_counts = Counter(sanitized_codes)
+    dup_codes = sorted(code for code, count in code_counts.items() if count > 1)
+    if dup_codes:
+        raise ValueError(
+            f"Duplicate sanitized {enum_name} codes after sanitization: {', '.join(dup_codes)}"
+        )
+
+    name_counts = Counter(name for _, name in entries)
+    dup_names = sorted(name for name, count in name_counts.items() if count > 1)
+    if dup_names:
+        raise ValueError(
+            f"Duplicate {enum_name} names remain after disambiguation: {', '.join(dup_names)}"
+        )
 
 
 def _sanitize_code(code: str, allow_digit_prefix: bool = False) -> str:
@@ -116,6 +163,8 @@ def generate_airport_enum() -> None:
     except (KeyError, csv.Error) as e:
         raise ValueError(f"Error reading CSV file: {e}") from e
 
+    entries = _disambiguate_names(entries)
+    _assert_unique(entries, enum_name="Airport")
     _write_enum_module(
         out_path,
         enum_name="Airport",
@@ -159,6 +208,8 @@ def generate_airline_enum() -> None:
         ]
     )
 
+    entries = _disambiguate_names(entries)
+    _assert_unique(entries, enum_name="Airline")
     _write_enum_module(
         out_path,
         enum_name="Airline",

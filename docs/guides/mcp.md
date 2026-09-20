@@ -40,6 +40,10 @@ run_http(host="0.0.0.0", port=8000)
 
 Once running, the MCP endpoint is served at `/mcp/`, for example: `http://127.0.0.1:8000/mcp/`.
 
+A liveness probe is available at `/health` (returns `{"status": "ok"}`). It is what the
+`docker-compose.yml` healthcheck calls, and it does not contact Google Flights, so an upstream
+outage will not cause a healthy container to be restarted.
+
 ## Claude Desktop Configuration
 
 Add this configuration to your `claude_desktop_config.json`:
@@ -86,6 +90,15 @@ Search for flights between two airports on a specific date.
 | `country` | string | No | null | ISO 3166-1 alpha-2 code (`gl=`) — e.g. 'GB' |
 | `sort_by` | string | No | CHEAPEST | CHEAPEST, DURATION, DEPARTURE_TIME, or ARRIVAL_TIME |
 | `passengers` | int | No | 1 | Number of adult passengers |
+| `children` | int | No | 0 | Number of children (ages 2-11) |
+| `infants_in_seat` | int | No | 0 | Number of infants (under 2) occupying their own seat |
+| `infants_on_lap` | int | No | 0 | Number of lap infants (under 2, no seat) |
+
+> **Passenger limits:** total travelers (`passengers + children + infants_in_seat +
+> infants_on_lap`) must be between 1 and 9, and `infants_on_lap` cannot exceed
+> `passengers` — Google Flights' own booking limits. An invalid mix returns
+> `success: false` with the specific problem (e.g. `"Total passengers must be
+> between 1 and 9 (got 10: ...)"`), not a generic error.
 
 **Example Response:**
 
@@ -151,6 +164,12 @@ Find the cheapest travel dates between two airports within a date range.
 | `country` | string | No | null | ISO 3166-1 alpha-2 country (`gl=`) |
 | `sort_by_price` | bool | No | false | Sort results by price (lowest first) |
 | `passengers` | int | No | 1 | Number of adult passengers |
+| `children` | int | No | 0 | Number of children (ages 2-11) |
+| `infants_in_seat` | int | No | 0 | Number of infants (under 2) occupying their own seat |
+| `infants_on_lap` | int | No | 0 | Number of lap infants (under 2, no seat) |
+
+> **Passenger limits:** same as `search_flights` — total travelers 1-9, and
+> `infants_on_lap` cannot exceed `passengers`.
 
 **Example Response:**
 
@@ -204,6 +223,9 @@ find out where (and at what price) a specific flight can be booked.
 | `cabin_class` | string | No | ECONOMY | ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST |
 | `max_stops` | string | No | ANY | ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS |
 | `passengers` | int | No | 1 | Number of adult passengers |
+| `children` | int | No | 0 | Number of children (ages 2-11) |
+| `infants_in_seat` | int | No | 0 | Number of infants (under 2) occupying their own seat |
+| `infants_on_lap` | int | No | 0 | Number of lap infants (under 2, no seat) — cannot exceed `passengers` |
 | `airlines` | list | No | null | Filter by airline codes (e.g., ['BA', 'AA']) |
 | `exclude_basic_economy` | bool | No | false | Exclude basic economy fares |
 | `departure_window` | string | No | null | Time window in 'HH-HH' format (e.g., '6-20') |

@@ -6,6 +6,7 @@ Models are designed to match Google Flights' APIs while providing a clean python
 
 from datetime import date, datetime, timedelta, timezone
 from enum import Enum
+from typing import Literal
 
 from pydantic import (
     BaseModel,
@@ -200,12 +201,38 @@ class TimeRestrictions(BaseModel):
 
 
 class PassengerInfo(BaseModel):
-    """Passenger configuration for flight search."""
+    """Passenger configuration for flight search.
+
+    Validation Rules:
+        - Total passengers (adults + children + infants) must be between 1 and 9 —
+          Google Flights refuses to price a booking outside that range.
+        - ``infants_on_lap`` cannot exceed ``adults`` — every lap infant needs an
+          adult to sit with.
+    """
 
     adults: NonNegativeInt = 1
     children: NonNegativeInt = 0
     infants_in_seat: NonNegativeInt = 0
     infants_on_lap: NonNegativeInt = 0
+
+    @model_validator(mode="after")
+    def validate_passenger_counts(self) -> "PassengerInfo":
+        """Enforce Google Flights' booking-wide passenger limits."""
+        total = self.adults + self.children + self.infants_in_seat + self.infants_on_lap
+        if not 1 <= total <= 9:
+            raise ValueError(
+                "Total passengers must be between 1 and 9 "
+                f"(got {total}: {self.adults} adults, {self.children} children, "
+                f"{self.infants_in_seat} infants in seat, {self.infants_on_lap} infants on lap)"
+            )
+
+        if self.infants_on_lap > self.adults:
+            raise ValueError(
+                f"infants_on_lap ({self.infants_on_lap}) cannot exceed adults ({self.adults}); "
+                "each lap infant must be paired with an adult"
+            )
+
+        return self
 
 
 class PriceLimit(BaseModel):
@@ -243,13 +270,55 @@ class LayoverRestrictions(BaseModel):
     max_duration: PositiveInt | None = None
 
 
+#: In-seat power flavour decoded from the ``leg[12]`` power slot group.
+PowerType = Literal["plug_and_usb", "plug", "usb"]
+
+#: In-flight entertainment flavour decoded from the ``leg[12]`` video group.
+VideoType = Literal["live_tv", "on_demand", "stream_to_device"]
+
+#: Whether Google flags the leg's Wi-Fi as complimentary or chargeable.
+WifiTier = Literal["free", "paid"]
+
+#: Human-readable label for Google's ``leg[13]`` seat-quality code.
+#:
+#: These are labels, not an ordered score: "average"/"below_average"/
+#: "above_average" describe an economy-style pitch, while the remaining
+#: four name a seat *product*. The code tracks the fare's cabin rather
+#: than the airframe — in the captured fixtures AA 1209 (ORD-LAX, 737
+#: MAX 8) appears twice, as "average" in economy and "recliner" in first.
+SeatQuality = Literal[
+    "average",
+    "below_average",
+    "above_average",
+    "extra_reclining",
+    "lie_flat",
+    "lie_flat_suite_with_door",
+    "recliner",
+]
+
+
 class Amenities(BaseModel):
     """Per-leg amenities reported by Google Flights.
 
     Boolean fields are tri-state (`True`, `False`, or `None` when Google did
     not publish that signal). ``legroom_rating`` is Google's seat-quality
     code from ``leg[13]``, or ``None`` when unavailable; it is not an ordered
-    numeric score or the Wi-Fi tier.
+    numeric score or the Wi-Fi tier. ``seat_quality`` is the decoded label
+    for that same code and is ``None`` for codes we have not confirmed.
+
+    The optional detail fields (``wifi_tier``, ``power_type``,
+    ``video_type``, ``seat_quality``, ``legroom_inches``) refine the
+    booleans above rather than replacing them: e.g. ``power=True`` plus
+    ``power_type="usb"`` means "charging available, USB only".
+
+    Google never publishes an explicit "no" for any of these amenities —
+    the wire format only ever sets a flag or omits it — so ``False`` is
+    always an inference and is used exactly once: ``in_seat_video`` is
+    ``False`` when ``video_type == "stream_to_device"``, which is
+    Google's way of saying the aircraft has no seatback screen. Every
+    other unknown stays ``None``, including ``usb_power`` for a
+    plug-only cabin and ``on_demand_video`` for a live-TV or
+    stream-to-device leg.
     """
 
     wifi: bool | None = None
@@ -258,6 +327,15 @@ class Amenities(BaseModel):
     in_seat_video: bool | None = None
     on_demand_video: bool | None = None
     legroom_rating: NonNegativeInt | None = None
+
+    # Optional detail — populated only for slot values confirmed against
+    # captured responses; left None when Google publishes a code we have
+    # not verified, so callers never see a confidently wrong label.
+    wifi_tier: WifiTier | None = None
+    power_type: PowerType | None = None
+    video_type: VideoType | None = None
+    seat_quality: SeatQuality | None = None
+    legroom_inches: PositiveInt | None = None
 
 
 class Layover(BaseModel):
@@ -305,6 +383,9 @@ class FlightLeg(BaseModel):
     amenities: Amenities | None = None
     overnight: bool = False
     co2_emissions_g: NonNegativeInt | None = None
+    #: Cabin actually flown on this leg, from ``leg[16]``. Per-leg, so a
+    #: business itinerary can still show an economy connecting leg.
+    cabin: SeatType | None = None
 
 
 class BookingOption(BaseModel):

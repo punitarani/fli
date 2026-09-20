@@ -14,11 +14,14 @@ from fastmcp import FastMCP
 from mcp.types import Icon
 from pydantic import BaseModel, Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from fli.core import (
     build_date_search_segments,
     build_flight_segments,
     build_time_restrictions,
+    format_validation_error,
     google_flights_url,
     parse_airlines,
     parse_alliances,
@@ -91,6 +94,16 @@ mcp = FastMCP(
         )
     ],
 )
+
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health_check(_request: Request) -> JSONResponse:
+    """Liveness probe for container healthchecks (see ``docker-compose.yml``).
+
+    Deliberately does not call Google Flights: an upstream outage should not
+    make the orchestrator restart an otherwise healthy server.
+    """
+    return JSONResponse({"status": "ok"})
 
 
 # =============================================================================
@@ -296,20 +309,6 @@ class DateSearchParams(BaseModel):
 # =============================================================================
 
 
-def _format_validation_error(exc: ValidationError) -> str:
-    """Flatten a pydantic ValidationError into one actionable message.
-
-    The underlying validators already say exactly what is wrong ("Travel date
-    cannot be in the past"); callers only ever saw "Invalid parameter value",
-    which gives an agent nothing to correct.
-    """
-    problems = []
-    for error in exc.errors():
-        location = ".".join(str(part) for part in error["loc"]) or "input"
-        problems.append(f"{location}: {error['msg']}")
-    return f"Invalid parameter value - {'; '.join(problems)}"
-
-
 def _airline_code(airline: Any) -> str:
     return getattr(airline, "name", str(airline)).lstrip("_")
 
@@ -432,6 +431,12 @@ def _serialize_flight_leg(leg: Any) -> dict[str, Any]:
         out["aircraft"] = leg.aircraft
     if getattr(leg, "legroom", None):
         out["legroom"] = leg.legroom
+    cabin_name = getattr(getattr(leg, "cabin", None), "name", None)
+    if isinstance(cabin_name, str):
+        # Report the SeatType member name (ECONOMY / BUSINESS / ...) so it
+        # matches the `cabin_class` tool parameter rather than Google's
+        # numeric code.
+        out["cabin"] = cabin_name
     if getattr(leg, "overnight", False):
         out["overnight"] = True
     amenities = getattr(leg, "amenities", None)
@@ -711,7 +716,7 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
     except ParseError as e:
         return {"success": False, "error": str(e), "flights": []}
     except ValidationError as e:
-        return {"success": False, "error": _format_validation_error(e), "flights": []}
+        return {"success": False, "error": format_validation_error(e), "flights": []}
     except Exception as e:
         return {"success": False, "error": f"Search failed: {e}", "flights": []}
 
@@ -806,7 +811,7 @@ def _execute_booking_options(
     except ParseError as e:
         return {"success": False, "error": str(e), "options": []}
     except ValidationError as e:
-        return {"success": False, "error": _format_validation_error(e), "options": []}
+        return {"success": False, "error": format_validation_error(e), "options": []}
     except Exception as e:
         return {"success": False, "error": f"Booking lookup failed: {e}", "options": []}
 
@@ -910,7 +915,7 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
     except ParseError as e:
         return {"success": False, "error": str(e), "dates": []}
     except ValidationError as e:
-        return {"success": False, "error": _format_validation_error(e), "dates": []}
+        return {"success": False, "error": format_validation_error(e), "dates": []}
     except Exception as e:
         return {"success": False, "error": f"Search failed: {str(e)}", "dates": []}
 
@@ -1448,17 +1453,19 @@ def find_airports(
         str,
         Field(
             description=(
-                "City name, airport name, or IATA code (e.g., 'new york', 'heathrow', 'JFK')"
+                "City name, airport name, IATA code, or ICAO code "
+                "(e.g., 'new york', 'heathrow', 'JFK', 'KJFK')"
             )
         ),
     ],
     limit: Annotated[int, Field(description="Maximum results to return", ge=1, le=50)] = 10,
 ) -> dict[str, Any]:
-    """Search for airports by city name, airport name, or IATA code.
+    """Search for airports by city name, airport name, IATA code, or ICAO code.
 
     Use this tool to find airport IATA codes before searching for flights.
     Supports city names (e.g., "new york" returns JFK, LGA, EWR),
-    airport names (e.g., "heathrow" returns LHR), and IATA codes.
+    airport names (e.g., "heathrow" returns LHR), IATA codes, and 4-letter
+    ICAO codes (e.g., "KJFK" returns JFK).
     """
     return _find_airports_impl(query, limit=limit)
 
