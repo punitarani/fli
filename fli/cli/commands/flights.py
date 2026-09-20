@@ -37,6 +37,7 @@ from fli.models import (
     FlightSearchFilters,
     LayoverRestrictions,
     PassengerInfo,
+    TripType,
 )
 from fli.search import SearchClientError, SearchFlights
 
@@ -70,6 +71,7 @@ def _search_flights_core(
     children: int = 0,
     infants_in_seat: int = 0,
     infants_on_lap: int = 0,
+    top_n: int | None = None,
 ) -> None:
     """Core flight search functionality."""
     query: dict[str, Any] = {
@@ -140,6 +142,26 @@ def _search_flights_core(
             time_restrictions=time_restrictions,
         )
 
+        # `--top-n` only matters once there is a return leg to expand into —
+        # it controls how many outbound candidates get chased into
+        # GetShoppingResults calls for the return flight (see
+        # SearchFlights.search / _expand_multi_leg). Left at its Typer
+        # default of None, it silently resolves to the library default (5)
+        # for both trip types. Set explicitly on a one-way search, it can
+        # never take effect, so we reject it instead of silently ignoring a
+        # flag the caller thought was doing something.
+        if trip_type == TripType.ONE_WAY:
+            if top_n is not None:
+                raise ValueError(
+                    "--top-n only applies to round-trip searches (it controls how many "
+                    "outbound options are expanded into return flights); remove it for "
+                    "a one-way search."
+                )
+            effective_top_n = 5
+        else:
+            effective_top_n = top_n if top_n is not None else 5
+            query["top_n"] = effective_top_n
+
         # Shareable Google Flights deep link for this search.
         booking_url = google_flights_url(
             origin_airports[0].name.lstrip("_"),
@@ -195,6 +217,7 @@ def _search_flights_core(
         search_client = SearchFlights()
         results = search_client.search(
             filters,
+            top_n=effective_top_n,
             currency=currency,
             language=language,
             country=country,
@@ -557,6 +580,18 @@ def flights(
             min=0,
         ),
     ] = 0,
+    top_n: Annotated[
+        int | None,
+        typer.Option(
+            "--top-n",
+            help=(
+                "Round-trip only: number of outbound options to expand into return-flight "
+                "combinations (default 5, 1-10). Cost is `1 + top_n` page fetches. Results "
+                "all from one airline? Raise this to see more carriers, or change --sort. "
+                "Rejected if set on a one-way search."
+            ),
+        ),
+    ] = None,
 ):
     """Search for flights on a specific date.
 
@@ -573,6 +608,7 @@ def flights(
         fli flights BUF ATH 2026-10-25 --min-layover 120
         fli flights JFK LHR 2026-10-25 --passengers 2
         fli flights JFK LHR 2026-10-25 --passengers 2 --children 1 --infants-on-lap 1
+        fli flights JFK LHR 2026-10-25 --return 2026-11-01 --top-n 8
 
     """
     _search_flights_core(
@@ -604,4 +640,5 @@ def flights(
         children=children,
         infants_in_seat=infants_in_seat,
         infants_on_lap=infants_on_lap,
+        top_n=top_n,
     )
