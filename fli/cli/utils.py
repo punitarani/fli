@@ -199,6 +199,9 @@ def serialize_flight_leg(leg: Any) -> dict[str, Any]:
         payload["aircraft"] = leg.aircraft
     if getattr(leg, "legroom", None):
         payload["legroom"] = leg.legroom
+    cabin_name = getattr(getattr(leg, "cabin", None), "name", None)
+    if isinstance(cabin_name, str):
+        payload["cabin"] = cabin_name
     if getattr(leg, "overnight", False):
         payload["overnight"] = True
     if getattr(leg, "operating_airline", None) is not None:

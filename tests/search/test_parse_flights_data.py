@@ -8,7 +8,7 @@ locking down the parser positions we depend on.
 
 import pytest
 
-from fli.models import Airline, Airport
+from fli.models import Airline, Airport, SeatType
 from fli.search.flights import SearchFlights
 
 
@@ -31,7 +31,11 @@ def _leg(
     dep_date=(2026, 7, 15),
     arr_date=(2026, 7, 15),
     co2=224716,
-    cabin=2,
+    # leg[32] is an undecoded field that takes values 1/2/3 with no
+    # relation to the cabin — economy legs in the captured fixtures carry
+    # all three. The per-leg cabin lives at leg[16] (``cabin`` below).
+    field_32=2,
+    cabin=None,
     overnight=False,
     amenities=None,
     legroom_rating=None,
@@ -48,6 +52,7 @@ def _leg(
     leg[12] = amenities
     leg[13] = legroom_rating
     leg[14] = legroom_short
+    leg[16] = cabin
     leg[17] = aircraft
     leg[19] = overnight
     leg[20] = list(dep_date)
@@ -56,7 +61,7 @@ def _leg(
     leg[25] = 1
     leg[30] = legroom_long
     leg[31] = co2
-    leg[32] = cabin
+    leg[32] = field_32
     return leg
 
 
@@ -115,7 +120,10 @@ class TestParseFlightsDataNonStop:
                 _leg(
                     dep_iata="JFK",
                     arr_iata="LAX",
-                    amenities=[None, True, None, None, None, True, None, None, None, True, None, 2],
+                    # Slot 1 = AC-outlet-and-USB power, slot 9 = on-demand
+                    # seatback video, slot 11 = free Wi-Fi. Only one slot in
+                    # 1..6 and one in 8..10 is ever set on a real leg.
+                    amenities=[None, True, None, None, None, None, None, None, None, True, None, 2],
                     legroom_rating=3,
                 )
             ],
@@ -153,10 +161,13 @@ class TestParseFlightsDataNonStop:
         assert am.power is True
         assert am.on_demand_video is True
         assert am.legroom_rating == 3
-        # USB/in-seat-video slots not yet disambiguated — left as None to
-        # avoid lying about what we know.
-        assert am.usb_power is None
-        assert am.in_seat_video is None
+        assert am.usb_power is True
+        assert am.in_seat_video is True
+        assert am.wifi_tier == "free"
+        assert am.power_type == "plug_and_usb"
+        assert am.video_type == "on_demand"
+        assert am.seat_quality == "above_average"
+        assert am.legroom_inches == 31
 
     def test_result_emissions(self):
         assert self.flight.co2_emissions_g == 225000
@@ -173,6 +184,37 @@ class TestParseFlightsDataNonStop:
 
     def test_booking_token(self):
         assert self.flight.booking_token == "CAISA1VTRBoDCNR/sample"
+
+
+class TestCabinCode:
+    """``leg[16]`` decodes to SeatType; ``leg[32]`` is unrelated to it."""
+
+    @pytest.mark.parametrize(
+        ("code", "expected"),
+        [
+            (1, SeatType.ECONOMY),
+            (2, SeatType.PREMIUM_ECONOMY),
+            (3, SeatType.BUSINESS),
+            (4, SeatType.FIRST),
+        ],
+    )
+    def test_decodes_each_cabin_code(self, code, expected):
+        row = _row(legs=[_leg(dep_iata="JFK", arr_iata="LAX", cabin=code)])
+        assert SearchFlights._parse_flights_data(row).legs[0].cabin is expected
+
+    @pytest.mark.parametrize("code", [None, 0, 5, 99, -1, True, "3", 2.0])
+    def test_absent_or_unknown_codes_give_none(self, code):
+        row = _row(legs=[_leg(dep_iata="JFK", arr_iata="LAX", cabin=code)])
+        assert SearchFlights._parse_flights_data(row).legs[0].cabin is None
+
+    def test_field_32_is_not_the_cabin(self):
+        """leg[32] must not leak into ``cabin``.
+
+        It holds 1/2/3 on economy legs throughout the captured fixtures,
+        so reading it as a cabin code would mislabel most of the corpus.
+        """
+        row = _row(legs=[_leg(dep_iata="JFK", arr_iata="LAX", field_32=3, cabin=None)])
+        assert SearchFlights._parse_flights_data(row).legs[0].cabin is None
 
 
 class TestLegroomRating:

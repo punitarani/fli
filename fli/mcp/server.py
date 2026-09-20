@@ -409,6 +409,12 @@ def _serialize_flight_leg(leg: Any) -> dict[str, Any]:
         out["aircraft"] = leg.aircraft
     if getattr(leg, "legroom", None):
         out["legroom"] = leg.legroom
+    cabin_name = getattr(getattr(leg, "cabin", None), "name", None)
+    if isinstance(cabin_name, str):
+        # Report the SeatType member name (ECONOMY / BUSINESS / ...) so it
+        # matches the `cabin_class` tool parameter rather than Google's
+        # numeric code.
+        out["cabin"] = cabin_name
     if getattr(leg, "overnight", False):
         out["overnight"] = True
     amenities = getattr(leg, "amenities", None)
