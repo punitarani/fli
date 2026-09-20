@@ -8,6 +8,7 @@ sweep — none of them touch the network.
 
 from __future__ import annotations
 
+import logging
 import threading
 from datetime import datetime, timedelta
 from typing import Any
@@ -23,8 +24,8 @@ from fli.models import (
     TimeRestrictions,
     TripType,
 )
+from fli.search import _tfs as tfs_module
 from fli.search import dates as dates_module
-from fli.search._concurrency import configure_concurrency, shutdown_executor
 from fli.search.exceptions import SearchClientError, SearchConnectionError
 from tests.search._pages import as_search_page
 
@@ -192,69 +193,72 @@ class TestRowExtractionIsTotal:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def small_pool():
-    """Shrink the shared executor to two workers, then restore the default."""
-    configure_concurrency(2)
-    yield
-    configure_concurrency(10)
-    shutdown_executor(wait=False)
-    # If the sweep deadlocked, its workers are blocked inside a task and will
-    # never drain their queue. ThreadPoolExecutor's atexit hook joins every
-    # live worker, so leaving them registered would turn a fast test failure
-    # into an interpreter that never exits. Detach them so a regression
-    # reports as a failure instead of a hung CI job.
-    import concurrent.futures.thread as _cf_thread
-
-    for thread in list(_cf_thread._threads_queues):
-        if thread.name.startswith("fli-worker") and thread.is_alive():
-            _cf_thread._threads_queues.pop(thread, None)
-
-
 class TestSingleLevelParallelism:
-    def test_sweep_submits_one_batch_of_work(self):
-        """The whole range is mapped once, not once per chunk plus once per date.
+    """The sweep must map the whole range once, never once per chunk again.
 
-        Nesting ``parallel_map`` inside a ``parallel_map`` worker is what makes
-        the deadlock below possible, so pin the shape directly too.
-        """
-        calls: list[int] = []
+    Nesting ``parallel_map`` inside a ``parallel_map`` worker deadlocks: both
+    levels share one bounded pool, so outer tasks can hold every worker while
+    blocking on inner tasks that can never be scheduled.
+
+    These are structural assertions rather than a "does it hang?" test on
+    purpose. A real deadlock parks non-daemon pool workers inside a task, and
+    the interpreter then hangs in ``threading._shutdown`` joining them — so a
+    behavioural test would hang CI on regression no matter how its own timeout
+    is written, and detaching the workers from
+    ``concurrent.futures.thread._threads_queues`` does not prevent it. The
+    assertions below catch the same regression in milliseconds.
+    """
+
+    def _counted_map(self, mp, sizes: list[int]):
         real = dates_module.parallel_map
 
         def _counting(fn, items, **kwargs):
             materialised = list(items)
-            calls.append(len(materialised))
+            sizes.append(len(materialised))
             return real(fn, materialised, **kwargs)
+
+        mp.setattr(dates_module, "parallel_map", _counting)
+
+    def test_sweep_submits_one_batch_of_work(self):
+        """70 dates spanning two chunks are mapped by a single call."""
+        sizes: list[int] = []
+        client = StubClient(_page([_row(150.0)]))
+        search = _search_with(client)
+        with pytest.MonkeyPatch.context() as mp:
+            self._counted_map(mp, sizes)
+            search.search(_filters(days=70))
+        assert sizes == [70], f"expected one flat map over 70 dates, got {sizes}"
+
+    def test_no_parallel_map_runs_inside_a_worker(self):
+        """Pin the property that actually causes the deadlock: no nesting.
+
+        Fails on the old shape, where the per-chunk worker called
+        ``parallel_map`` again while running on a pool thread.
+        """
+        depth = threading.local()
+        nested: list[str] = []
+        real = dates_module.parallel_map
+
+        def _tracking(fn, items, **kwargs):
+            if getattr(depth, "inside", False):
+                nested.append(threading.current_thread().name)
+
+            def _wrapped(item):
+                depth.inside = True
+                try:
+                    return fn(item)
+                finally:
+                    depth.inside = False
+
+            return real(_wrapped, list(items), **kwargs)
 
         client = StubClient(_page([_row(150.0)]))
         search = _search_with(client)
         with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(dates_module, "parallel_map", _counting)
-            search.search(_filters(days=70))
-        assert calls == [70], f"expected one flat map over 70 dates, got {calls}"
-
-    def test_multi_chunk_sweep_completes_with_two_workers(self, small_pool):
-        """A range spanning two chunks must not deadlock on a 2-worker pool.
-
-        The chunk sweep used to call ``parallel_map`` once per chunk and again
-        per date inside each chunk's worker. Both levels share one bounded
-        pool, so the outer tasks could hold every worker while waiting on
-        inner tasks that could never be scheduled.
-        """
-        client = StubClient(_page([_row(150.0)]))
-        search = _search_with(client)
-        # 70 dates > MAX_DAYS_PER_SEARCH (61), so this spans two chunks.
-        box: list[Any] = []
-
-        def _run():
-            box.append(search.search(_filters(days=70)))
-
-        worker = threading.Thread(target=_run, daemon=True)
-        worker.start()
-        worker.join(timeout=15)
-        assert not worker.is_alive(), "date sweep deadlocked on the shared thread pool"
-        assert box and box[0] is not None and len(box[0]) == 70
-        assert client.calls == 70
+            mp.setattr(dates_module, "parallel_map", _tracking)
+            results = search.search(_filters(days=70))
+        assert results is not None and len(results) == 70
+        assert nested == [], f"parallel_map was called from inside a worker: {nested}"
 
 
 # ---------------------------------------------------------------------------
@@ -348,3 +352,111 @@ class TestClientSideFiltersApplyToDates:
         results = _search_with(client).search(_filters(days=70, airlines_exclude=[Airline.AA]))
         assert results is not None
         assert {r.price for r in results} == {500.0}
+
+
+# ---------------------------------------------------------------------------
+# Transient pages without a ds:1 payload (fix round 1, F2)
+# ---------------------------------------------------------------------------
+
+
+class _Sequence(StubClient):
+    """Serves a scripted list of bodies, one per call, repeating the last."""
+
+    def __init__(self, bodies: list[str]):
+        """Record the scripted bodies."""
+        super().__init__()
+        self.bodies = bodies
+
+    def get(self, url: str, **kwargs: Any) -> _Response:
+        with self._lock:
+            index = min(self.calls, len(self.bodies) - 1)
+            self.calls += 1
+        return _Response(self.bodies[index])
+
+
+@pytest.fixture
+def no_backoff(monkeypatch):
+    """Record retry delays instead of sleeping them."""
+    slept: list[float] = []
+    monkeypatch.setattr(tfs_module, "_sleep", slept.append)
+    return slept
+
+
+class TestTransientPageRetry:
+    """One page in ~60 comes back 200 with no ds:1 blob; retry just that case."""
+
+    BLANK = "<html>no data callback here</html>"
+
+    def test_healthy_sweep_stays_one_request_per_date(self, no_backoff):
+        client = StubClient(_page([_row(150.0)]))
+        results = _search_with(client).search(_filters(days=5))
+        assert results is not None and len(results) == 5
+        assert client.calls == 5, "a healthy sweep must not pay for the retry"
+        assert no_backoff == []
+
+    def test_missing_once_then_present_succeeds_in_two_fetches(self, no_backoff):
+        client = _Sequence([self.BLANK, _page([_row(150.0)])])
+        results = _search_with(client).search(_filters(days=1))
+        assert results is not None and len(results) == 1
+        assert client.calls == 2
+        assert no_backoff == [0.5]
+
+    def test_missing_three_times_gives_up_after_exactly_three_fetches(self, no_backoff):
+        client = _Sequence([self.BLANK])
+        with pytest.raises(SearchClientError) as excinfo:
+            _search_with(client).search(_filters(days=1))
+        assert client.calls == 3
+        assert no_backoff == [0.5, 1.5]
+        assert "ds:1" in str(excinfo.value)
+
+    def test_total_failure_message_carries_the_consent_hint(self, no_backoff):
+        client = _Sequence([self.BLANK])
+        with pytest.raises(SearchClientError) as excinfo:
+            _search_with(client).search(_filters(days=2))
+        assert "consent/blocked page" in str(excinfo.value)
+
+    def test_http_errors_are_not_retried(self, no_backoff):
+        """Only a 200-with-no-payload is transient; a raised error is not."""
+        client = StubClient(error=SearchConnectionError("connection refused"))
+        with pytest.raises(SearchClientError):
+            _search_with(client).search(_filters(days=1))
+        assert client.calls == 1
+        assert no_backoff == []
+
+
+# ---------------------------------------------------------------------------
+# Per-date processing must be total (fix round 1, R5)
+# ---------------------------------------------------------------------------
+
+
+class TestPerDateProcessingIsTotal:
+    def test_zero_leg_row_with_a_window_does_not_sink_the_sweep(self):
+        """A decoded row with no legs used to raise IndexError out of the sweep.
+
+        ``_within_window`` reaches for ``legs[0]``; ``FlightResult.legs`` has
+        no minimum length and Google's rows occasionally decode to none.
+        """
+        legless = _row(100.0)
+        legless[0][2] = []  # detail[2] — the leg array
+        client = StubClient(_page([legless, _row(500.0, hour=20)]))
+        results = _search_with(client).search(
+            _filters(
+                days=2,
+                time_restrictions=TimeRestrictions(earliest_departure=8, latest_departure=23),
+            )
+        )
+        assert results is not None
+        assert [r.price for r in results] == [500.0, 500.0]
+
+    def test_failure_is_logged_without_a_traceback(self, caplog):
+        """A 93-date sweep must not print 93 tracebacks; keep those at DEBUG."""
+        client = StubClient(error=SearchConnectionError("connection refused"))
+        with caplog.at_level(logging.WARNING, logger="fli.search.dates"):
+            with pytest.raises(SearchClientError):
+                _search_with(client).search(_filters(days=2))
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert warnings, "each bad date should still warn"
+        assert all(r.exc_info is None for r in warnings), (
+            "warnings must not carry exc_info — logging.lastResort prints the full traceback"
+        )
+        assert any("connection refused" in r.getMessage() for r in warnings)

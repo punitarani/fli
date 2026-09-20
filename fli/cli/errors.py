@@ -20,6 +20,8 @@ from fli.search.exceptions import (
     SearchClientError,
     SearchConnectionError,
     SearchHTTPError,
+    SearchParseError,
+    SearchRejectedError,
     SearchTimeoutError,
 )
 
@@ -35,6 +37,14 @@ def _friendly_message(exc: BaseException) -> str:
         return f"Network error. {exc}"
     if isinstance(exc, SearchHTTPError):
         return f"Google Flights error. {exc}"
+    if isinstance(exc, SearchRejectedError):
+        return f"Google Flights declined the request. {exc}"
+    if isinstance(exc, SearchParseError):
+        return (
+            f"Could not read Google Flights' response. {exc} "
+            "This is usually a transient page variant or a regional consent "
+            "interstitial — retry, or set FLI_SOCS_COOKIE if you are in the EU/EEA."
+        )
     if isinstance(exc, SearchClientError):
         return f"Search failed. {exc}"
     return f"Unexpected error: {exc.__class__.__name__}: {exc}"
@@ -96,6 +106,10 @@ def json_error_payload(exc: BaseException, *, command: str | None = None) -> tup
         return str(exc), "connection_error", log_path
     if isinstance(exc, SearchHTTPError):
         return str(exc), "http_error", log_path
+    if isinstance(exc, SearchRejectedError):
+        return str(exc), "rejected", log_path
+    if isinstance(exc, SearchParseError):
+        return str(exc), "parse_error", log_path
     if isinstance(exc, SearchClientError):
         return str(exc), "search_error", log_path
     return f"{exc.__class__.__name__}: {exc}", "unexpected_error", log_path

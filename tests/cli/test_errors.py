@@ -238,3 +238,50 @@ def test_flights_command_json_error_includes_log_path(runner, monkeypatch, tmp_p
     assert payload["error"]["type"] == "connection_error"
     assert "log_path" in payload["error"]
     assert Path(payload["error"]["log_path"]).exists()
+
+
+class TestTransportErrorClassification:
+    """`SearchParseError` used to surface as "Unexpected error" in the CLI.
+
+    It is raised on the normal flight path whenever Google serves a
+    consent/blocked page, so it needs to read as a search failure with a
+    useful hint, not as a crash.
+    """
+
+    def test_parse_error_is_a_search_client_error(self):
+        from fli.search import SearchParseError as exported
+        from fli.search.exceptions import SearchClientError as base
+        from fli.search.flights import SearchParseError as from_flights
+
+        assert exported is from_flights
+        assert issubclass(exported, base)
+
+    def test_parse_error_message_is_actionable(self):
+        from fli.cli.errors import _friendly_message
+        from fli.search import SearchParseError
+
+        message = _friendly_message(SearchParseError("Search page carried no ds:1 payload"))
+        assert "Unexpected error" not in message
+        assert "ds:1" in message
+        assert "FLI_SOCS_COOKIE" in message
+
+    def test_rejected_error_message_is_specific(self):
+        from fli.cli.errors import _friendly_message
+        from fli.search import SearchRejectedError
+
+        message = _friendly_message(SearchRejectedError(13))
+        assert "Unexpected error" not in message
+        assert "declined the request" in message
+
+    @pytest.mark.parametrize(
+        ("exc_factory", "expected_type"),
+        [
+            (lambda: __import__("fli.search", fromlist=["x"]).SearchParseError("x"), "parse_error"),
+            (lambda: __import__("fli.search", fromlist=["x"]).SearchRejectedError(13), "rejected"),
+        ],
+    )
+    def test_json_error_types(self, exc_factory, expected_type):
+        from fli.cli.errors import json_error_payload
+
+        _, error_type, _ = json_error_payload(exc_factory(), command="flights")
+        assert error_type == expected_type

@@ -31,7 +31,7 @@ from fli.search._decoders import (
 from fli.search._tfs import (
     apply_client_side_filters,
     build_tfs,
-    extract_payload,
+    fetch_payload,
     page_url,
     unsupported_filters,
 )
@@ -39,17 +39,15 @@ from fli.search._urls import with_locale_params
 from fli.search._urls import with_locale_params as _with_locale_params  # noqa: F401
 from fli.search._wire import iter_wrb_chunks
 from fli.search.client import get_client
+from fli.search.exceptions import SearchParseError
 
 logger = logging.getLogger(__name__)
 
-
-class SearchParseError(Exception):
-    """Raised when a successful HTTP response cannot be parsed into flights.
-
-    Distinct from network / HTTP errors raised by the underlying client —
-    use this to tell "Google responded but the shape changed" apart from
-    "Google didn't respond at all".
-    """
+# Re-exported from its original home so ``from fli.search.flights import
+# SearchParseError`` keeps working; the class now lives with the rest of the
+# typed error family in ``fli.search.exceptions`` so it inherits
+# ``SearchClientError`` and is classified as a search failure, not a crash.
+__all__ = ["SearchFlights", "SearchParseError"]
 
 
 def _sort_key(sort_by: SortBy) -> Callable[[FlightResult], Any]:
@@ -197,10 +195,7 @@ class SearchFlights:
             )
 
         url = page_url(build_tfs(filters), currency, language, country)
-        response = self.client.get(url, impersonate="chrome", allow_redirects=True)
-        response.raise_for_status()
-
-        inner = extract_payload(response.text)
+        inner = fetch_payload(self.client, url)
         if inner is None:
             raise SearchParseError(
                 "Search page carried no ds:1 payload — Google may have changed "

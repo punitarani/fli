@@ -20,14 +20,21 @@ from fli.search._decoders import parse_flight_row
 from fli.search._tfs import (
     apply_client_side_filters,
     build_tfs,
-    extract_payload,
+    fetch_payload,
     page_url,
     unsupported_filters,
 )
 from fli.search.client import get_client
-from fli.search.exceptions import SearchClientError
+from fli.search.exceptions import SearchClientError, SearchParseError
 
 logger = logging.getLogger(__name__)
+
+# Same wording the flight path uses for the same condition, so a caller who
+# sees it on either path gets the same hint about what to check.
+_NO_PAYLOAD = (
+    "the search page carried no ds:1 payload — Google may have changed the "
+    "page shape, or served a consent/blocked page instead"
+)
 
 MAX_DATES_PER_SEARCH = 93
 """Most dates a single :meth:`SearchDates.search` call will price.
@@ -101,10 +108,12 @@ class SearchDates:
     useful for finding the cheapest dates to fly.
     """
 
-    BASE_URL = "https://www.google.com/_/FlightsFrontendUi/data/travel.frontend.flights.FlightsFrontendService/GetCalendarGraph"
-    DEFAULT_HEADERS = {
-        "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
-    }
+    # Dates are swept one page fetch each (see ``_price_one_date``); the
+    # GetCalendarGraph RPC this class used to POST to is gated and no longer
+    # reachable, so its URL and headers are gone rather than left as dead
+    # constants that imply the class still speaks that protocol.
+
+    # Range size at which the sweep splits into independent chunk filters.
     MAX_DAYS_PER_SEARCH = 61
 
     def __init__(self):
@@ -135,8 +144,11 @@ class SearchDates:
             SearchClientError: Every date in the range failed to load.
 
         Notes:
-            - For date ranges larger than 61 days, splits into multiple searches.
-            - We can't search more than 305 days in the future.
+            Every date in the range costs its own search-page fetch — the page
+            serves no calendar grid — so the range is capped at
+            :data:`MAX_DATES_PER_SEARCH` dates. Internally it is still split
+            into ``MAX_DAYS_PER_SEARCH``-day chunk filters, but all dates are
+            priced by a single flat parallel map.
 
         """
         dropped = unsupported_filters(filters)
@@ -197,6 +209,11 @@ class SearchDates:
         arrived is not. When *every* attempted date failed, returning an empty
         list would report a dead transport as "this route has no flights" —
         exactly the silent failure this client exists to avoid.
+
+        The error type mirrors the flight path: a range where every page came
+        back without a ``ds:1`` blob raises :class:`SearchParseError`, the same
+        class (and hint) a single unreadable page raises there. Anything else
+        raises the more general :class:`SearchClientError`.
         """
         results = [o.price for o in outcomes if o.price is not None]
         attempted = [o for o in outcomes if o.attempted]
@@ -207,7 +224,12 @@ class SearchDates:
                 if outcome.failure not in reasons and len(reasons) < 3:
                     reasons.append(outcome.failure)
             cause = next((o.error for o in failed if o.error is not None), None)
-            raise SearchClientError(
+            error_type = (
+                SearchParseError
+                if all(o.failure == _NO_PAYLOAD for o in failed)
+                else SearchClientError
+            )
+            raise error_type(
                 f"Priced 0 of {len(attempted)} dates — every date in the range failed. "
                 f"Reasons: {'; '.join(reasons)}"
             ) from cause
@@ -298,22 +320,37 @@ class SearchDates:
 
         url = page_url(build_tfs(filters, travel_dates=travel_dates), currency, language, country)
         try:
-            response = self.client.get(url, impersonate="chrome", allow_redirects=True)
-            response.raise_for_status()
-            payload = extract_payload(response.text)
-        except Exception as exc:  # noqa: BLE001 — one bad date must not sink the sweep
-            logger.warning("Pricing %s failed: %s", travel_dates[0], exc, exc_info=True)
-            return _DateOutcome(failure=f"{type(exc).__name__}: {exc}", error=exc)
-        if payload is None:
-            logger.warning("Pricing %s returned a page with no ds:1 payload", travel_dates[0])
-            return _DateOutcome(failure="the search page carried no ds:1 payload")
+            payload = fetch_payload(self.client, url)
+            if payload is None:
+                # Logged here rather than raised: one bad date is a warning,
+                # and ``_collect`` decides whether *every* date failing is fatal.
+                logger.warning(
+                    "Pricing %s failed: the search page carried no ds:1 payload",
+                    travel_dates[0],
+                )
+                return _DateOutcome(failure=_NO_PAYLOAD)
 
-        # The filters Google has no ``tfs`` field for (airlines, price cap,
-        # duration, departure window) are applied to the decoded rows, exactly
-        # as the flight search applies them — otherwise the cheapest price for
-        # a date is taken over itineraries the caller asked to exclude.
-        flights = apply_client_side_filters(_flights_in(payload), filters)
-        prices = [flight.price for flight in flights if flight.price]
+            # The filters Google has no ``tfs`` field for (airlines, price cap,
+            # duration, departure window) are applied to the decoded rows,
+            # exactly as the flight search applies them — otherwise the
+            # cheapest price for a date is taken over itineraries the caller
+            # asked to exclude.
+            #
+            # Decoding and filtering sit inside the ``try`` on purpose: they
+            # walk attacker-shaped data from the wire, and letting one odd row
+            # raise out of here would sink the whole sweep, which is the class
+            # of bug this method exists to avoid.
+            flights = apply_client_side_filters(_flights_in(payload), filters)
+            prices = [flight.price for flight in flights if flight.price]
+        except Exception as exc:  # noqa: BLE001 — one bad date must not sink the sweep
+            # One concise line per bad date. A 93-date sweep against a blocked
+            # client would otherwise print 93 full tracebacks through
+            # ``logging.lastResort``, which is exactly what fli.cli.errors
+            # exists to prevent. The traceback stays available at DEBUG.
+            logger.warning("Pricing %s failed: %s: %s", travel_dates[0], type(exc).__name__, exc)
+            logger.debug("Pricing %s failed", travel_dates[0], exc_info=True)
+            return _DateOutcome(failure=f"{type(exc).__name__}: {exc}", error=exc)
+
         if not prices:
             return _DateOutcome()
 
