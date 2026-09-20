@@ -190,9 +190,12 @@ What that means in practice:
   across 10 workers is several hundred MB of pages and parsed JSON at peak.
   A sweep that never manages to load a single page — the shape a blocked or
   consent-gated client produces — gives up after a handful of dates rather than
-  paying the retry budget on all of them: measured at 15 page fetches (bounded
-  at 45, so at most ~135 HTTP requests once the client's own retries multiply
-  in), the same whether the range is 30 days or 93.
+  paying the retry budget on all of them. Measured with the real backoff: **42
+  page fetches** (bounded at 45, so up to ~135 HTTP requests once the client's
+  own retries multiply in) and about 4 seconds, the same whether the range is 30
+  days or 93. Unbroken, a 93-date range would have cost 279 fetches and up to
+  837 requests. The bound is `(5 + worker count) x 3`, so raising
+  `configure_concurrency` raises it proportionally.
 * **A page occasionally arrives without results.** Roughly one request in sixty
   returns HTTP 200 with no `ds:1` blob; the client retries that case up to twice
   (0.5s then 1.5s) before raising `SearchParseError`. A healthy search never

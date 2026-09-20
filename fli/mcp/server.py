@@ -661,7 +661,7 @@ def _search_error_message(exc: Exception, prefix: str = "Search failed") -> str:
     at `FLI_SOCS_COOKIE` for that; an MCP caller has no log file to consult, so
     it needs the hint in the response itself.
     """
-    from fli.search.exceptions import SearchParseError, SearchRejectedError
+    from fli.search.exceptions import SearchParseError
 
     if isinstance(exc, SearchParseError):
         return (
@@ -669,8 +669,9 @@ def _search_error_message(exc: Exception, prefix: str = "Search failed") -> str:
             "consent interstitial — retry, or check FLI_SOCS_COOKIE if you are in the "
             "EU/EEA."
         )
-    if isinstance(exc, SearchRejectedError):
-        return f"{prefix}: {exc}"
+    # Everything else already carries its own actionable text —
+    # `SearchRejectedError` names the gated header and the issue, and the
+    # client's typed errors name the host and what to check.
     return f"{prefix}: {exc}"
 
 

@@ -119,12 +119,19 @@ Consequences to keep in mind when changing search code:
 - Date searches have no calendar grid: one page fetch per date, capped at
   `fli.search.dates.MAX_DATES_PER_SEARCH` (93) per `SearchDates.search`. At the
   cap that is several hundred MB of pages and parsed JSON at peak.
-- `_SweepHealth` (`SWEEP_FAILURE_THRESHOLD`, 5) is the sweep's circuit breaker:
-  armed only while no date has loaded a page, disarmed permanently by the first
-  success. It turns a fully blocked 93-date sweep from 279 page fetches (up to
-  837 HTTP requests once the client's own retries multiply) into 15, bounded at
-  (threshold + pool workers) x `PAGE_FETCH_ATTEMPTS` = 45 regardless of range.
-  A sweep that is working keeps the full retry budget for transient misses.
+- `_SweepHealth` (`SWEEP_FAILURE_THRESHOLD`, 5) is the sweep's circuit breaker.
+  It counts **only** payload-less pages — that failure is deterministic, so the
+  untried dates will fail the same way; a timeout or connection error says
+  nothing about them and deliberately does not count. It is armed only while no
+  date has loaded a page and disarmed permanently by the first success, so a
+  working sweep keeps the full retry budget for transient misses.
+  Measured with the real backoff, it turns a fully blocked 93-date sweep from
+  279 page fetches (up to 837 HTTP requests once the client's own retries
+  multiply) into 42 in ~4s, bounded at
+  (threshold + pool workers) x `PAGE_FETCH_ATTEMPTS` = 45 regardless of range —
+  the bound scales with `configure_concurrency`.
+  When it trips but prices still come back, `_collect` emits exactly one
+  warning naming the skipped count: a truncated answer must never be silent.
 - ~1 page in 60 arrives HTTP 200 with no `ds:1` blob. `fetch_payload` in
   `fli/search/_tfs.py` is the single fetch path for both flights and dates and
   retries exactly that case (`PAGE_FETCH_ATTEMPTS`, `PAGE_RETRY_BACKOFF`);
