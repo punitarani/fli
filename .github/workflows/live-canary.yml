@@ -15,6 +15,16 @@ name: Live Canary
 # under a fast back-to-back burst (measured ~11% per-case failure rate) and
 # would make this canary red almost every day. The fuzz-live case stays
 # opt-in for humans only, via `make test-live-fuzz`; it is never scheduled.
+#
+# A canary's whole job is to be noisy when something is wrong, so it must
+# not be able to die quietly: every pytest pass is bounded by `timeout`
+# well under the job's own timeout-minutes, so a hung request becomes an
+# ordinary non-zero exit instead of a job-level kill; the issue steps treat
+# anything other than an explicit "success" output as failure-shaped (a
+# setup step failing, a step crashing before it can report, etc. all count
+# — see steps.live.outputs.result below); and they use `!cancelled()`
+# rather than `always()` so a human cancelling a manual run doesn't file
+# anything.
 
 on:
   schedule:
@@ -37,7 +47,12 @@ jobs:
   live-canary:
     name: Live search canary
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Comfortably above the worst case of the "Run live tests" step (two
+    # 7-minute pytest passes + a 30s pause ≈ 14.5 min) plus setup/issue
+    # overhead (~2-3 min) ≈ 17.5 min, so a hang inside a single pytest pass
+    # is caught by that step's own `timeout` well before the job itself
+    # would be killed.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
 
@@ -72,7 +87,7 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          uv run pytest tests/ -m live --live -vv --junitxml=live-junit-1.xml
+          timeout 7m uv run pytest tests/ -m live --live -vv --junitxml=live-junit-1.xml
           first_status=$?
           set -e
 
@@ -81,14 +96,14 @@ jobs:
             exit 0
           fi
 
-          echo "First run had failures (exit $first_status). Roughly 1 in 60" \
-               "real requests hits a transient search-page variant, so pausing" \
-               "30s and re-running only the failed cases once before raising" \
-               "the alarm."
+          echo "First run had failures or was killed after its 7-minute limit (exit" \
+               "$first_status). Roughly 1 in 60 real requests hits a transient" \
+               "search-page variant, so pausing 30s and re-running only the failed" \
+               "cases once before raising the alarm."
           sleep 30
 
           set +e
-          uv run pytest tests/ -m live --live --last-failed -vv --junitxml=live-junit-2.xml
+          timeout 7m uv run pytest tests/ -m live --live --last-failed -vv --junitxml=live-junit-2.xml
           retry_status=$?
           set -e
 
@@ -98,7 +113,7 @@ jobs:
             exit 0
           fi
 
-          echo "::error::Live tests are still failing after one retry of the failed cases."
+          echo "::error::Live tests are still failing (or timing out) after one retry of the failed cases."
           echo "result=failure" >> "$GITHUB_OUTPUT"
           exit 1
 
@@ -116,8 +131,11 @@ jobs:
       # couple of times; if it still fails, fail this step loudly rather
       # than silently treating "lookup failed" as "no issue exists" — that
       # confusion is exactly what caused duplicate issues before this fix.
+      # `!cancelled()` (not `always()`): a human cancelling a manual run
+      # should not cause this — or the two issue-filing steps below — to
+      # run at all.
       - name: Find existing canary issue
-        if: always()
+        if: "!cancelled()"
         id: find_issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -140,11 +158,15 @@ jobs:
           number=$(printf '%s' "$listing" | jq -r --arg t "$TITLE" '[.[] | select(.title == $t)][0].number // empty')
           echo "number=$number" >> "$GITHUB_OUTPUT"
 
-      # Only reachable when the lookup above actually succeeded (whether it
-      # found an issue or not) — never when it failed/was skipped, so a
-      # flaky `gh issue list` cannot cause a duplicate issue to be created.
+      # Fires on anything other than an explicit "success" — not just an
+      # explicit "failure" — so a step that never got to write its result
+      # (job/step timeout, a crashed runner, uv sync failing before the
+      # tests could even start) is treated as failure-shaped too, instead
+      # of silently filing nothing. Only reachable when the lookup above
+      # actually succeeded (never when it failed/was skipped), so a flaky
+      # `gh issue list` cannot cause a duplicate issue to be created.
       - name: Open or update issue on failure
-        if: always() && steps.live.outputs.result == 'failure' && steps.find_issue.outcome == 'success'
+        if: "!cancelled() && steps.live.outputs.result != 'success' && steps.find_issue.outcome == 'success'"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -152,21 +174,30 @@ jobs:
           LABEL: ${{ env.ISSUE_LABEL }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ISSUE_NUMBER: ${{ steps.find_issue.outputs.number }}
+          LIVE_RESULT: ${{ steps.live.outputs.result }}
+          LIVE_OUTCOME: ${{ steps.live.outcome }}
         run: |
           set -euo pipefail
+          if [ "$LIVE_RESULT" = "failure" ]; then
+            reason="the live tests failed twice in a row (initial run + one same-run retry of the failed cases)"
+          elif [ "$LIVE_OUTCOME" = "skipped" ]; then
+            reason="a setup step (installing uv, Python, or dependencies) failed before the live tests could start"
+          else
+            reason="the live-test step did not finish cleanly (it may have hit a time limit, crashed, or the runner was lost) before it could report a result"
+          fi
           if [ -n "$ISSUE_NUMBER" ]; then
             gh issue comment "$ISSUE_NUMBER" --repo "$REPO" \
-              --body "Live canary is still failing (after one same-run retry of the failed cases). Run: $RUN_URL"
+              --body "Live canary is still failing: ${reason}. Run: $RUN_URL"
           else
             gh issue create --repo "$REPO" \
               --title "$TITLE" \
               --label "$LABEL" \
-              --body "The scheduled live-canary workflow failed against the real Google Flights network, even after retrying the failed cases once. Run: $RUN_URL"
+              --body "The scheduled live-canary workflow failed: ${reason}. Run: $RUN_URL"
           fi
 
       - name: Close issue on recovery
         if: >-
-          always() && steps.live.outputs.result == 'success' &&
+          !cancelled() && steps.live.outputs.result == 'success' &&
           steps.find_issue.outcome == 'success' && steps.find_issue.outputs.number != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
