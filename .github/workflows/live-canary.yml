@@ -1,13 +1,20 @@
 name: Live Canary
 
-# Runs the tests marked `live` (tests/search/test_search_flights_new_filters_live.py,
-# the fuzz test in test_search_flights_fuzz.py, and the four live cases in
-# tests/mcp/test_mcp_server.py::TestMCPServer) against the real Google Flights
-# network. These are excluded from the `--all` CI job (see ci.yml) because a
-# transient search-page variant or a runner IP being treated worse than a
-# residential one is a property of the network that day, not of this code —
-# so they must not gate merges, but they must still run somewhere and be
-# noisy when they break.
+# Runs the SMALL, STABLE `live`-marked test set (all of
+# test_search_flights_new_filters_live.py, the four live cases in
+# tests/mcp/test_mcp_server.py::TestMCPServer, and the previously-unmocked
+# cases in test_search_flights.py / test_search_dates.py — 29 tests total)
+# against the real Google Flights network. These are excluded from the
+# `--all` CI job (see ci.yml) because a transient search-page variant or a
+# runner IP being treated worse than a residential one is a property of the
+# network that day, not of this code — so they must not gate merges, but
+# they must still run somewhere and be noisy when they break.
+#
+# Deliberately does NOT pass --all: that would also pull in the 100-case
+# fuzz-gated live test (test_search_flights_fuzz.py), which is far flakier
+# under a fast back-to-back burst (measured ~11% per-case failure rate) and
+# would make this canary red almost every day. The fuzz-live case stays
+# opt-in for humans only, via `make test-live-fuzz`; it is never scheduled.
 
 on:
   schedule:
@@ -24,6 +31,7 @@ concurrency:
 
 env:
   ISSUE_TITLE: "Live canary failing: Google Flights search"
+  ISSUE_LABEL: "live-canary"
 
 jobs:
   live-canary:
@@ -32,6 +40,19 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+
+      # Created up front (idempotently) so both the lookup and the create
+      # step below can always rely on it existing — `gh issue create
+      # --label` errors out if the label isn't already present in the repo.
+      - name: Ensure canary issue label exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          LABEL: ${{ env.ISSUE_LABEL }}
+        run: |
+          set -euo pipefail
+          gh label create "$LABEL" --repo "$REPO" --color ededed \
+            --description "Opened/tracked by .github/workflows/live-canary.yml" 2>/dev/null || true
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -44,23 +65,57 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev --extra mcp
 
-      - name: Run live tests
+      - name: Run live tests (single retry of failures after a transient)
         id: live
-        # --all is required alongside -m live: without it, the pre-existing
-        # fuzz-gating in tests/conftest.py strips the fuzz-marked live case
-        # in test_search_flights_fuzz.py out of collection before -m even
-        # sees it (fuzz tests are dropped unless --fuzz/--all is passed).
-        run: uv run pytest tests/ --all -m live --live -vv --junitxml=live-junit.xml
         env:
           FORCE_COLOR: 1
+        run: |
+          set -euo pipefail
+          set +e
+          uv run pytest tests/ -m live --live -vv --junitxml=live-junit-1.xml
+          first_status=$?
+          set -e
+
+          if [ "$first_status" -eq 0 ]; then
+            echo "result=success" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "First run had failures (exit $first_status). Roughly 1 in 60" \
+               "real requests hits a transient search-page variant, so pausing" \
+               "30s and re-running only the failed cases once before raising" \
+               "the alarm."
+          sleep 30
+
+          set +e
+          uv run pytest tests/ -m live --live --last-failed -vv --junitxml=live-junit-2.xml
+          retry_status=$?
+          set -e
+
+          if [ "$retry_status" -eq 0 ]; then
+            echo "Retry cleared every failure — treating this run as a pass."
+            echo "result=success" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "::error::Live tests are still failing after one retry of the failed cases."
+          echo "result=failure" >> "$GITHUB_OUTPUT"
+          exit 1
 
       - name: Upload live test results
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: Live canary results
-          path: live-junit.xml
+          path: live-junit-*.xml
+          if-no-files-found: warn
 
+      # Identifies the canary's own issue by exact title AND a dedicated
+      # label (never just title) so this can never touch a user's issue. If
+      # the lookup itself fails (transient GitHub API error), retry a
+      # couple of times; if it still fails, fail this step loudly rather
+      # than silently treating "lookup failed" as "no issue exists" — that
+      # confusion is exactly what caused duplicate issues before this fix.
       - name: Find existing canary issue
         if: always()
         id: find_issue
@@ -68,37 +123,58 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           TITLE: ${{ env.ISSUE_TITLE }}
+          LABEL: ${{ env.ISSUE_LABEL }}
         run: |
-          number=$(gh issue list --repo "$REPO" --state open --json number,title |
-            jq -r --arg t "$TITLE" '[.[] | select(.title == $t)][0].number // empty')
+          set -euo pipefail
+          attempt=1
+          max_attempts=3
+          until listing=$(gh issue list --repo "$REPO" --label "$LABEL" --state open --json number,title); do
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "::error::gh issue list failed after $max_attempts attempts;" \
+                   "not touching issues this run to avoid creating a duplicate."
+              exit 1
+            fi
+            attempt=$((attempt + 1))
+            sleep $((attempt * 5))
+          done
+          number=$(printf '%s' "$listing" | jq -r --arg t "$TITLE" '[.[] | select(.title == $t)][0].number // empty')
           echo "number=$number" >> "$GITHUB_OUTPUT"
 
+      # Only reachable when the lookup above actually succeeded (whether it
+      # found an issue or not) — never when it failed/was skipped, so a
+      # flaky `gh issue list` cannot cause a duplicate issue to be created.
       - name: Open or update issue on failure
-        if: always() && steps.live.outcome == 'failure'
+        if: always() && steps.live.outputs.result == 'failure' && steps.find_issue.outcome == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           TITLE: ${{ env.ISSUE_TITLE }}
+          LABEL: ${{ env.ISSUE_LABEL }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ISSUE_NUMBER: ${{ steps.find_issue.outputs.number }}
         run: |
+          set -euo pipefail
           if [ -n "$ISSUE_NUMBER" ]; then
             gh issue comment "$ISSUE_NUMBER" --repo "$REPO" \
-              --body "Live canary is still failing. Run: $RUN_URL"
+              --body "Live canary is still failing (after one same-run retry of the failed cases). Run: $RUN_URL"
           else
             gh issue create --repo "$REPO" \
               --title "$TITLE" \
-              --body "The scheduled live-canary workflow failed against the real Google Flights network. Run: $RUN_URL"
+              --label "$LABEL" \
+              --body "The scheduled live-canary workflow failed against the real Google Flights network, even after retrying the failed cases once. Run: $RUN_URL"
           fi
 
       - name: Close issue on recovery
-        if: always() && steps.live.outcome == 'success' && steps.find_issue.outputs.number != ''
+        if: >-
+          always() && steps.live.outputs.result == 'success' &&
+          steps.find_issue.outcome == 'success' && steps.find_issue.outputs.number != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ISSUE_NUMBER: ${{ steps.find_issue.outputs.number }}
         run: |
+          set -euo pipefail
           gh issue comment "$ISSUE_NUMBER" --repo "$REPO" \
             --body "Live canary passed again. Run: $RUN_URL"
           gh issue close "$ISSUE_NUMBER" --repo "$REPO"
