@@ -68,6 +68,7 @@ class TestSerializeFlightLeg:
         leg.legroom = None
         leg.overnight = False
         leg.amenities = None
+        leg.cabin = None
         for k, v in overrides.items():
             setattr(leg, k, v)
         return leg
@@ -95,6 +96,13 @@ class TestSerializeFlightLeg:
         assert "operating_airline" not in result
         assert "aircraft" not in result
         assert "legroom" not in result
+        assert "cabin" not in result
+
+    def test_cabin_serialized_as_seat_type_name(self):
+        from fli.models import SeatType
+
+        leg = self._make_leg(cabin=SeatType.BUSINESS)
+        assert _serialize_flight_leg(leg)["cabin"] == "BUSINESS"
 
     def test_overnight_true_included(self):
         leg = self._make_leg(overnight=True)

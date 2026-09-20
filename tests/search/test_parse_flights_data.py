@@ -115,7 +115,10 @@ class TestParseFlightsDataNonStop:
                 _leg(
                     dep_iata="JFK",
                     arr_iata="LAX",
-                    amenities=[None, True, None, None, None, True, None, None, None, True, None, 2],
+                    # Slot 1 = AC-outlet-and-USB power, slot 9 = on-demand
+                    # seatback video, slot 11 = free Wi-Fi. Only one slot in
+                    # 1..6 and one in 8..10 is ever set on a real leg.
+                    amenities=[None, True, None, None, None, None, None, None, None, True, None, 2],
                     legroom_rating=3,
                 )
             ],
@@ -153,10 +156,13 @@ class TestParseFlightsDataNonStop:
         assert am.power is True
         assert am.on_demand_video is True
         assert am.legroom_rating == 3
-        # USB/in-seat-video slots not yet disambiguated — left as None to
-        # avoid lying about what we know.
-        assert am.usb_power is None
-        assert am.in_seat_video is None
+        assert am.usb_power is True
+        assert am.in_seat_video is True
+        assert am.wifi_tier == "free"
+        assert am.power_type == "plug_and_usb"
+        assert am.video_type == "on_demand"
+        assert am.seat_quality == "above_average"
+        assert am.legroom_inches == 31
 
     def test_result_emissions(self):
         assert self.flight.co2_emissions_g == 225000
