@@ -226,13 +226,15 @@ def _search_flights_core(
         )
 
         if not results:
-            # Same condition the library warns on: an empty result for a
-            # party with children or infants often reflects Google's
-            # client-side pricing gap, not a route with no service.
+            # Read the library's own verdict rather than recomputing "empty +
+            # children/infants" here: SearchFlights.search already knows
+            # whether the empty result traces back to a page Google itself
+            # served with zero rows, versus the caller's own airline/price/
+            # duration/window filter removing rows Google did inline — that
+            # distinction lives in the fetch path, not in these arguments,
+            # so it can only be answered correctly once, there.
             sparse_note = (
-                SPARSE_PASSENGER_MIX_WARNING
-                if children + infants_in_seat + infants_on_lap > 0
-                else None
+                SPARSE_PASSENGER_MIX_WARNING if search_client.sparse_passenger_mix else None
             )
             if output_format == OutputFormat.JSON:
                 emit_json(
