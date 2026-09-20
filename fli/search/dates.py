@@ -48,7 +48,7 @@ and caps one search at roughly 190 MB of transfer rather than letting a
 """
 
 SWEEP_FAILURE_THRESHOLD = 5
-"""Consecutive-from-the-start failures that abandon a sweep.
+"""Payload-less pages, before any success, that abandon a sweep.
 
 Retries multiply. The client retries a request three times, and
 :func:`~fli.search._tfs.fetch_payload` fetches a page up to three times, so one
@@ -56,44 +56,65 @@ date can cost nine HTTP requests before it gives up — and a client that is
 being blocked (an EU/EEA IP with the consent cookie disabled, say) fails that
 way on *every* date. Paying it 93 times to learn one fact is the wrong trade.
 
-The breaker only looks at the start of a sweep: it arms while no date has
-produced a usable page, and disarms permanently the moment one does. A sweep
-that is working, with a few transient misses scattered through it, therefore
-keeps the full retry budget for each of those misses.
+Only the payload-less page counts. That failure is deterministic: a consent or
+block page is served to every request alike, so the dates not yet tried will
+fail the same way. A connection error or timeout says nothing about them, so
+counting those would abandon a healthy sweep over a transient wobble — they
+keep the ordinary behaviour of costing their own date and nothing more.
+
+The breaker also only looks at the start of a sweep: it arms while no date has
+produced a usable page, and disarms permanently the moment one does. A working
+sweep therefore keeps the full retry budget for every transient miss in it.
 """
 
 
 class _SweepHealth:
-    """Tracks whether a sweep has produced any usable page yet.
+    """Tracks whether a sweep is failing the one way that is worth quitting over.
 
     Shared by the worker threads pricing each date, so every read and write is
     under one lock. ``should_stop`` answers "is this sweep failing
     deterministically?", which is only ever true before the first success.
     """
 
-    __slots__ = ("_lock", "_failures", "_any_success", "_threshold")
+    __slots__ = ("_lock", "_blocked", "_any_success", "_threshold", "_skipped")
 
     def __init__(self, threshold: int):
-        """Arm a breaker that trips after ``threshold`` failures without a success."""
+        """Arm a breaker that trips after ``threshold`` payload-less pages."""
         self._lock = threading.Lock()
-        self._failures = 0
+        self._blocked = 0
         self._any_success = False
         self._threshold = threshold
+        self._skipped = 0
 
     def record_success(self) -> None:
         """Note a date whose page arrived; disarms the breaker for good."""
         with self._lock:
             self._any_success = True
 
-    def record_failure(self) -> None:
-        """Note a date whose page never arrived."""
+    def record_blocked(self) -> None:
+        """Note a date whose page arrived without a ``ds:1`` payload.
+
+        Only this failure mode counts towards the threshold — see the module
+        constant's docstring for why a network error deliberately does not.
+        """
         with self._lock:
-            self._failures += 1
+            self._blocked += 1
+
+    def record_skip(self) -> None:
+        """Note a date abandoned because the breaker had already tripped."""
+        with self._lock:
+            self._skipped += 1
+
+    @property
+    def skipped(self) -> int:
+        """How many dates were abandoned without being requested."""
+        with self._lock:
+            return self._skipped
 
     def should_stop(self) -> bool:
-        """Report whether the sweep has only ever failed, and failed enough."""
+        """Report whether the sweep has only ever been blocked, and enough times."""
         with self._lock:
-            return not self._any_success and self._failures >= self._threshold
+            return not self._any_success and self._blocked >= self._threshold
 
 
 class DatePrice(BaseModel):
@@ -251,7 +272,7 @@ class SearchDates:
             ),
             tasks,
         )
-        return self._collect(outcomes, len(tasks))
+        return self._collect(outcomes, len(tasks), skipped=health.skipped)
 
     def _days_in(self, filters: DateSearchFilters) -> list[datetime]:
         """List every date in one chunk's ``from_date``..``to_date`` range."""
@@ -262,7 +283,12 @@ class SearchDates:
         ]
 
     @staticmethod
-    def _collect(outcomes: list[_DateOutcome], total: int) -> list[DatePrice] | None:
+    def _collect(
+        outcomes: list[_DateOutcome],
+        total: int,
+        *,
+        skipped: int = 0,
+    ) -> list[DatePrice] | None:
         """Assemble priced dates, raising when nothing could be fetched at all.
 
         A date with no flights is a legitimate answer; a date whose page never
@@ -275,10 +301,16 @@ class SearchDates:
         class (and hint) a single unreadable page raises there. Anything else
         raises the more general :class:`SearchClientError`.
 
+        A sweep that tripped the breaker *and* still has prices to return is the
+        other half of the same problem: the answer is real but incomplete, and
+        handing it back unannounced is the same silent-truncation failure in a
+        quieter costume. One warning, naming the count.
+
         Args:
             outcomes: One entry per date in the range, in date order.
             total: Dates the sweep set out to price, so the error can say how
                 many were abandoned when the circuit breaker stopped it.
+            skipped: Dates the breaker abandoned without requesting them.
 
         """
         results = [o.price for o in outcomes if o.price is not None]
@@ -310,6 +342,20 @@ class SearchDates:
                     "check FLI_SOCS_COOKIE has not been set to an empty value"
                 )
             raise error_type(message) from cause
+
+        if skipped and results:
+            # Exactly one line, whatever the sweep's size: the caller is about
+            # to act on a partial answer and has no other way to know it.
+            logger.warning(
+                "Date sweep returned %d of %d dates: %d were skipped after %d pages came "
+                "back without a ds:1 payload and none had loaded yet. The prices below are "
+                "real but incomplete — retry, or check FLI_SOCS_COOKIE if you are in the "
+                "EU/EEA.",
+                len(results),
+                total,
+                skipped,
+                SWEEP_FAILURE_THRESHOLD,
+            )
         return results or None
 
     def _build_chunk_filters(
@@ -405,6 +451,7 @@ class SearchDates:
         # ``attempted=False`` keeps it out of the "everything failed" tally,
         # which the already-failed dates satisfy on their own.
         if health is not None and health.should_stop():
+            health.record_skip()
             return _DateOutcome(attempted=False)
 
         url = page_url(build_tfs(filters, travel_dates=travel_dates), currency, language, country)
@@ -418,7 +465,7 @@ class SearchDates:
                     travel_dates[0],
                 )
                 if health is not None:
-                    health.record_failure()
+                    health.record_blocked()
                 return _DateOutcome(failure=_NO_PAYLOAD)
 
             if health is not None:
@@ -445,8 +492,10 @@ class SearchDates:
             # exists to prevent. The traceback stays available at DEBUG.
             logger.warning("Pricing %s failed: %s: %s", travel_dates[0], type(exc).__name__, exc)
             logger.debug("Pricing %s failed", travel_dates[0], exc_info=True)
-            if health is not None:
-                health.record_failure()
+            # Deliberately not fed to the breaker: an exception here (a
+            # timeout, a reset connection) tells us nothing about the dates
+            # that have not been tried, unlike a page served without its
+            # payload. See SWEEP_FAILURE_THRESHOLD.
             return _DateOutcome(failure=f"{type(exc).__name__}: {exc}", error=exc)
 
         if not prices:

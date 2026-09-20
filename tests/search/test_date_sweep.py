@@ -555,14 +555,92 @@ class TestSweepCircuitBreaker:
         assert results is not None and len(results) == 10 - misses
         assert client.calls == misses * tfs_module.PAGE_FETCH_ATTEMPTS + (10 - misses)
 
-    def test_exception_failures_also_trip_the_breaker(self, no_backoff):
-        """A dead network is just as deterministic as a consent page."""
-        client = StubClient(error=SearchConnectionError("connection refused"))
-        with pytest.raises(SearchClientError):
-            _search_with(client).search(_filters(days=30))
-        assert client.calls < 30, "exception failures should stop the sweep early too"
+    def test_generic_exceptions_do_not_trip_the_breaker(self, no_backoff):
+        """Only the payload-less page is deterministic; a network blip is not.
 
-    @pytest.mark.parametrize("days", [30, 61, MAX_FOR_TEST := 93])
+        A blocked client fails identically on every date, which is what makes
+        abandoning the sweep safe. A burst of connection errors says nothing
+        about the dates that have not been tried yet, so counting those toward
+        the threshold would abort a healthy sweep over a transient wobble.
+        """
+        good = _page([_row(150.0)])
+        failures = dates_module.SWEEP_FAILURE_THRESHOLD
+
+        class _EarlyBlips(StubClient):
+            def get(self, url: str, **kwargs: Any) -> _Response:
+                with self._lock:
+                    self.calls += 1
+                    n = self.calls
+                if n <= failures:
+                    raise SearchConnectionError("connection refused")
+                return _Response(good)
+
+        client = _EarlyBlips()
+        results = _search_with(client).search(_filters(days=20))
+
+        # Nothing aborted: the five blips cost their own dates, everything else
+        # priced normally.
+        assert results is not None
+        assert len(results) == 20 - failures
+        assert client.calls == 20
+
+    def test_a_wholly_dead_network_still_raises_at_the_end(self, no_backoff):
+        """Not tripping is not the same as going quiet — the sweep still errors."""
+        client = StubClient(error=SearchConnectionError("connection refused"))
+        with pytest.raises(SearchClientError) as excinfo:
+            _search_with(client).search(_filters(days=8))
+        assert "every date in the range failed" in str(excinfo.value)
+        # Every date was tried, because nothing here is known to be deterministic.
+        assert client.calls == 8
+
+    def test_tripped_sweep_that_still_returns_prices_warns_once(self, caplog):
+        """A truncated answer must never be silent — that is this PR's whole point.
+
+        Driven through ``_collect`` directly rather than through a sweep: after
+        P1 the only way a success lands *after* a trip is a real race between
+        worker threads, which cannot be staged deterministically. The contract
+        being pinned is ``_collect``'s, so this exercises it head-on.
+        """
+        priced = dates_module.DatePrice(date=(FIRST_DAY,), price=150.0, currency="USD")
+        outcomes = [
+            dates_module._DateOutcome(price=priced),
+            *[dates_module._DateOutcome(failure="the search page carried no ds:1 payload")] * 5,
+            *[dates_module._DateOutcome(attempted=False)] * 24,
+        ]
+
+        with caplog.at_level(logging.WARNING, logger="fli.search.dates"):
+            results = dates_module.SearchDates._collect(outcomes, 30, skipped=24)
+
+        assert results == [priced]
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1, f"expected exactly one warning, got {len(warnings)}"
+        message = warnings[0].getMessage()
+        assert "1 of 30" in message, message
+        assert "24 were skipped" in message, message
+        assert "FLI_SOCS_COOKIE" in message, message
+        assert warnings[0].exc_info is None, "no traceback on the truncation warning"
+        assert "\n" not in message, "the warning must be a single line"
+
+    def test_tripped_sweep_with_no_prices_reports_once_as_an_error(self, caplog):
+        """Nothing priced is already an exception; don't also warn about truncation."""
+        outcomes = [
+            *[dates_module._DateOutcome(failure=dates_module._NO_PAYLOAD)] * 5,
+            *[dates_module._DateOutcome(attempted=False)] * 25,
+        ]
+        with caplog.at_level(logging.WARNING, logger="fli.search.dates"):
+            with pytest.raises(SearchParseError):
+                dates_module.SearchDates._collect(outcomes, 30, skipped=25)
+        assert not [r for r in caplog.records if "skipped" in r.getMessage()]
+
+    def test_untripped_sweep_does_not_warn_about_truncation(self, no_backoff, caplog):
+        """A healthy sweep prices every date, so there is nothing to announce."""
+        client = StubClient(_page([_row(150.0)]))
+        with caplog.at_level(logging.WARNING, logger="fli.search.dates"):
+            results = _search_with(client).search(_filters(days=12))
+        assert results is not None and len(results) == 12
+        assert not [r for r in caplog.records if "skipped" in r.getMessage()]
+
+    @pytest.mark.parametrize("days", [30, 61, 93])
     def test_blocked_sweep_costs_the_same_at_any_range(self, days, no_backoff):
         """The cost of learning "this client is blocked" must not scale with the range.
 
