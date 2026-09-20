@@ -267,10 +267,17 @@ def _parse_datetime(date_arr: list[int], time_arr: list[int]) -> datetime:
 
 # Airline / Airport enums are immutable so each code maps to a single
 # member instance — cache the ``getattr`` walk so the parse hot path
-# turns into a dict lookup. ``__members__`` is itself a dict, but going
-# through ``getattr`` adds attribute-protocol overhead we don't need.
-_AIRLINE_BY_CODE: dict[str, Airline] = {m.name: m for m in Airline}
-_AIRPORT_BY_CODE: dict[str, Airport] = {m.name: m for m in Airport}
+# turns into a dict lookup. Built from ``__members__`` (not ``for m in
+# Airline``/``for m in Airport``) so every registered name resolves, even
+# an alias: iterating the Enum itself silently skips alias members (two
+# codes sharing the same human-readable name collapse into one Enum
+# value), which used to make codes like Okinawa's ``OKA`` disappear from
+# this dict entirely and get dropped as "unknown code". The generator now
+# disambiguates duplicate names so aliases shouldn't occur in practice,
+# but building from ``__members__`` keeps this dict correct even if that
+# invariant is ever violated.
+_AIRLINE_BY_CODE: dict[str, Airline] = dict(Airline.__members__)
+_AIRPORT_BY_CODE: dict[str, Airport] = dict(Airport.__members__)
 
 
 def _parse_airline(code: str) -> Airline:
