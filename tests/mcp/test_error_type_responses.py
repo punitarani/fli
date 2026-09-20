@@ -4,9 +4,18 @@ Additive contract: `success`, `error`, and the tool's existing empty-result
 key (`flights` / `dates` / `options`) must be byte-identical to what they
 were before this change — these tests assert the new keys are *added*, not
 that the old ones changed.
+
+T10 fix round 3: dates are computed relative to `datetime.now()` at
+test-run time rather than pinned to a fixed clock, per the same fix
+applied to `tests/core/test_error_type_parity.py` — see that file's
+docstring for why a fixed pinned clock paired with fixed future dates is
+fragile (it can silently stop exercising the intended code path without
+any test failure to flag it).
 """
 
 from __future__ import annotations
+
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -28,13 +37,11 @@ from fli.search.exceptions import (
     SearchUnsupportedError,
 )
 
-PINNED_TODAY = "2026-01-01"
-
-
-@pytest.fixture(autouse=True)
-def _pinned_clock(pin_today):
-    """Freeze "today" well before every date literal in this module."""
-    pin_today(PINNED_TODAY)
+# A single "comfortably in the future, whatever day this runs" date for
+# tests that only need *a* valid date (not a specific range).
+_FUTURE_DATE = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+_SHORT_RANGE_START = (datetime.now() + timedelta(days=60)).strftime("%Y-%m-%d")
+_SHORT_RANGE_END = (datetime.now() + timedelta(days=69)).strftime("%Y-%m-%d")
 
 
 def _raiser(exc: BaseException):
@@ -68,7 +75,7 @@ _SEARCH_CLIENT_ERROR_CASES = [
 class TestSearchFlightsErrorType:
     @pytest.fixture
     def params(self):
-        return FlightSearchParams(origin="JFK", destination="LHR", departure_date="2026-12-01")
+        return FlightSearchParams(origin="JFK", destination="LHR", departure_date=_FUTURE_DATE)
 
     @pytest.mark.parametrize("exc,expected_type,expected_retryable", _SEARCH_CLIENT_ERROR_CASES)
     def test_search_error_types(self, monkeypatch, params, exc, expected_type, expected_retryable):
@@ -100,7 +107,7 @@ class TestSearchFlightsErrorType:
 
     def test_bad_airport_code_is_validation_error(self):
         """An unresolvable origin raises fli.core.parsers.ParseError -> validation_error."""
-        params = FlightSearchParams(origin="ZZZZ", destination="LHR", departure_date="2026-12-01")
+        params = FlightSearchParams(origin="ZZZZ", destination="LHR", departure_date=_FUTURE_DATE)
         result = _execute_flight_search(params)
         assert result["success"] is False
         assert result["error_type"] == "validation_error"
@@ -111,7 +118,7 @@ class TestSearchFlightsErrorType:
         params = FlightSearchParams(
             origin="JFK",
             destination="LHR",
-            departure_date="2026-12-01",
+            departure_date=_FUTURE_DATE,
             passengers=9,
             children=5,
         )
@@ -132,7 +139,10 @@ class TestSearchDatesErrorType:
     @pytest.fixture
     def params(self):
         return DateSearchParams(
-            origin="JFK", destination="LHR", start_date="2026-03-01", end_date="2026-03-10"
+            origin="JFK",
+            destination="LHR",
+            start_date=_SHORT_RANGE_START,
+            end_date=_SHORT_RANGE_END,
         )
 
     @pytest.mark.parametrize("exc,expected_type,expected_retryable", _SEARCH_CLIENT_ERROR_CASES)
@@ -147,19 +157,34 @@ class TestSearchDatesErrorType:
         assert result["dates"] == []
 
     def test_over_93_date_cap_is_validation_error(self):
-        """SearchDates.search() raises a bare ValueError for >93-date ranges — no mocking needed."""
+        """SearchDates.search() raises a bare ValueError for >93-date ranges — no mocking needed.
+
+        Dates are relative to today (150-day range, well over the 93-date
+        cap) so this keeps exercising SearchDates.search()'s cap check
+        rather than drifting onto a "date in the past" pydantic validator
+        that would also report validation_error but prove nothing about
+        the cap path — see tests/core/test_error_type_parity.py's
+        docstring for the fragile-fixed-date failure mode this avoids.
+        """
+        today = datetime.now()
+        start_date = (today + timedelta(days=10)).strftime("%Y-%m-%d")
+        end_date = (today + timedelta(days=10 + 150)).strftime("%Y-%m-%d")
         params = DateSearchParams(
-            origin="JFK", destination="LHR", start_date="2026-02-01", end_date="2026-12-01"
+            origin="JFK", destination="LHR", start_date=start_date, end_date=end_date
         )
         result = _execute_date_search(params)
         assert result["success"] is False
         assert "93-date limit" in result["error"]  # existing message untouched
+        assert "in the past" not in result["error"]
         assert result["error_type"] == "validation_error"
         assert result["retryable"] is False
 
     def test_bad_airport_code_is_validation_error(self):
         params = DateSearchParams(
-            origin="ZZZZ", destination="LHR", start_date="2026-03-01", end_date="2026-03-10"
+            origin="ZZZZ",
+            destination="LHR",
+            start_date=_SHORT_RANGE_START,
+            end_date=_SHORT_RANGE_END,
         )
         result = _execute_date_search(params)
         assert result["error_type"] == "validation_error"
@@ -175,7 +200,7 @@ class TestSearchDatesErrorType:
 class TestBookingOptionsErrorType:
     @pytest.fixture
     def params(self):
-        return FlightSearchParams(origin="JFK", destination="LHR", departure_date="2026-12-01")
+        return FlightSearchParams(origin="JFK", destination="LHR", departure_date=_FUTURE_DATE)
 
     def _flight(self):
         from unittest.mock import MagicMock

@@ -27,11 +27,26 @@ round 1's parity test could not have caught U1 (the CLI commands'
 ``except (AttributeError, ValueError)`` blocks hardcoding
 ``error_type="search_error"`` independently of ``json_error_payload``,
 which they never called for that branch).
+
+T10 fix round 3: every date below is computed relative to
+``datetime.now()`` at test-run time — no fixed pinned clock, no hardcoded
+absolute dates. The original version of this file paired a hardcoded
+``PINNED_TODAY = "2026-01-01"`` clock with a hardcoded
+``"2026-02-01"``/``"2026-12-01"`` date-range in
+``test_date_range_over_93_day_cap``; the two were meant to keep the range
+comfortably in the future forever, but that pairing is exactly the kind
+of fixture that can silently stop exercising its intended code path
+(there is no pytest failure that fires when a "far future" date stops
+being far enough in the future relative to whatever governs "today" — it
+just quietly starts hitting a different, unintended branch that happens
+to produce the same top-level assertion). Relative dates have no such
+window to fall out of.
 """
 
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 
 import pytest
 from pydantic import BaseModel, ValidationError
@@ -56,13 +71,10 @@ from fli.search.exceptions import (
     SearchUnsupportedError,
 )
 
-PINNED_TODAY = "2026-01-01"
-
-
-@pytest.fixture(autouse=True)
-def _pinned_clock(pin_today):
-    """Freeze "today" well before the departure date used below."""
-    pin_today(PINNED_TODAY)
+# A single "comfortably in the future, whatever day this runs" date for
+# tests that only need *a* valid date (not a specific range) — every test
+# below builds its own dates from datetime.now(), so none of them rot.
+_FUTURE_DATE = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
 
 
 def _all_subclasses(cls: type) -> set[type]:
@@ -134,7 +146,7 @@ def test_cli_and_mcp_agree_on_error_type(exc, monkeypatch):
         raise exc
 
     monkeypatch.setattr("fli.mcp.server.SearchFlights.search", _raise)
-    params = FlightSearchParams(origin="JFK", destination="LHR", departure_date="2026-12-01")
+    params = FlightSearchParams(origin="JFK", destination="LHR", departure_date=_FUTURE_DATE)
     mcp_result = _execute_flight_search(params)
 
     assert mcp_result["success"] is False
@@ -160,12 +172,12 @@ class TestCliCommandAndMcpToolAgreeOnErrorType:
     def test_invalid_airport_code(self, runner):
         """Bad origin code: ParseError -> validation_error on both surfaces."""
         cli_result = runner.invoke(
-            app, ["flights", "ZZZZ", "LHR", "2026-12-01", "--format", "json"]
+            app, ["flights", "ZZZZ", "LHR", _FUTURE_DATE, "--format", "json"]
         )
         cli_payload = json.loads(cli_result.stdout)
 
         mcp_result = _execute_flight_search(
-            FlightSearchParams(origin="ZZZZ", destination="LHR", departure_date="2026-12-01")
+            FlightSearchParams(origin="ZZZZ", destination="LHR", departure_date=_FUTURE_DATE)
         )
 
         assert cli_payload["success"] is False
@@ -182,7 +194,29 @@ class TestCliCommandAndMcpToolAgreeOnErrorType:
         to prevent, and the one round 1's parity test (which only compared
         json_error_payload against the MCP executor, not the full CLI
         command) could not catch.
+
+        Dates are relative to today (not a pinned clock) and the range is
+        150 days wide — comfortably over the 93-date cap regardless of what
+        day this runs. The message assertions are the important part: they
+        prove this hit SearchDates.search()'s cap ValueError specifically
+        (the except (AttributeError, ValueError) block — the actual U1 fix
+        site), not some other validation_error path (e.g. a pydantic "date
+        in the past" check, which is a *different* except block that was
+        never broken and would give the same top-level error_type while
+        testing nothing about U1). A round 3 fix: the original version of
+        this test used hardcoded "2026-02-01"/"2026-12-01" dates that only
+        stayed in that intended future window because of a matching
+        hardcoded pinned clock — a pairing that, if either side ever drifts
+        independently, silently starts hitting the "in the past" branch
+        instead while still asserting True, defeating the point of the test
+        without failing it. Confirmed (manually, not committed) that
+        reverting the classify_error call in dates.py's
+        except (AttributeError, ValueError) block makes this test fail.
         """
+        today = datetime.now()
+        start_date = (today + timedelta(days=10)).strftime("%Y-%m-%d")
+        end_date = (today + timedelta(days=10 + 150)).strftime("%Y-%m-%d")
+
         cli_result = runner.invoke(
             app,
             [
@@ -190,9 +224,9 @@ class TestCliCommandAndMcpToolAgreeOnErrorType:
                 "JFK",
                 "LAX",
                 "--from",
-                "2026-02-01",
+                start_date,
                 "--to",
-                "2026-12-01",
+                end_date,
                 "--format",
                 "json",
             ],
@@ -201,7 +235,7 @@ class TestCliCommandAndMcpToolAgreeOnErrorType:
 
         mcp_result = _execute_date_search(
             DateSearchParams(
-                origin="JFK", destination="LAX", start_date="2026-02-01", end_date="2026-12-01"
+                origin="JFK", destination="LAX", start_date=start_date, end_date=end_date
             )
         )
 
@@ -209,6 +243,13 @@ class TestCliCommandAndMcpToolAgreeOnErrorType:
         assert mcp_result["success"] is False
         assert cli_payload["error"]["type"] == mcp_result["error_type"] == "validation_error"
         assert cli_payload["error"]["retryable"] == mcp_result["retryable"] is False
+        # Prove this hit the 93-date cap, not a "date in the past" pydantic
+        # validator that would also report validation_error but exercises
+        # a completely different except block.
+        assert "93-date limit" in cli_payload["error"]["message"]
+        assert "93-date limit" in mcp_result["error"]
+        assert "in the past" not in cli_payload["error"]["message"]
+        assert "in the past" not in mcp_result["error"]
 
     def test_invalid_passenger_mix(self, runner):
         """1 adult + 2 lap infants (each needs its own adult): pydantic ValidationError."""
@@ -218,7 +259,7 @@ class TestCliCommandAndMcpToolAgreeOnErrorType:
                 "flights",
                 "JFK",
                 "LHR",
-                "2026-12-01",
+                _FUTURE_DATE,
                 "--passengers",
                 "1",
                 "--infants-on-lap",
@@ -233,7 +274,7 @@ class TestCliCommandAndMcpToolAgreeOnErrorType:
             FlightSearchParams(
                 origin="JFK",
                 destination="LHR",
-                departure_date="2026-12-01",
+                departure_date=_FUTURE_DATE,
                 passengers=1,
                 infants_on_lap=2,
             )
@@ -253,11 +294,11 @@ class TestCliCommandAndMcpToolAgreeOnErrorType:
             ),
         )
 
-        cli_result = runner.invoke(app, ["flights", "JFK", "LHR", "2026-12-01", "--format", "json"])
+        cli_result = runner.invoke(app, ["flights", "JFK", "LHR", _FUTURE_DATE, "--format", "json"])
         cli_payload = json.loads(cli_result.stdout)
 
         mcp_result = _execute_flight_search(
-            FlightSearchParams(origin="JFK", destination="LHR", departure_date="2026-12-01")
+            FlightSearchParams(origin="JFK", destination="LHR", departure_date=_FUTURE_DATE)
         )
 
         assert cli_payload["success"] is False
@@ -274,11 +315,11 @@ class TestCliCommandAndMcpToolAgreeOnErrorType:
             ),
         )
 
-        cli_result = runner.invoke(app, ["flights", "JFK", "LHR", "2026-12-01", "--format", "json"])
+        cli_result = runner.invoke(app, ["flights", "JFK", "LHR", _FUTURE_DATE, "--format", "json"])
         cli_payload = json.loads(cli_result.stdout)
 
         mcp_result = _execute_flight_search(
-            FlightSearchParams(origin="JFK", destination="LHR", departure_date="2026-12-01")
+            FlightSearchParams(origin="JFK", destination="LHR", departure_date=_FUTURE_DATE)
         )
 
         assert cli_payload["success"] is False
