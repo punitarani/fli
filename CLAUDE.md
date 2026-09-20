@@ -117,7 +117,13 @@ Consequences to keep in mind when changing search code:
 - A search returns fewer rows than the old RPC (~20-45), and client-side
   filtering is not back-filled.
 - Date searches have no calendar grid: one page fetch per date, capped at
-  `fli.search.dates.MAX_DATES_PER_SEARCH` (93) per `SearchDates.search`.
+  `fli.search.dates.MAX_DATES_PER_SEARCH` (93) per `SearchDates.search`. At the
+  cap that is several hundred MB of pages and parsed JSON at peak, and up to
+  ~3 requests per date against a blocked client.
+- ~1 page in 60 arrives HTTP 200 with no `ds:1` blob. `fetch_payload` in
+  `fli/search/_tfs.py` is the single fetch path for both flights and dates and
+  retries exactly that case (`PAGE_FETCH_ATTEMPTS`, `PAGE_RETRY_BACKOFF`);
+  HTTP errors and error-13 rejections are not retried there.
 - `FLI_SOCS_COOKIE` overrides the pre-accepted `SOCS` consent cookie the client
   sends so EU/EEA IPs skip Google's consent interstitial; set it empty to send
   no cookie.
@@ -202,10 +208,14 @@ options — each with a clickable `booking_url` and `google_click_url`.
 - `currency`, `language`, `country` - Same locale knobs as `search_flights`
 
 ### Note on emissions
-Both tools accept the `emissions` filter (forwarded to Google's
-"less emissions" toggle as `LESS`), but raw CO₂ figures are intentionally
-**not** returned in CLI output or MCP tool responses. The filter operates
-server-side; the data is not displayed in the current release.
+The API surface still accepts the `emissions` filter, but the search-page
+transport has no `tfs` field for it, so it is **currently ignored** — the
+search logs a warning naming it and returns unfiltered results. The same is
+true of `checked_bags` / `carry_on` and `exclude_basic_economy`. See
+"Search transport" above.
+
+Independently of that: raw CO₂ figures are intentionally **not** returned in
+CLI output or MCP tool responses, and that is unchanged.
 
 ## Releasing
 

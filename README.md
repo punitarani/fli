@@ -175,7 +175,15 @@ What that means in practice:
   Google's server-side one did.
 * **Date searches cost one page fetch per date.** The page has no calendar
   grid, so a range is priced date by date; one `SearchDates.search` covers at
-  most 93 dates and a wider range raises `ValueError`.
+  most 93 dates and a wider range raises `ValueError`. Budget for it: 93 dates
+  across 10 workers is several hundred MB of pages and parsed JSON at peak, and
+  a client that Google is blocking can issue up to ~3 requests per date (the
+  client's own retries, plus one retry of a page that arrives without a `ds:1`
+  blob) before giving up.
+* **A page occasionally arrives without results.** Roughly one request in sixty
+  returns HTTP 200 with no `ds:1` blob; the client retries that case up to twice
+  (0.5s then 1.5s) before raising `SearchParseError`. A healthy search never
+  pays for it.
 * **`FLI_SOCS_COOKIE`.** EU/EEA IPs are redirected to Google's consent
   interstitial, which serves no `ds:1` blob. The client sends a pre-accepted
   `SOCS` consent cookie by default; set `FLI_SOCS_COOKIE` to change the value,
