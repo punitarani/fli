@@ -133,7 +133,14 @@ class SearchFlights:
         Args:
             filters: Full search descriptor (airports, dates, preferences).
             top_n: Number of outbound options to expand when chasing a
-                round-trip or multi-city itinerary.
+                round-trip or multi-city itinerary. Must be between 1 and
+                10 (inclusive). A round trip costs ``1 + top_n`` page
+                fetches — one for the outbound search plus one per
+                candidate expanded into return flights — so raising it
+                surfaces more airlines (the default sort otherwise expands
+                only the cheapest ``top_n`` outbounds, which are often all
+                from the same carrier) at the cost of more requests.
+                Ignored for one-way searches.
             currency: Optional ISO 4217 currency code (``curr`` URL param).
             language: Optional BCP-47 language code (``hl`` URL param).
             country: Optional ISO 3166-1 alpha-2 country code (``gl`` URL param).
@@ -145,9 +152,20 @@ class SearchFlights:
             when no results.
 
         Raises:
+            ValueError: ``top_n`` is not an ``int`` (``bool`` included — a
+                Python ``int`` subclass, rejected explicitly rather than
+                silently treated as ``0``/``1``) or is outside ``1..10``
+                inclusive.
             Exception: HTTP failure or unparseable response.
 
         """
+        if not isinstance(top_n, int) or isinstance(top_n, bool) or not 1 <= top_n <= 10:
+            raise ValueError(
+                f"top_n must be an integer between 1 and 10 (inclusive); got {top_n!r} "
+                f"({type(top_n).__name__}). It controls how many outbound options a "
+                "round-trip search expands into return-flight combinations — cost is "
+                "1 + top_n page fetches, hence the cap."
+            )
         flights = self._fetch_flights(
             filters,
             currency=currency,

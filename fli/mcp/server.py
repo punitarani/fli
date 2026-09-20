@@ -220,6 +220,17 @@ class FlightSearchParams(BaseModel):
         ge=1,
         description="Maximum layover duration in minutes (multi-stop trips only).",
     )
+    top_n: int = Field(
+        5,
+        description=(
+            "Round-trip only: number of outbound options to expand into return-flight "
+            "combinations. Cost is `1 + top_n` page fetches (one outbound search plus one "
+            "per expanded candidate). The default sort expands only the cheapest `top_n` "
+            "outbounds, which are often all the same airline — raise top_n (max 10) to see "
+            "more carriers on a round trip, at the cost of more requests. Ignored for "
+            "one-way searches."
+        ),
+    )
 
 
 class DateSearchParams(BaseModel):
@@ -697,6 +708,7 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
         search_client = SearchFlights()
         flights = search_client.search(
             filters,
+            top_n=params.top_n,
             currency=currency,
             language=params.language,
             country=params.country,
@@ -781,7 +793,10 @@ def _execute_booking_options(
     selects the itinerary identified by ``flight_numbers`` (or the top
     result when omitted), then calls
     :meth:`fli.search.SearchFlights.get_booking_options` and serializes the
-    vendor list — each carrying a direct ``booking_url``.
+    vendor list — each carrying a direct ``booking_url``. ``params.top_n``
+    is forwarded to the re-run search so a round-trip itinerary that was
+    only discoverable with a raised ``top_n`` (see :func:`search_flights`)
+    can still be matched here.
     """
     try:
         filters, trip_type, origins, destinations = _build_flight_filters(params)
@@ -790,6 +805,7 @@ def _execute_booking_options(
         search_client = SearchFlights()
         flights = search_client.search(
             filters,
+            top_n=params.top_n,
             currency=currency,
             language=params.language,
             country=params.country,
@@ -1138,6 +1154,20 @@ def search_flights(
         int | None,
         Field(description="Maximum layover duration in minutes.", ge=1),
     ] = None,
+    top_n: Annotated[
+        int,
+        Field(
+            description=(
+                "Round-trip only: number of outbound options to expand into return-flight "
+                "combinations. Cost is `1 + top_n` page fetches. Round-trip results all "
+                "from one airline? Raise top_n to see more carriers (max 10) — the default "
+                "sort otherwise only expands the cheapest 5 outbounds, which are often the "
+                "same carrier. Ignored for one-way searches."
+            ),
+            ge=1,
+            le=10,
+        ),
+    ] = 5,
 ) -> dict[str, Any]:
     """Search for flights between two airports on a specific date.
 
@@ -1175,6 +1205,7 @@ def search_flights(
         language=language,
         country=country,
         exclude_airlines=exclude_airlines,
+        top_n=top_n,
         alliance=alliance,
         exclude_alliance=exclude_alliance,
         min_layover=min_layover,
@@ -1466,6 +1497,20 @@ def get_booking_options(
         bool,
         Field(description=f"Include carry-on bag fee in displayed price. {_IGNORED_BY_TRANSPORT}"),
     ] = False,
+    top_n: Annotated[
+        int,
+        Field(
+            description=(
+                "Round-trip only: number of outbound options the re-run search expands "
+                "into return-flight combinations — pass the same value used for the "
+                "search_flights call that found this itinerary, or a flight found with a "
+                "higher top_n may not be reproduced here. Cost is `1 + top_n` page fetches. "
+                "Ignored for one-way searches."
+            ),
+            ge=1,
+            le=10,
+        ),
+    ] = 5,
 ) -> dict[str, Any]:
     """Get bookable fares (vendor names, prices, and direct booking URLs) for a flight.
 
@@ -1476,11 +1521,13 @@ def get_booking_options(
     flight numbers, then call this tool to retrieve where and at what price
     it can be booked.
 
-    Pass the same filters (``sort_by``, ``departure_window``,
+    Pass the same filters (``sort_by``, ``departure_window``, ``top_n``,
     ``exclude_airlines``, ``alliance``, layover/bags/emissions, …) that were
     used for ``search_flights`` so the re-run search reproduces the same result
     set — otherwise, when ``flight_numbers`` is omitted, the priced "top
-    result" may differ from the one the user saw.
+    result" may differ from the one the user saw, and a flight found only
+    because ``search_flights`` was called with a higher ``top_n`` may not be
+    found at all.
 
     On failure (``success: false``, including "no flight matched
     flight_numbers"), the response also carries ``error_type`` (e.g.
@@ -1518,6 +1565,7 @@ def get_booking_options(
         exclude_alliance=exclude_alliance,
         min_layover=min_layover,
         max_layover=max_layover,
+        top_n=top_n,
     )
     return _execute_booking_options(params, flight_numbers)
 

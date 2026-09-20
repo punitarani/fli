@@ -251,6 +251,52 @@ class TestCliCommandAndMcpToolAgreeOnErrorType:
         assert "in the past" not in cli_payload["error"]["message"]
         assert "in the past" not in mcp_result["error"]
 
+    def test_top_n_out_of_range(self, runner):
+        """T12 (issue #142): top_n outside 1-10 -> bare ValueError -> validation_error.
+
+        ``SearchFlights.search``'s own bound check (``fli/search/flights.py``)
+        raises before any network call, so both the real CLI command and the
+        real MCP executor exercise the exact same ``ValueError`` — this is the
+        library-level source of truth for the bound, not a CLI- or MCP-only
+        check that could drift from it.
+        """
+        return_date = (datetime.now() + timedelta(days=37)).strftime("%Y-%m-%d")
+
+        cli_result = runner.invoke(
+            app,
+            [
+                "flights",
+                "JFK",
+                "LHR",
+                _FUTURE_DATE,
+                "--return",
+                return_date,
+                "--top-n",
+                "11",
+                "--format",
+                "json",
+            ],
+        )
+        cli_payload = json.loads(cli_result.stdout)
+
+        mcp_result = _execute_flight_search(
+            FlightSearchParams(
+                origin="JFK",
+                destination="LHR",
+                departure_date=_FUTURE_DATE,
+                return_date=return_date,
+                top_n=11,
+            )
+        )
+
+        assert cli_payload["success"] is False
+        assert mcp_result["success"] is False
+        assert cli_payload["error"]["type"] == mcp_result["error_type"] == "validation_error"
+        assert cli_payload["error"]["retryable"] == mcp_result["retryable"] is False
+        # Specific bound wording, not a bare "top_n" substring (fix round 1, I1 audit).
+        assert "between 1 and 10" in cli_payload["error"]["message"]
+        assert "between 1 and 10" in mcp_result["error"]
+
     def test_invalid_passenger_mix(self, runner):
         """1 adult + 2 lap infants (each needs its own adult): pydantic ValidationError."""
         cli_result = runner.invoke(

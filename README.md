@@ -70,6 +70,7 @@ The MCP server provides two main tools:
 | `exclude_alliance`  | list   | Alliance names to **exclude** from results                  |
 | `min_layover`       | int    | Minimum layover duration in minutes (multi-stop only)       |
 | `max_layover`       | int    | Maximum layover duration in minutes (multi-stop only)       |
+| `top_n`             | int    | Round-trip only: outbound options expanded into return flights (default 5, 1-10) |
 | `currency`          | string | ISO 4217 code (e.g. 'EUR', 'JPY') — flows to `curr=` param  |
 | `language`          | string | BCP-47 language code (e.g. 'en-GB') — flows to `hl=` param  |
 | `country`           | string | ISO 3166-1 alpha-2 country code (e.g. 'GB') for `gl=` param |
@@ -81,6 +82,11 @@ The MCP server provides two main tools:
 
 > Total travelers (`passengers + children + infants_in_seat + infants_on_lap`) must be
 > between 1 and 9, and `infants_on_lap` cannot exceed `passengers`.
+>
+> A round trip costs `1 + top_n` page fetches (one outbound search, plus one per
+> outbound candidate expanded into return flights), so `top_n` is capped at 10. Round-trip
+> results all from one airline? Raise `top_n`, or sort differently — the default sort only
+> ever expands the cheapest `top_n` outbounds, which are often the same carrier.
 
 #### `search_dates` Parameters
 
@@ -237,6 +243,10 @@ fli flights JFK LHR 2026-10-25 \
     --max-layover 360 \
     --currency EUR --language en-GB --country GB
 
+# Round trip: raise --top-n to see more airlines (default 5, max 10, costs 1 + top_n
+# page fetches per search)
+fli flights JFK LHR 2026-10-25 --return 2026-11-01 --top-n 8
+
 # Family mix: 2 adults, 1 child, 1 lap infant (total must be 1-9)
 fli flights JFK LHR 2026-10-25 --passengers 2 --children 1 --infants-on-lap 1
 ```
@@ -299,6 +309,7 @@ fli multi \
 | `--exclude-alliance`    | Alliance(s) to **exclude**                 | `STAR_ALLIANCE`                  |
 | `--min-layover`         | Minimum layover (minutes)                  | `90`                             |
 | `--max-layover`         | Maximum layover (minutes)                  | `360`                            |
+| `--top-n`               | Round-trip only: outbound options expanded into return flights (default 5, 1-10) | `8` |
 | `--currency`            | ISO 4217 currency code                     | `EUR`, `JPY`                     |
 | `--language`            | BCP-47 language code (Google `hl=`)        | `en-GB`                          |
 | `--country`             | ISO 3166-1 alpha-2 country (`gl=`)         | `GB`                             |
@@ -312,6 +323,11 @@ fli multi \
 | `--format`              | Output format                              | `text`, `json`                   |
 
 > Total passengers (adults + children + infants) must be between 1 and 9.
+>
+> `--top-n` only applies to round trips (it is rejected if set on a one-way search) and
+> costs `1 + top_n` page fetches. Round-trip results all from one airline? Raise `--top-n`
+> (up to 10), or `--sort` differently — the default sort only expands the cheapest
+> `top_n` outbounds, which are often the same carrier.
 
 #### Dates Command (`fli dates`)
 
