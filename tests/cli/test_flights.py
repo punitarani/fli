@@ -111,6 +111,15 @@ def test_flights_with_family_passenger_mix(runner, mock_search_flights, mock_con
     assert args[0].passenger_info.children == 1
     assert args[0].passenger_info.infants_in_seat == 1
     assert args[0].passenger_info.infants_on_lap == 1
+    # The same passenger mix must reach the per-flight booking deep link —
+    # otherwise the family sees a family-priced result but a single-adult
+    # booking page.
+    mock_search_flights.build_flight_booking_url.assert_called()
+    _, kwargs = mock_search_flights.build_flight_booking_url.call_args
+    assert kwargs["passenger_info"].adults == 2
+    assert kwargs["passenger_info"].children == 1
+    assert kwargs["passenger_info"].infants_in_seat == 1
+    assert kwargs["passenger_info"].infants_on_lap == 1
 
 
 def test_flights_json_query_echoes_full_passenger_mix(runner, mock_search_flights, mock_console):

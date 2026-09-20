@@ -15,6 +15,7 @@ import {
   extractBookingTokenFromTfu,
   extractSessionIdFromTfu,
   type LegSpec,
+  passengerCodes,
 } from "../../src/search/proto.ts";
 
 // Captured live 2026-05-14 (JFK → LAX outbound AA171, return AA28, RT $346.80).
@@ -374,5 +375,82 @@ describe("buildTfsToken", () => {
     expect(Buffer.from(economy).includes(Buffer.from([0x48, 0x01]))).toBe(true);
     expect(Buffer.from(business).includes(Buffer.from([0x48, 0x03]))).toBe(true);
     expect(Buffer.from(economy).equals(Buffer.from(business))).toBe(false);
+  });
+
+  /** Walk the top-level message and collect every field-8 (passenger) code. */
+  function field8Codes(raw: Uint8Array): number[] {
+    const codes: number[] = [];
+    let offset = 0;
+    while (offset < raw.length) {
+      const [tagVal, afterTag] = _readVarint(raw, offset);
+      offset = afterTag;
+      const field = tagVal >> 3;
+      const wire = tagVal & 0x7;
+      if (wire === 0) {
+        const [value, afterVal] = _readVarint(raw, offset);
+        offset = afterVal;
+        if (field === 8) codes.push(value);
+      } else if (wire === 2) {
+        const [length, afterLen] = _readVarint(raw, offset);
+        offset = afterLen + length;
+      } else {
+        throw new Error(`unexpected wire type ${wire} at offset ${offset}`);
+      }
+    }
+    return codes;
+  }
+
+  test("passengers defaults to a single adult", () => {
+    const built = buildTfsToken([
+      [{ origin: "SFO", depDate: "2026-09-01", dest: "PHX", airline: "AA", flightNumber: "100" }],
+    ]);
+    expect(field8Codes(tfsBytes(built))).toEqual([1]);
+  });
+
+  test("passengers=[1,1,2] (2 adults, 1 child) encodes one entry per traveller", () => {
+    const built = buildTfsToken(
+      [[{ origin: "SFO", depDate: "2026-09-01", dest: "PHX", airline: "AA", flightNumber: "100" }]],
+      { passengers: [1, 1, 2] },
+    );
+    expect(field8Codes(tfsBytes(built))).toEqual([1, 1, 2]);
+  });
+
+  test("passengers do not disturb the seat or trip-type fields", () => {
+    const segs: LegSpec[][] = [
+      [{ origin: "SFO", depDate: "2026-09-01", dest: "PHX", airline: "AA", flightNumber: "100" }],
+    ];
+    const built = buildTfsToken(segs, { passengers: [1, 1, 2], seat: 3 });
+    const raw = tfsBytes(built);
+    const text = Buffer.from(raw);
+    // Three f8 entries, then f9=3 (business), then f14=1 — same layout as
+    // the single-passenger case, just with more f8 entries ahead of f9.
+    expect(
+      text.includes(Buffer.from([0x40, 0x01, 0x40, 0x01, 0x40, 0x02, 0x48, 0x03, 0x70, 0x01])),
+    ).toBe(true);
+    // f19 (trip type) is unaffected by the passenger count.
+    expect(Array.from(raw.slice(-3))).toEqual([0x98, 0x01, 0x02]);
+  });
+});
+
+describe("passengerCodes", () => {
+  // Maps a PassengerInfo to `tfs` field-8 codes — extracted out of
+  // `tfs.ts::buildTfs` so the search token and the booking token
+  // (buildTfsToken) cannot drift on how they encode the passenger mix.
+
+  test("family mix", () => {
+    expect(passengerCodes({ adults: 2, children: 1, infants_on_lap: 1 })).toEqual([1, 1, 2, 3]);
+  });
+
+  test("infant in seat is code 4", () => {
+    expect(passengerCodes({ adults: 1, infants_in_seat: 1 })).toEqual([1, 4]);
+  });
+
+  test("null/undefined defaults to a single adult", () => {
+    expect(passengerCodes(null)).toEqual([1]);
+    expect(passengerCodes(undefined)).toEqual([1]);
+  });
+
+  test("object with no passenger fields defaults to a single adult", () => {
+    expect(passengerCodes({})).toEqual([1]);
   });
 });

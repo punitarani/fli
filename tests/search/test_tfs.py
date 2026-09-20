@@ -371,6 +371,32 @@ class TestPassengerCodes:
         assert _passenger_codes(build_tfs(one_lap_each)) == [1, 1, 3, 3]
 
 
+class TestPassengerCodesParityWithBookingToken:
+    """Drift guard: the search token and the booking token must agree.
+
+    ``build_tfs`` (search token) and ``build_tfs_token`` (per-flight booking
+    deep link) both encode field 8 from the same ``passenger_codes`` helper —
+    this pins that they produce the identical sequence for the same
+    ``PassengerInfo``, the way a manual re-implementation in one of the two
+    places could silently stop doing.
+    """
+
+    def test_family_mix_matches_between_search_and_booking_tokens(self):
+        from fli.search._proto import LegSpec, build_tfs_token, passenger_codes
+
+        info = PassengerInfo(adults=2, children=1, infants_on_lap=1)
+        spec = _filters([("JFK", "LAX", OUTBOUND_DATE)], passenger_info=info)
+        search_codes = _passenger_codes(build_tfs(spec))
+
+        booking_token = build_tfs_token(
+            [[LegSpec("JFK", OUTBOUND_DATE, "LAX", "AA", "171")]],
+            passengers=passenger_codes(info),
+        )
+        booking_codes = _passenger_codes(booking_token)
+
+        assert search_codes == passenger_codes(info) == booking_codes == [1, 1, 2, 3]
+
+
 class TestPageUrl:
     def test_includes_locale_and_currency(self):
         url = page_url("TFS", currency="EUR", language="de", country="DE")

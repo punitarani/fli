@@ -11,7 +11,7 @@
  */
 
 import type { GoogleFlightsUrlOptions } from "../core/links.ts";
-import type { BookingOption, FlightResult } from "../models/google-flights/base.ts";
+import type { BookingOption, FlightResult, PassengerInfo } from "../models/google-flights/base.ts";
 import { SeatType, SortBy, TripType } from "../models/google-flights/base.ts";
 import type { FlightSearchFilters } from "../models/google-flights/flights.ts";
 import { type Client, getClient } from "./client.ts";
@@ -20,7 +20,7 @@ import { parallelMap, throwIfAborted } from "./concurrency.ts";
 import { parseBookingChunk, parseFlightRow } from "./decoders.ts";
 import { SearchParseError } from "./exceptions.ts";
 import { getSearchLogger } from "./logging.ts";
-import { buildBookingToken, buildTfsToken, type LegSpec } from "./proto.ts";
+import { buildBookingToken, buildTfsToken, type LegSpec, passengerCodes } from "./proto.ts";
 import {
   applyClientSideFilters,
   buildTfs,
@@ -91,6 +91,12 @@ export interface BookingOptions {
 export interface BookingUrlOptions extends GoogleFlightsUrlOptions {
   /** Cabin class encoded into the `tfs` token (field 9). Defaults to economy. */
   seatType?: SeatType;
+  /**
+   * Passenger mix encoded into the `tfs` token (field 8, one entry per
+   * traveller). Defaults to a single adult, matching this method's output
+   * before this option existed.
+   */
+  passengerInfo?: Partial<PassengerInfo>;
 }
 
 export class SearchFlights {
@@ -409,7 +415,11 @@ export class SearchFlights {
           flightNumber: leg.flight_number,
         })),
       );
-      const tfs = buildTfsToken(segments, { isOneWay, seat: options.seatType ?? SeatType.ECONOMY });
+      const tfs = buildTfsToken(segments, {
+        isOneWay,
+        passengers: passengerCodes(options.passengerInfo),
+        seat: options.seatType ?? SeatType.ECONOMY,
+      });
       url = `https://www.google.com/travel/flights/booking?tfs=${tfs}`;
     } catch {
       url = "https://www.google.com/travel/flights";

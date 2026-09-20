@@ -511,6 +511,35 @@ class TestSearchReturnsBookingUrl:
             "https://www.google.com/travel/flights/booking?tfs=TEST"
         )
 
+    def test_per_flight_booking_url_carries_search_passenger_mix(self, monkeypatch, params):
+        """A family search's passenger_info reaches build_flight_booking_url.
+
+        Otherwise the flights array shows a family-priced result but every
+        booking_url opens Google's page priced for a single adult.
+        """
+        flight = _make_bookable_flight()
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.search",
+            lambda self, *a, **k: [flight],
+        )
+        captured_kwargs: dict = {}
+
+        def _capture(self, f, **kw):
+            captured_kwargs.update(kw)
+            return "https://www.google.com/travel/flights/booking?tfs=TEST"
+
+        monkeypatch.setattr("fli.mcp.server.SearchFlights.build_flight_booking_url", _capture)
+
+        family_params = params.model_copy(
+            update={"passengers": 2, "children": 1, "infants_on_lap": 1}
+        )
+        result = _execute_flight_search(family_params)
+        assert result["success"] is True
+        passenger_info = captured_kwargs["passenger_info"]
+        assert passenger_info.adults == 2
+        assert passenger_info.children == 1
+        assert passenger_info.infants_on_lap == 1
+
     def test_top_level_search_booking_url_still_present(self, monkeypatch, params):
         """The top-level search booking_url (q= link) is kept alongside per-flight links."""
         flight = _make_bookable_flight()
@@ -577,6 +606,32 @@ class TestExecuteBookingOptions:
         assert result["selected_flight"]["booking_url"] == (
             "https://www.google.com/travel/flights/booking?tfs=SEL"
         )
+
+    def test_selected_flight_booking_url_carries_search_passenger_mix(self, monkeypatch, params):
+        """get_booking_options forwards the search's passenger_info too."""
+        flight = _make_bookable_flight()
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.search",
+            lambda self, *a, **k: [flight],
+        )
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.get_booking_options",
+            lambda self, *a, **k: [_make_option_helper()],
+        )
+        captured_kwargs: dict = {}
+
+        def _capture(self, f, **kw):
+            captured_kwargs.update(kw)
+            return "https://www.google.com/travel/flights/booking?tfs=SEL"
+
+        monkeypatch.setattr("fli.mcp.server.SearchFlights.build_flight_booking_url", _capture)
+
+        family_params = params.model_copy(update={"passengers": 2, "children": 1})
+        result = _execute_booking_options(family_params, ["BA178"])
+        assert result["success"] is True
+        passenger_info = captured_kwargs["passenger_info"]
+        assert passenger_info.adults == 2
+        assert passenger_info.children == 1
 
     def test_no_match_lists_available_flights(self, monkeypatch, params):
         flight = _make_bookable_flight()

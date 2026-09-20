@@ -6,6 +6,7 @@
  */
 
 import { Buffer } from "node:buffer";
+import type { PassengerInfo } from "../models/google-flights/base.ts";
 
 function concatBytes(...parts: Uint8Array[]): Uint8Array {
   let total = 0;
@@ -348,6 +349,13 @@ export interface BuildTfsTokenOptions {
   /** `true` for one-way (incl. multi-city); `false` for round-trip. */
   isOneWay?: boolean;
   /**
+   * Passenger kind codes, one entry per traveller (field 8). Build these
+   * from a search's `PassengerInfo` with {@link passengerCodes}. Defaults
+   * to a single adult so existing callers keep producing the captured
+   * tokens.
+   */
+  passengers?: readonly number[];
+  /**
    * Cabin class encoded in field 9.
    * `1` = economy, `2` = premium economy, `3` = business, `4` = first.
    * Defaults to economy so existing callers keep producing the captured tokens.
@@ -375,6 +383,47 @@ export interface BuildTfsTokenOptions {
 // `fli/search/_proto.py`.
 
 const MAX_U64 = (1n << 64n) - 1n;
+
+/**
+ * Passenger kinds, in the order Google's repeated field 8 numbers them:
+ * 1 = adult, 2 = child, 3 = infant on lap, 4 = infant in own seat.
+ *
+ * The two infant codes are easy to transpose and the mistake is expensive
+ * rather than loud: on an international route a lap infant prices at ~10%
+ * of the adult fare and an infant in its own seat at ~100%, so a swap
+ * quotes a plausible but wrong fare instead of erroring. The legacy RPC
+ * struct orders the same four counts
+ * `[adults, children, infants_on_lap, infants_in_seat]`.
+ */
+const PASSENGER_FIELDS: ReadonlyArray<readonly [keyof PassengerInfo, number]> = [
+  ["adults", 1],
+  ["children", 2],
+  ["infants_on_lap", 3],
+  ["infants_in_seat", 4],
+];
+
+/**
+ * Convert a `PassengerInfo` into `tfs` field-8 codes, one per traveller.
+ *
+ * Shared by {@link buildTfs} in `tfs.ts` (the search token) and
+ * {@link buildTfsToken} (the per-flight booking token) so the two cannot
+ * drift on how they encode the passenger mix.
+ *
+ * @param passengerInfo A `PassengerInfo`, or any duck-typed object exposing
+ *   some subset of `adults`/`children`/`infants_on_lap`/`infants_in_seat`
+ *   (missing ones count as zero). `null`/`undefined` is treated as an
+ *   all-zero mix.
+ * @returns One code per traveller, in field order. Falls back to `[1]` (a
+ *   single adult) when the mix would otherwise be empty.
+ */
+export function passengerCodes(passengerInfo: Partial<PassengerInfo> | null | undefined): number[] {
+  const codes: number[] = [];
+  for (const [field, code] of PASSENGER_FIELDS) {
+    const count = (passengerInfo as Partial<PassengerInfo> | null)?.[field] ?? 0;
+    for (let i = 0; i < count; i++) codes.push(code);
+  }
+  return codes.length > 0 ? codes : [1];
+}
 
 /** Optional per-segment restrictions Google reads out of the `tfs` segment. */
 export interface EncodeTfsSegmentOptions {
@@ -522,6 +571,7 @@ export function encodeTfsPayload(segments: Uint8Array, options: EncodeTfsPayload
  */
 export function buildTfsToken(segments: LegSpec[][], options: BuildTfsTokenOptions = {}): string {
   const isOneWay = options.isOneWay ?? true;
+  const passengers = options.passengers ?? [1];
   const seat = options.seat ?? 1;
   if (segments.length === 0) throw new Error("segments must be non-empty");
   for (let i = 0; i < segments.length; i++) {
@@ -539,5 +589,5 @@ export function buildTfsToken(segments: LegSpec[][], options: BuildTfsTokenOptio
     );
   }
 
-  return encodeTfsPayload(segmentProtos, { isOneWay, seat, pinMaxU64: true });
+  return encodeTfsPayload(segmentProtos, { isOneWay, passengers, seat, pinMaxU64: true });
 }
