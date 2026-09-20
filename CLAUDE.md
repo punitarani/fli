@@ -249,6 +249,42 @@ options — each with a clickable `booking_url` and `google_click_url`.
   user saw.
 - `currency`, `language`, `country` - Same locale knobs as `search_flights`
 
+### Error responses (`error_type` / `retryable`)
+Every tool's failure response (`success: false`) carries `error_type` (a
+stable string) and `retryable` (bool) alongside the existing free-text
+`error` message, so a caller can decide what to do without string-matching
+`error`. `http_error` responses also carry `http_status` when the upstream
+status code is known. Classification is by exception **type**, never by
+message text — see `fli.core.errors.classify_error` (`fli/core/errors.py`).
+
+**This vocabulary is shared** by the MCP tools *and* the CLI's
+`--format json` error output (`fli/cli/errors.py::json_error_payload`) —
+both call the same `classify_error`, so the same exception always produces
+the same `error_type` string on either surface. Some values are a released
+contract from the CLI (`"timeout"`, `"connection_error"`, `"http_error"`,
+`"search_error"`, `"unexpected_error"`, shipped in v0.9.0) and were kept
+as-is rather than renamed for the MCP tools.
+
+| `error_type` | `retryable` | Meaning / what to do |
+|---|---|---|
+| `validation_error` | `false` | Bad input — unknown airport code, an invalid passenger mix, a date range over the 93-date cap, etc. Fix the request; retrying unchanged will fail again. |
+| `unsupported_error` | `false` | The request is well-formed but this transport can't serve it (e.g. multi-city). Change the request. |
+| `parse_error` | `false` | Google served a page fli couldn't read. Usually (not always) a regional consent/blocked interstitial. Not retryable as-is; set `FLI_SOCS_COOKIE` (EU/EEA) and retry — don't just retry the same request unchanged. |
+| `rejected_error` | `false` | Google refused the RPC outright (e.g. `get_booking_options`'s `GetBookingResults` call today — see above). Deterministic; retrying the same request will not help. |
+| `timeout` | `true` | The request to Google Flights timed out. See retry guidance below. |
+| `connection_error` | `true` | A network/DNS issue prevented reaching Google Flights. See retry guidance below. |
+| `http_error` | `true` iff `http_status` is 429 or 5xx | Non-2xx HTTP response from Google; check `http_status`. See retry guidance below. |
+| `search_error` | `false` | Any other typed search-client failure not covered above. |
+| `unexpected_error` | `false` | An unclassified exception — most likely a bug, worth reporting. |
+
+**Retry guidance for `retryable: true`.** The HTTP client has *already*
+retried internally with backoff before raising (`fli/search/client.py`'s
+`tenacity` decorator) — a caller seeing `retryable: true` should retry **at
+most once or twice more**, with its own exponential backoff in *seconds*
+(not milliseconds) between attempts, not hammer the endpoint immediately.
+`http_status: 429` specifically means Google is telling you to slow down —
+back off more, not less.
+
 ### Note on passenger limits
 `PassengerInfo` (`fli/models/google_flights/base.py`) validates every
 passenger mix against Google Flights' own booking limits: total travelers

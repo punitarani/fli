@@ -9,6 +9,13 @@ from typer.testing import CliRunner
 from fli.cli.main import app
 from fli.models import Airline, Airport, FlightLeg, FlightResult, SeatType
 from fli.models.google_flights.base import TripType
+from fli.search.exceptions import (
+    SearchClientError,
+    SearchConnectionError,
+    SearchHTTPError,
+    SearchParseError,
+    SearchTimeoutError,
+)
 
 
 @pytest.fixture
@@ -180,6 +187,111 @@ def test_flights_invalid_passenger_mix_json_error(runner, mock_search_flights, m
     payload = json.loads(result.stdout)
     assert payload["success"] is False
     assert "Total passengers must be between 1 and 9" in payload["error"]["message"]
+    assert payload["error"]["type"] == "validation_error"
+    assert payload["error"]["retryable"] is False
+
+
+def test_flights_invalid_lap_infant_mix_json_error(runner, mock_search_flights, mock_console):
+    """1 adult + 2 lap infants (each needs its own adult) is also validation_error."""
+    result = runner.invoke(
+        app,
+        [
+            "flights",
+            "JFK",
+            "LAX",
+            datetime.now().strftime("%Y-%m-%d"),
+            "--passengers",
+            "1",
+            "--infants-on-lap",
+            "2",
+            "--format",
+            "json",
+        ],
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert payload["error"]["type"] == "validation_error"
+    assert payload["error"]["retryable"] is False
+    mock_search_flights.search.assert_not_called()
+
+
+def test_flights_json_invalid_airport_code(runner, mock_search_flights, mock_console):
+    """An unresolvable airport code reports validation_error, not a crash."""
+    result = runner.invoke(
+        app,
+        ["flights", "ZZZZ", "LAX", datetime.now().strftime("%Y-%m-%d"), "--format", "json"],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert payload["error"]["type"] == "validation_error"
+    assert payload["error"]["retryable"] is False
+    mock_search_flights.search.assert_not_called()
+
+
+def test_flights_json_stubbed_blocked_page(runner, mock_search_flights, mock_console):
+    """A SearchParseError (consent/blocked page) reports parse_error, not retryable as-is."""
+    mock_search_flights.search.side_effect = SearchParseError(
+        "the search page carried no ds:1 payload — Google may have changed the "
+        "page shape, or served a consent/blocked page instead"
+    )
+
+    result = runner.invoke(
+        app,
+        ["flights", "JFK", "LAX", datetime.now().strftime("%Y-%m-%d"), "--format", "json"],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert payload["error"]["type"] == "parse_error"
+    assert payload["error"]["retryable"] is False
+
+
+@pytest.mark.parametrize(
+    "exc, expected_type, expected_retryable",
+    [
+        # Released v0.9.0 CLI --format json values — must not move.
+        pytest.param(SearchTimeoutError("slow"), "timeout", True, id="timeout"),
+        pytest.param(SearchConnectionError("no route"), "connection_error", True, id="connection"),
+        pytest.param(SearchHTTPError("bad gw", status_code=502), "http_error", True, id="http-5xx"),
+        pytest.param(
+            SearchClientError("generic"), "search_error", False, id="generic-search-error"
+        ),
+        pytest.param(RuntimeError("bug"), "unexpected_error", False, id="unexpected"),
+        # Gained in T10 fix round 2 (U1): a bare ValueError used to be
+        # hardcoded to "search_error" by the CLI's
+        # except (AttributeError, ValueError) block — now validation_error.
+        pytest.param(ValueError("simulated bug"), "validation_error", False, id="bare-value-error"),
+        # A bare AttributeError isn't a SearchClientError or an
+        # input-validation failure, so the shared classifier calls it
+        # unexpected_error (also previously hardcoded to "search_error").
+        pytest.param(
+            AttributeError("'NoneType' object has no attribute 'name'"),
+            "unexpected_error",
+            False,
+            id="bare-attribute-error",
+        ),
+    ],
+)
+def test_flights_json_error_type_matches_shared_classifier(
+    runner, mock_search_flights, mock_console, exc, expected_type, expected_retryable
+):
+    """Flights --format json's error_type/retryable match fli.core.errors.classify_error."""
+    mock_search_flights.search.side_effect = exc
+
+    result = runner.invoke(
+        app,
+        ["flights", "JFK", "LAX", datetime.now().strftime("%Y-%m-%d"), "--format", "json"],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert payload["error"]["type"] == expected_type
+    assert payload["error"]["retryable"] is expected_retryable
 
 
 def test_flights_with_airlines(runner, mock_search_flights, mock_console):
@@ -475,6 +587,7 @@ def test_flights_json_invalid_date(runner, mock_search_flights, mock_console):
     assert payload["success"] is False
     assert payload["search_type"] == "flights"
     assert payload["error"]["type"] == "validation_error"
+    assert payload["error"]["retryable"] is False
     assert "YYYY-MM-DD" in payload["error"]["message"]
 
 
