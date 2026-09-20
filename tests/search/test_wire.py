@@ -24,6 +24,11 @@ def _multi_chunk(*payloads):
     measured in UTF-8 bytes. Google measures in characters instead (see
     :func:`_google_framed`); both helpers exist so the reader is pinned as
     working under either convention.
+
+    ``json.dumps`` escapes non-ASCII by default, so the bodies this builds
+    are pure ASCII and the two counts coincide in them. The byte count is
+    exercised against a genuinely multi-byte body in
+    ``TestNonAsciiFraming.test_byte_counted_framing_of_the_same_body_also_parses``.
     """
     parts = [")]}'\n\n"]
     for p in payloads:
@@ -207,6 +212,26 @@ class TestNonAsciiFraming:
             [1, "Paris Charles de Gaulle Airport"],
             [2, "beta"],
         ]
+
+    def test_byte_counted_framing_of_the_same_body_also_parses(self):
+        # The other plausible reading of the header: UTF-8 bytes. ``_multi_chunk``
+        # covers the byte count too, but ``json.dumps`` escapes non-ASCII by
+        # default, so its bodies are pure ASCII and the two counts coincide
+        # there. This builds the raw multi-byte body and announces its byte
+        # length, which is what pins the reader as correct under either
+        # convention rather than merely under Google's.
+        payloads = ([1, "Aéroport de Paris-Charles de Gaulle"], [2, "Düsseldorf"])
+        parts = [")]}'\n\n"]
+        for payload in payloads:
+            inner_json = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+            outer_json = json.dumps(
+                [["wrb.fr", None, inner_json]], separators=(",", ":"), ensure_ascii=False
+            )
+            parts.append(f"{len(outer_json.encode('utf-8')) + 2}\n{outer_json}\n")
+        body = "".join(parts)
+        # The two conventions really do disagree on this body.
+        assert len(body.encode("utf-8")) != len(body)
+        assert list(iter_wrb_chunks(body)) == list(payloads)
 
     def test_length_header_is_not_trusted(self):
         # A header that matches neither the byte nor the character length
