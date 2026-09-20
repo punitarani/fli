@@ -455,13 +455,14 @@ class SearchFlights:
         """
         try:
             session_id = inner[0][4]
-        except (IndexError, TypeError):
+        except (IndexError, TypeError) as exc:
             logger.warning(
-                "Failed to capture shopping session id from search response; "
+                "Failed to capture shopping session id from search response (%s); "
                 "subsequent get_booking_options() calls without an explicit "
                 "session_id will fail.",
-                exc_info=True,
+                exc,
             )
+            logger.debug("session id capture failed", exc_info=True)
             return
         if isinstance(session_id, str) and session_id:
             self._last_session_id = session_id

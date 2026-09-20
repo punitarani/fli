@@ -347,7 +347,12 @@ def encode_tfs_payload(
             Controls field 19. Multi-city is a third value (3) that the
             search page cannot serve — see :func:`fli.search._tfs.build_tfs`.
         passengers: Passenger kind codes, one entry per traveller
-            (1 = adult, 2 = child, 3 = infant in seat, 4 = infant on lap).
+            (1 = adult, 2 = child, 3 = infant on lap, 4 = infant in own
+            seat). The two infant codes are the ones to get right: a lap
+            infant prices at ~10% of the adult fare and an infant in its own
+            seat at ~100%, and transposing them produces a plausible wrong
+            quote rather than an error. See ``_PASSENGER_FIELDS`` in
+            :mod:`fli.search._tfs` for the live fare evidence.
         seat: Cabin class (1 = economy, 2 = premium, 3 = business, 4 = first).
         pin_max_u64: Emit the field 16 constant that booking deep links
             carry. The search page does not need it.

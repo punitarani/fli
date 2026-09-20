@@ -58,8 +58,9 @@ def iter_wrb_chunks(body: str | bytes) -> Iterator[Any]:
     if not (b"0" <= raw[:1] <= b"9"):
         try:
             outer = json.loads(raw.decode("utf-8"))
-        except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
-            logger.warning("Failed to decode single-chunk wrb.fr body as JSON", exc_info=True)
+        except (ValueError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            logger.warning("Failed to decode single-chunk wrb.fr body as JSON: %s", exc)
+            logger.debug("single-chunk wrb.fr decode failed", exc_info=True)
             return
         yield from _chunks_from_outer(outer)
         return
@@ -88,8 +89,9 @@ def iter_wrb_chunks(body: str | bytes) -> Iterator[Any]:
         cursor += chunk_bytes
         try:
             outer = json.loads(payload.strip().decode("utf-8"))
-        except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
-            logger.warning("Discarding malformed wrb.fr chunk", exc_info=True)
+        except (ValueError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            logger.warning("Discarding malformed wrb.fr chunk: %s", exc)
+            logger.debug("malformed wrb.fr chunk", exc_info=True)
             continue
         yield from _chunks_from_outer(outer)
 
@@ -116,8 +118,9 @@ def _chunks_from_outer(outer: Any) -> Iterator[Any]:
             continue
         try:
             yield json.loads(inner)
-        except (ValueError, json.JSONDecodeError):
-            logger.warning("Failed to decode wrb.fr inner JSON payload", exc_info=True)
+        except (ValueError, json.JSONDecodeError) as exc:
+            logger.warning("Failed to decode wrb.fr inner JSON payload: %s", exc)
+            logger.debug("wrb.fr inner JSON decode failed", exc_info=True)
             continue
 
 

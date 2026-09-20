@@ -211,8 +211,14 @@ def extract_payload(html: str) -> Any | None:
             continue
         try:
             return json.loads(data.group(1))
-        except (ValueError, json.JSONDecodeError):
-            logger.warning("ds:1 blob is not valid JSON", exc_info=True)
+        except (ValueError, json.JSONDecodeError) as exc:
+            # One concise line. This sits on the per-page path, which the
+            # retry below runs up to three times and a date sweep runs once
+            # per date — with no logging configured, `exc_info` here would
+            # put hundreds of full tracebacks on stderr through
+            # `logging.lastResort`. The traceback stays at DEBUG.
+            logger.warning("ds:1 blob is not valid JSON: %s", exc)
+            logger.debug("ds:1 blob decode failed", exc_info=True)
             return None
     return None
 
