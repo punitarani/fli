@@ -1,87 +1,41 @@
-# Welcome to Fli Documentation
+# Fli Documentation
 
-Fli is a powerful Python library that provides direct access to Google Flights' API through reverse engineering. Unlike
-other flight search libraries that rely on web scraping, Fli offers a clean, fast, and reliable way to search for
-flights and analyze pricing data.
+Fli provides direct, reverse-engineered access to Google Flights' API. Unlike
+libraries that scrape HTML or drive a browser, Fli speaks the Flights API
+directly — making it fast, reliable, and far less likely to break when the UI
+changes.
+
+Fli ships in two flavors with a shared design:
+
+| | Package | Install | Docs |
+|---|---|---|---|
+| **Python** | [`flights`](https://pypi.org/project/flights/) (PyPI) | `pip install flights` | [Python Quick Start](python/quickstart.md) |
+| **TypeScript** | [`fli-js`](https://www.npmjs.com/package/fli-js) (npm) | `bun add fli-js` | [TypeScript Quick Start](typescript/quickstart.md) |
+
+The TypeScript package is a 1:1 port of the Python library — same models, same
+filter encoding, same wire-format decoders.
 
 ## Key Features
 
-### 🚀 Direct API Access
+* **Direct API access** — no scraping, no browser automation, no HTML parsing.
+* **Rich search** — one-way, round-trip, and multi-city; cabin classes; stop
+  and layover limits; airline/alliance include & exclude; currency and locale.
+* **Cheapest-date search** — scan a flexible date window for the best fares.
+* **Built-in protection** — 10 req/s rate limiting, automatic retries with
+  exponential backoff, typed errors, and input validation.
+* **MCP server** (Python) — search flights from AI assistants like Claude via
+  the Model Context Protocol.
 
-* No web scraping or browser automation
-* Fast and reliable results
-* Less prone to breaking from UI changes
-* Clean, modular architecture
-
-### 🤖 MCP Server Integration
-
-* Model Context Protocol server for AI assistants
-* Natural language flight search with Claude
-* Two powerful tools: `search_flights` and `search_dates`
-* Easy configuration with environment variables
-
-### 🔍 Search Capabilities
-
-* One-way and round-trip flight searches
-* Flexible departure times
-* Multi-airline support
-* Various cabin classes
-* Stop preferences
-* Custom result sorting
-* Experimental JSON CLI output for agents and tools like `jq`
-
-### 💰 Price Analysis
-
-* Search across date ranges
-* Find cheapest dates to fly
-* Price tracking and analysis
-* Flexible date options
-
-## Quick Start
-
-### Installation
-
-```bash
-# Install using pip
-pip install flights
-
-# Or install using pipx (recommended for CLI usage)
-pipx install flights
-```
-
-### MCP Server (for AI Assistants)
-
-```bash
-# Run the MCP server
-fli-mcp
-
-# Or run over HTTP
-fli-mcp-http
-```
-
-See the [MCP Guide](guides/mcp.md) for Claude Desktop configuration.
-
-### Basic Usage
-
-### CLI JSON Output
-
-!!! warning "Experimental"
-    The `--format json` CLI output is experimental. The schema is intended for agents and tools such as `jq`, but may evolve in future releases.
-
-```bash
-fli flights JFK LHR 2026-06-01 --format json
-fli dates JFK LHR --from 2026-06-01 --to 2026-06-30 --format json
-```
+## Python in 30 seconds
 
 ```python
 from datetime import datetime, timedelta
 from fli.models import (
-    Airport, PassengerInfo, SeatType, MaxStops, SortBy,
-    FlightSearchFilters, FlightSegment
+    Airport, FlightSearchFilters, FlightSegment,
+    MaxStops, PassengerInfo, SeatType, SortBy,
 )
 from fli.search import SearchFlights
 
-# Create search filters
 filters = FlightSearchFilters(
     passenger_info=PassengerInfo(adults=1),
     flight_segments=[
@@ -96,75 +50,52 @@ filters = FlightSearchFilters(
     sort_by=SortBy.CHEAPEST,
 )
 
-# Search flights
-search = SearchFlights()
-flights = search.search(filters)
-
-# Process results
-for flight in flights:
-    print(f"💰 Price: ${flight.price}")
-    print(f"⏱️ Duration: {flight.duration} minutes")
-    print(f"✈️ Stops: {flight.stops}")
+for flight in SearchFlights().search(filters) or []:
+    print(f"${flight.price} — {flight.duration} min — {flight.stops} stop(s)")
 ```
 
-### Running Examples
+## TypeScript in 30 seconds
 
-Complete, runnable examples are available in the `examples/` directory:
+```ts
+import {
+  Airport, FlightSearchFilters, FlightSegment,
+  MaxStops, SearchFlights, SeatType, SortBy,
+} from "fli-js";
+
+const filters = new FlightSearchFilters({
+  passenger_info: { adults: 1, children: 0, infants_in_seat: 0, infants_on_lap: 0 },
+  flight_segments: [
+    new FlightSegment({
+      departure_airport: [[[Airport.JFK, 0]]],
+      arrival_airport: [[[Airport.LAX, 0]]],
+      travel_date: "2026-12-25",
+    }),
+  ],
+  seat_type: SeatType.ECONOMY,
+  stops: MaxStops.NON_STOP,
+  sort_by: SortBy.CHEAPEST,
+});
+
+for (const flight of (await new SearchFlights().search(filters, { currency: "USD" })) ?? []) {
+  console.log(`$${flight.price} — ${flight.duration} min — ${flight.stops} stop(s)`);
+}
+```
+
+## Command line (Python)
 
 ```bash
-# Run with uv (recommended - handles dependencies)
-uv run python examples/basic_one_way_search.py
+pipx install flights
 
-# Or install dependencies first, then run
-pip install pydantic curl_cffi httpx
-python examples/basic_one_way_search.py
+fli flights JFK LHR 2026-06-01 --class BUSINESS --stops NON_STOP
+fli dates JFK LHR --from 2026-06-01 --to 2026-06-30
 ```
 
-**Available Examples:**
+## Where to next
 
-* Basic one-way and round-trip searches
-* Date range analysis and cheapest date finding
-* Advanced filtering with time restrictions
-* Error handling and retry logic
-* Data analysis with pandas integration
-
-> 💡 All examples include automatic dependency checking and helpful error messages.
-
-## Project Structure
-
-The library is organized into several key modules:
-
-* `core/`: Shared utilities
-  * `parsers.py`: Parameter parsing (airports, airlines, stops, etc.)
-  * `builders.py`: Filter building utilities
-
-* `models/`: Data models and enums
-  * `google_flights`: Core data models specific to Google Flights
-  * `airline.py`: Airline enums and data
-  * `airport.py`: Airport enums and data
-
-* `search/`: Search functionality
-  * `flights.py`: Flight search implementation
-  * `dates.py`: Date-based price search
-  * `client.py`: HTTP client with rate limiting
-
-* `mcp/`: MCP server
-  * `server.py`: FastMCP server with `search_flights` and `search_dates` tools
-
-* `cli/`: Command-line interface
-  * `commands/`: CLI commands (`flights`, `dates`)
-  * `utils.py`: Display and validation utilities
-
-## Contributing
-
-We welcome contributions! Here's how you can help:
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests: `uv run pytest`
-5. Submit a pull request
+* [Python Quick Start](python/quickstart.md) · [Python Examples](python/examples.md) · [Python API Reference](python/api/models.md)
+* [TypeScript Quick Start](typescript/quickstart.md) · [TypeScript Examples](typescript/examples.md)
+* [MCP Server Guide](guides/mcp.md) — flight search for AI assistants
 
 ## License
 
-This project is licensed under the MIT License. See the LICENSE file for details.
+Fli is released under the MIT License. See the `LICENSE` file for details.

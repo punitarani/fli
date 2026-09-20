@@ -665,4 +665,6 @@ def test_flight_search_filters(test_case):
 
     # Test URL encoding
     encoded_filters = search_filters.encode()
-    assert test_case["encoded"] is None or encoded_filters == test_case["encoded"]
+    assert isinstance(encoded_filters, str) and len(encoded_filters) > 0
+    if test_case["encoded"] is not None:
+        assert encoded_filters == test_case["encoded"]

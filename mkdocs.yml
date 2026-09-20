@@ -98,10 +98,13 @@ extra:
 
 nav:
   - Home: index.md
-  - Getting Started:
-    - Quick Start: guides/quickstart.md
-    - Examples: examples/advanced.md
-    - MCP Server: guides/mcp.md
-  - API Reference:
-    - Models: api/models.md
-    - Search: api/search.md 
+  - Python:
+    - Quick Start: python/quickstart.md
+    - Examples: python/examples.md
+    - API Reference:
+      - Models: python/api/models.md
+      - Search: python/api/search.md
+  - TypeScript:
+    - Quick Start: typescript/quickstart.md
+    - Examples: typescript/examples.md
+  - MCP Server: guides/mcp.md

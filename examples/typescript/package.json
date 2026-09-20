@@ -1,0 +1,17 @@
+{
+  "name": "fli-typescript-examples",
+  "private": true,
+  "type": "module",
+  "description": "Runnable TypeScript examples for the fli library.",
+  "scripts": {
+    "basic": "bun run basic_one_way_search.ts",
+    "round-trip": "bun run round_trip_search.ts",
+    "dates": "bun run date_range_search.ts",
+    "multi-city": "bun run multi_city_search.ts",
+    "advanced": "bun run advanced_filters_search.ts",
+    "errors": "bun run error_handling_with_retries.ts"
+  },
+  "dependencies": {
+    "fli-js": "^0.0.4"
+  }
+}

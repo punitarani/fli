@@ -1,0 +1,285 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Git ref (tag/branch/SHA) to check out. Defaults to the caller ref.'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      fli-js: ${{ steps.filter.outputs.fli-js || 'true' }}
+      workflows: ${{ steps.filter.outputs.workflows || 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dorny/paths-filter@v4
+        id: filter
+        if: github.event_name == 'pull_request'
+        with:
+          filters: |
+            fli-js:
+              - 'fli-js/**'
+              - 'data/**'
+              - '.github/workflows/ci.yml'
+            workflows:
+              - '.github/workflows/**'
+              - '.github/actionlint.yaml'
+
+  actionlint:
+    name: Actionlint
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Run actionlint
+        uses: raven-actions/actionlint@v2
+        with:
+          # Show inline annotations on the PR diff for any findings
+          matcher: true
+
+  lint:
+    name: Lint Python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.10
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Check formatting
+        run: uv run ruff format . --check
+
+      - name: Check style
+        run: uv run ruff check .
+
+  fli-js-lint:
+    name: fli-js / Format & lint
+    needs: changes
+    if: needs.changes.outputs.fli-js == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: fli-js
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Biome format check
+        run: bun run format:check
+
+      - name: Biome + oxlint check
+        run: bun run lint
+
+      - name: TypeScript typecheck
+        run: bun run typecheck
+
+  fli-js-test:
+    name: fli-js / Bun tests
+    needs: [ changes, fli-js-lint ]
+    if: needs.changes.outputs.fli-js == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: fli-js
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Verify generated enums are in sync with data/
+        run: |
+          bun run generate:enums
+          if ! git diff --quiet src/models/airport.ts src/models/airline.ts; then
+            echo "Generated enums are out of date — run 'bun run generate:enums' and commit." >&2
+            git diff --stat src/models/airport.ts src/models/airline.ts
+            exit 1
+          fi
+
+      - name: Run tests with coverage
+        run: bun run test:ci
+
+      - name: Upload fli-js test results
+        if: always() && !env.ACT
+        uses: actions/upload-artifact@v7
+        with:
+          name: Test Results (fli-js)
+          path: fli-js/junit.xml
+
+      - name: Upload fli-js coverage
+        if: always() && !env.ACT
+        uses: actions/upload-artifact@v7
+        with:
+          name: Coverage (fli-js)
+          path: fli-js/coverage/
+
+  railway-build:
+    name: Railway build validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Create local bin directory
+        run: mkdir -p "$HOME/.local/bin"
+
+      - name: Install Nixpacks CLI
+        run: |
+          NIXPACKS_VERSION="1.41.0"
+          curl -fsSL "https://github.com/railwayapp/nixpacks/releases/download/v${NIXPACKS_VERSION}/nixpacks-v${NIXPACKS_VERSION}-x86_64-unknown-linux-musl.tar.gz" | tar xz -C "$HOME/.local/bin"
+
+      - name: Add local bin to PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Validate Railway and Nixpacks config
+        run: |
+          python - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          railway = tomllib.loads(Path("railway.toml").read_text())
+          nixpacks = tomllib.loads(Path("nixpacks.toml").read_text())
+
+          assert railway["build"]["builder"] == "NIXPACKS"
+          assert "nixpacksPlan" not in railway["build"]
+          assert railway["deploy"]["startCommand"] == "fli-mcp-http"
+          assert nixpacks["variables"]["NIXPACKS_UV_VERSION"]
+          assert nixpacks["start"]["cmd"] == "fli-mcp-http"
+          PY
+
+      - name: Generate Nixpacks plan
+        run: nixpacks plan . > /tmp/nixpacks-plan.json
+
+      - name: Assert plan pins uv for install
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          plan = json.loads(Path("/tmp/nixpacks-plan.json").read_text())
+          install_cmds = plan["phases"]["install"]["cmds"]
+          joined = "\n".join(install_cmds)
+
+          assert "pip install uv==$NIXPACKS_UV_VERSION" in joined
+          assert "uv sync --active --no-dev --frozen --extra mcp" in joined
+          PY
+
+      - name: Smoke test Railway production install
+        run: |
+          uv venv /tmp/fli-railway-venv --python 3.12
+          . /tmp/fli-railway-venv/bin/activate
+          uv sync --active --no-dev --frozen --extra mcp
+          python -c "import fastmcp, fli.mcp.server"
+
+  test:
+    name: test
+    needs: [ lint, railway-build ]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [ "3.10", "3.11", "3.12", "3.13" ]
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --extra dev --extra mcp
+
+      - name: Run tests
+        run: |
+          uv run pytest tests/ --all -v \
+            --ignore=tests/search/ \
+            -k "not test_search_dates_round_trip" \
+            --junitxml=junit.xml
+        env:
+          FORCE_COLOR: 1
+
+      - name: Upload Test Results
+        if: always() && !env.ACT
+        uses: actions/upload-artifact@v7
+        with:
+          name: Test Results (Python ${{ matrix.python-version }})
+          path: junit.xml
+
+  publish-test-results:
+    name: Publish Test Results
+    needs: [ test, fli-js-test ]
+    runs-on: ubuntu-latest
+    if: always() && (needs.test.result != 'skipped' || needs.fli-js-test.result != 'skipped')
+    permissions:
+      checks: write
+      pull-requests: write
+
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: Publish Test Results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          files: "artifacts/**/junit.xml"
+          check_name: "Test Results"
+          comment_mode: always
+          compare_to_earlier_commit: true

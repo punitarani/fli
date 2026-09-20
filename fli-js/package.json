@@ -1,0 +1,90 @@
+{
+  "name": "fli-js",
+  "version": "0.0.4",
+  "description": "TypeScript port of the fli library: programmatic access to Google Flights data through direct API interaction.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./models": {
+      "types": "./dist/models/index.d.ts",
+      "import": "./dist/models/index.js",
+      "default": "./dist/models/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js",
+      "default": "./dist/core/index.js"
+    },
+    "./search": {
+      "types": "./dist/search/index.d.ts",
+      "import": "./dist/search/index.js",
+      "default": "./dist/search/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "lint": "biome check . && oxlint .",
+    "lint:fix": "biome check --write . && oxlint --fix .",
+    "test": "bun test tests/models tests/core tests/search tests/integration",
+    "test:all": "bun test",
+    "test:e2e": "FLI_E2E=1 bun test tests/e2e",
+    "test:watch": "bun test --watch tests/models tests/core tests/search tests/integration",
+    "test:coverage": "bun test --coverage tests/models tests/core tests/search tests/integration",
+    "test:ci": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov --reporter=junit --reporter-outfile=./junit.xml tests/models tests/core tests/search tests/integration",
+    "generate:enums": "bun run scripts/generate-enums.ts",
+    "ci": "bun run format:check && bun run lint && bun run typecheck && bun run test",
+    "prepublishOnly": "bun run build"
+  },
+  "keywords": [
+    "flights",
+    "google-flights",
+    "travel",
+    "api",
+    "flight-search"
+  ],
+  "author": "Punit Arani <punitsai36@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/punitarani/fli.git",
+    "directory": "fli-js"
+  },
+  "homepage": "https://github.com/punitarani/fli/tree/main/fli-js#readme",
+  "bugs": {
+    "url": "https://github.com/punitarani/fli/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "engines": {
+    "bun": ">=1.1.0",
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.15",
+    "@types/bun": "^1.1.14",
+    "@types/node": "^25.9.1",
+    "oxlint": "^1.66.0",
+    "typescript": "^6.0.3"
+  }
+}

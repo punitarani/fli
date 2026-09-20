@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+.env
+.env.local
+bun.lockb
+coverage/
+junit.xml

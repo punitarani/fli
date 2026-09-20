@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "error",
+    "perf": "warn"
+  },
+  "ignorePatterns": ["dist", "node_modules", "src/models/airport.ts", "src/models/airline.ts"],
+  "rules": {
+    "no-console": "off",
+    "no-unused-vars": "warn",
+    "no-explicit-any": "off",
+    "no-await-in-loop": "off",
+    "consistent-function-scoping": "off",
+    "no-new-array": "warn"
+  }
+}

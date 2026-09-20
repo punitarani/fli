@@ -97,6 +97,9 @@ def mock_search_flights(monkeypatch):
             "total_price": 599.98,
         }
     ]
+    mock.build_flight_booking_url.return_value = (
+        "https://www.google.com/travel/flights/booking?tfs=test"
+    )
     monkeypatch.setattr("fli.search.flights.SearchFlights.__new__", lambda cls: mock)
     monkeypatch.setattr("fli.search.SearchFlights.__new__", lambda cls: mock)
     return mock

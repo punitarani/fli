@@ -5,6 +5,7 @@ from typing import Annotated, Any
 import typer
 
 from fli.cli.enums import OutputFormat
+from fli.cli.errors import json_error_payload, report_cli_error
 from fli.cli.utils import (
     build_json_error_response,
     build_json_success_response,
@@ -17,6 +18,7 @@ from fli.cli.utils import (
 )
 from fli.core import (
     build_flight_segments,
+    google_flights_url,
     parse_airlines,
     parse_alliances,
     parse_cabin_class,
@@ -32,7 +34,7 @@ from fli.models import (
     LayoverRestrictions,
     PassengerInfo,
 )
-from fli.search import SearchFlights
+from fli.search import SearchClientError, SearchFlights
 
 
 def _search_flights_core(
@@ -60,6 +62,7 @@ def _search_flights_core(
     exclude_alliance: list[str] | None = None,
     min_layover: int | None = None,
     max_layover: int | None = None,
+    passengers: int = 1,
 ) -> None:
     """Core flight search functionality."""
     query: dict[str, Any] = {
@@ -72,6 +75,7 @@ def _search_flights_core(
         "cabin_class": cabin_class.upper(),
         "max_stops": max_stops.upper(),
         "sort_by": sort_by.upper(),
+        "passengers": passengers,
     }
 
     try:
@@ -127,6 +131,17 @@ def _search_flights_core(
             time_restrictions=time_restrictions,
         )
 
+        # Shareable Google Flights deep link for this search.
+        booking_url = google_flights_url(
+            origin_airport.name.lstrip("_"),
+            destination_airport.name.lstrip("_"),
+            departure_date,
+            return_date,
+            currency=currency,
+            language=language,
+            country=country,
+        )
+
         # Parse layover constraints (airports, min duration, max duration).
         layover_restrictions = None
         layover_airports = [resolve_airport(code) for code in layover] if layover else None
@@ -145,7 +160,7 @@ def _search_flights_core(
         # Create search filters
         filters = FlightSearchFilters(
             trip_type=trip_type,
-            passenger_info=PassengerInfo(adults=1),
+            passenger_info=PassengerInfo(adults=passengers),
             flight_segments=segments,
             stops=stops,
             seat_type=seat_type,
@@ -180,12 +195,25 @@ def _search_flights_core(
                         query=query,
                         results_key="flights",
                         results=[],
+                        booking_url=booking_url,
                     )
                 )
                 return
 
             typer.echo("No flights found.")
             raise typer.Exit(1)
+
+        # Build per-flight booking deep-links (tfs; never raises).
+        booking_urls = [
+            search_client.build_flight_booking_url(
+                result,
+                currency=currency,
+                language=language,
+                country=country,
+                seat_type=seat_type,
+            )
+            for result in results
+        ]
 
         if output_format == OutputFormat.JSON:
             emit_json(
@@ -195,14 +223,21 @@ def _search_flights_core(
                     query=query,
                     results_key="flights",
                     results=[
-                        serialize_flight_result(result, default_currency=currency)
-                        for result in results
+                        serialize_flight_result(result, default_currency=currency, booking_url=burl)
+                        for result, burl in zip(results, booking_urls, strict=False)
                     ],
+                    booking_url=booking_url,
                 )
             )
             return
 
-        display_flight_results(results, trip_type=trip_type, default_currency=currency)
+        display_flight_results(
+            results,
+            trip_type=trip_type,
+            default_currency=currency,
+            booking_url=booking_url,
+            booking_urls=booking_urls,
+        )
 
     except ParseError as e:
         if output_format == OutputFormat.JSON:
@@ -231,6 +266,32 @@ def _search_flights_core(
 
         typer.echo(f"Error: {str(e)}")
         raise typer.Exit(1) from e
+    except SearchClientError as e:
+        if output_format == OutputFormat.JSON:
+            message, error_type, log_path = json_error_payload(e, command="flights")
+            payload = build_json_error_response(
+                search_type="flights",
+                message=message,
+                error_type=error_type,
+                query=query,
+            )
+            payload["error"]["log_path"] = str(log_path)
+            emit_json(payload)
+            raise typer.Exit(1) from e
+        raise report_cli_error(e, command="flights") from e
+    except Exception as e:  # noqa: BLE001 — fall back to clean reporting
+        if output_format == OutputFormat.JSON:
+            message, error_type, log_path = json_error_payload(e, command="flights")
+            payload = build_json_error_response(
+                search_type="flights",
+                message=message,
+                error_type=error_type,
+                query=query,
+            )
+            payload["error"]["log_path"] = str(log_path)
+            emit_json(payload)
+            raise typer.Exit(1) from e
+        raise report_cli_error(e, command="flights") from e
 
 
 def flights(
@@ -407,6 +468,15 @@ def flights(
             min=1,
         ),
     ] = None,
+    passengers: Annotated[
+        int,
+        typer.Option(
+            "--passengers",
+            "-p",
+            help="Number of adult passengers",
+            min=1,
+        ),
+    ] = 1,
 ):
     """Search for flights on a specific date.
 
@@ -420,6 +490,7 @@ def flights(
         fli flights JFK FRA 2026-10-25 --alliance ONEWORLD
         fli flights JFK LAX 2026-10-25 --exclude-airlines DL
         fli flights BUF ATH 2026-10-25 --min-layover 120
+        fli flights JFK LHR 2026-10-25 --passengers 2
 
     """
     _search_flights_core(
@@ -447,4 +518,5 @@ def flights(
         exclude_alliance=exclude_alliance,
         min_layover=min_layover,
         max_layover=max_layover,
+        passengers=passengers,
     )

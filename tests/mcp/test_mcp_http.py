@@ -14,7 +14,7 @@ from fastmcp import Client
 
 from fli.mcp.server import mcp
 
-EXPECTED_TOOLS = {"search_flights", "search_dates", "find_airports"}
+EXPECTED_TOOLS = {"search_flights", "search_dates", "find_airports", "get_booking_options"}
 
 
 # ---------------------------------------------------------------------------

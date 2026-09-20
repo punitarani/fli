@@ -31,6 +31,9 @@ from fli.models import (
     LayoverRestrictions,
     MaxStops,
     PassengerInfo,
+    SeatType,
+    SortBy,
+    TripType,
 )
 from fli.search import SearchFlights
 from fli.search._urls import with_locale_params
@@ -92,6 +95,32 @@ SCENARIOS: dict[str, tuple[Callable[[], FlightSearchFilters], str]] = {
             stops=MaxStops.NON_STOP,
         ),
         "EUR",
+    ),
+    # Issue #165 regression: premium-cabin RT with family pax. Google
+    # returns rows with an empty price head; the parser must surface
+    # them with ``price=None`` rather than dropping the whole batch.
+    "flight_search_lax_lhr_rt_biz_2a1c": (
+        lambda: FlightSearchFilters(
+            trip_type=TripType.ROUND_TRIP,
+            passenger_info=PassengerInfo(adults=2, children=1),
+            flight_segments=[
+                FlightSegment(
+                    departure_airport=[[Airport.LAX, 0]],
+                    arrival_airport=[[Airport.LHR, 0]],
+                    travel_date=_future(45),
+                ),
+                FlightSegment(
+                    departure_airport=[[Airport.LHR, 0]],
+                    arrival_airport=[[Airport.LAX, 0]],
+                    travel_date=_future(59),
+                ),
+            ],
+            stops=MaxStops.ANY,
+            seat_type=SeatType.BUSINESS,
+            sort_by=SortBy.BEST,
+            show_all_results=True,
+        ),
+        "USD",
     ),
 }
 

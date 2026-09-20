@@ -1,19 +1,28 @@
-"""Minimal protobuf wire-format encoder used to build the GetBookingResults token.
+"""Minimal protobuf wire-format encoder used to build booking tokens and URLs.
 
-Google's booking-options endpoint accepts a base64-encoded protobuf as
-``outer[0][1]``. The structure was reverse-engineered from a live capture
-on 2026-05-14 (see ``.reverse-eng/notes/booking_results.md``):
+Two token types are implemented:
 
-::
+1. **GetBookingResults token** (``outer[0][1]``) — used for the vendor-list
+   API call.  Structure reverse-engineered 2026-05-14 (see
+   ``.reverse-eng/notes/booking_results.md``):
 
-    field 1 (length-delim): shopping session id            (response `inner[0][4]`)
-    field 2 (length-delim): "{airline}{flight_no}#{idx}"   (selected itinerary)
-    field 3 (length-delim, nested):
-        field 1 (varint): price in smallest currency unit   (e.g. cents)
-        field 2 (varint): 2                                 (constant in our samples)
-        field 3 (length-delim): ISO currency code           (e.g. "USD")
-    field 7 (varint): 28                                    (stops bucket marker)
-    field 14 (varint): same as inner field 1                (price duplicated)
+   ::
+
+       field 1 (length-delim): shopping session id            (response ``inner[0][4]``)
+       field 2 (length-delim): "{airline}{flight_no}#{idx}"   (selected itinerary)
+       field 3 (length-delim, nested):
+           field 1 (varint): price in smallest currency unit   (e.g. cents)
+           field 2 (varint): 2                                 (constant)
+           field 3 (length-delim): ISO currency code           (e.g. "USD")
+       field 7 (varint): 28                                    (stops bucket marker)
+       field 14 (varint): same as inner field 1                (price duplicated)
+
+2. **Deep-link itinerary token** (``tfs``) — embedded in
+   ``https://www.google.com/travel/flights/booking?tfs=…`` to open a specific
+   itinerary's booking page (vendor fares + "Continue" CTA included). The
+   ``tfs`` token alone is sufficient; the companion ``tfu`` token Google's UI
+   also emits is not needed and is intentionally not built. Structure
+   reverse-engineered 2026-05-28 (see ``.reverse-eng/notes/booking_results.md``).
 
 We implement only the protobuf primitives we need here — varint, length-
 delimited string/bytes, nested-message — to avoid the protobuf-runtime
@@ -24,8 +33,34 @@ from __future__ import annotations
 
 import base64
 import logging
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# tfs deep-link helpers
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class LegSpec:
+    """One physical leg within a booking-URL segment.
+
+    Attributes:
+        origin: IATA code of the departure airport (e.g. ``"SFO"``).
+        dep_date: Departure date in ``YYYY-MM-DD`` format.
+        dest: IATA code of the arrival airport (e.g. ``"PHX"``).
+        airline: Airline IATA code (e.g. ``"AA"``).
+        flight_number: Flight number string (e.g. ``"2413"``).
+
+    """  # noqa: D413 — blank-line-after-last-section false-positive on frozen dataclass
+
+    origin: str
+    dep_date: str
+    dest: str
+    airline: str
+    flight_number: str
 
 
 def _varint(value: int) -> bytes:
@@ -193,95 +228,101 @@ def _read_varint(buf: bytes, off: int) -> tuple[int, int]:
         shift += 7
 
 
-def extract_booking_token_from_tfu(tfu: str) -> str:
-    """Extract the booking token from a booking-page ``tfu`` URL parameter.
+# ---------------------------------------------------------------------------
+# Deep-link URL parameter builder (tfs)
+# ---------------------------------------------------------------------------
 
-    Google Flights' booking page URL has the shape::
 
-        /booking?tfs=<tfs>&tfu=<tfu>...
+def _to_urlsafe_b64(data: bytes) -> str:
+    """Encode *data* as URL-safe base64 without ``=`` padding.
 
-    where ``tfu`` is a base64-encoded protobuf wrapping the booking token::
+    The ``tfs`` query parameter uses the urlsafe alphabet (``-`` / ``_``) with
+    padding stripped.
+    """
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
 
-        tfu = base64( protobuf {
-          field 1 (str): base64( <booking token bytes> )
-          field 2 (nested): { ... }
-          field 4 (str): "" or other padding
-        } )
 
-    This helper accepts either a bare ``tfu`` value or a full URL and
-    returns the inner booking token in the same base64 form
-    :class:`SearchFlights.get_booking_options` accepts via its
-    ``booking_token`` kwarg.
+def build_tfs_token(
+    segments: list[list[LegSpec]],
+    *,
+    is_one_way: bool = True,
+    seat: int = 1,
+) -> str:
+    """Build the ``tfs`` query parameter for a Google Flights deep-link URL.
+
+    The ``tfs`` token encodes the complete itinerary — one segment per travel
+    direction, each segment containing one leg per physical flight.  It is
+    deterministic (no session id required) and can be constructed purely from
+    search-result data.
+
+    Reverse-engineered 2026-05-28 from live browser captures of one-way
+    nonstop, one-way connection (2-stop), and round-trip booking pages (see
+    ``.reverse-eng/notes/booking_results.md``).
 
     Args:
-        tfu: A ``tfu`` URL parameter value, or a full URL containing one.
+        segments: Ordered list of travel directions.  Each element is a list
+            of :class:`LegSpec` describing every physical leg in that
+            direction (one leg for nonstop, two or more for connections).
+        is_one_way: ``True`` for one-way (including multi-city); ``False``
+            for round-trip.  Controls the ``f19`` constant.
+        seat: Cabin class encoded in field 9.  ``1`` = economy, ``2`` =
+            premium economy, ``3`` = business, ``4`` = first.  Defaults to
+            economy so existing callers keep producing the captured tokens.
 
     Returns:
-        The base64-encoded booking token suitable for
-        :meth:`SearchFlights.get_booking_options`.
+        URL-safe base64 string (no ``=`` padding) suitable for use as the
+        ``tfs=`` query parameter.
 
     Raises:
-        ValueError: If the input does not contain a parseable tfu blob.
+        ValueError: *segments* is empty or any segment has no legs.
 
     """
-    # Accept full URL
-    if "tfu=" in tfu:
-        from urllib.parse import parse_qs, urlparse
+    if not segments:
+        raise ValueError("segments must be non-empty")
+    for i, seg in enumerate(segments):
+        if not seg:
+            raise ValueError(f"segment {i} has no legs")
 
-        parts = urlparse(tfu)
-        qs = parse_qs(parts.query)
-        if "tfu" not in qs:
-            raise ValueError("URL has no `tfu` query parameter")
-        tfu = qs["tfu"][0]
+    segment_protos = b""
+    for seg in segments:
+        # Each leg becomes a repeated f4 within this segment.
+        legs_proto = b""
+        for leg in seg:
+            leg_proto = (
+                _length_delim(1, leg.origin.encode())
+                + _length_delim(2, leg.dep_date.encode())
+                + _length_delim(3, leg.dest.encode())
+                + _length_delim(5, leg.airline.encode())
+                + _length_delim(6, leg.flight_number.encode())
+            )
+            legs_proto += _length_delim(4, leg_proto)
 
-    # Decode the outer protobuf
-    padding = "=" * ((4 - len(tfu) % 4) % 4)
-    try:
-        raw = base64.urlsafe_b64decode(tfu + padding)
-    except (ValueError, base64.binascii.Error) as e:
-        raise ValueError(f"tfu is not valid base64: {e}") from e
+        origin_iata = seg[0].origin
+        dest_iata = seg[-1].dest
+        seg_date = seg[0].dep_date
 
-    # Walk protobuf fields looking for field 1 (length-delim string)
-    off = 0
-    while off < len(raw):
-        tag, off = _read_varint(raw, off)
-        field = tag >> 3
-        wire = tag & 0x7
-        if wire == 0:
-            _, off = _read_varint(raw, off)
-        elif wire == 2:
-            length, off = _read_varint(raw, off)
-            data = raw[off : off + length]
-            off += length
-            if field == 1:
-                try:
-                    token_b64 = data.decode("ascii")
-                except UnicodeDecodeError as e:
-                    raise ValueError("tfu field 1 is not ASCII") from e
-                # Strip trailing whitespace/padding-like chars and
-                # re-normalise to the standard base64 alphabet so the
-                # downstream parser accepts it.
-                token_b64 = token_b64.strip().rstrip("=")
-                return token_b64
-        elif wire == 5:
-            off += 4
-        elif wire == 1:
-            off += 8
-        else:
-            raise ValueError(f"unsupported wire type {wire} at offset {off}")
+        seg_proto = (
+            _length_delim(2, seg_date.encode())
+            + legs_proto
+            + _length_delim(13, _varint_field(1, 1) + _length_delim(2, origin_iata.encode()))
+            + _length_delim(14, _varint_field(1, 1) + _length_delim(2, dest_iata.encode()))
+        )
+        segment_protos += _length_delim(3, seg_proto)
 
-    raise ValueError("tfu protobuf has no field 1 (booking token)")
+    # f16 constant: max uint64 (0xFFFFFFFFFFFFFFFF)
+    _MAX_U64 = (1 << 64) - 1
 
+    # f19: 2 = one-way / multi-city, 1 = round-trip
+    f19 = 2 if is_one_way else 1
 
-def extract_session_id_from_tfu(tfu: str) -> str:
-    """Extract the booking session id from a ``tfu`` URL parameter.
-
-    Convenience wrapper that calls :func:`extract_booking_token_from_tfu`
-    then decodes the inner token's ``field 1`` (the session id).
-    """
-    inner_token = extract_booking_token_from_tfu(tfu)
-    decoded = decode_booking_token(inner_token)
-    session = decoded.get("field_1")
-    if not isinstance(session, str):
-        raise ValueError("inner booking token has no field 1 (session id)")
-    return session
+    payload = (
+        _varint_field(1, 28)
+        + _varint_field(2, 2)
+        + segment_protos
+        + _varint_field(8, 1)
+        + _varint_field(9, seat)  # 1=economy 2=premium 3=business 4=first
+        + _varint_field(14, 1)
+        + _length_delim(16, _varint_field(1, _MAX_U64))
+        + _varint_field(19, f19)
+    )
+    return _to_urlsafe_b64(payload)

@@ -19,6 +19,7 @@ import pytest
 from fli.mcp.server import (
     DateSearchParams,
     FlightSearchParams,
+    _get_booking_options_from_params,
     _search_dates_from_params,
     _search_flights_from_params,
 )
@@ -233,3 +234,77 @@ class TestSearchDatesNewFilters:
         assert filters.layover_restrictions is not None
         assert filters.layover_restrictions.min_duration == 120
         assert filters.layover_restrictions.max_duration == 600
+
+
+# ---------------------------------------------------------------------------
+# passenger mix — adults / children / infants flow into PassengerInfo
+# ---------------------------------------------------------------------------
+
+
+class TestPassengerMix:
+    def test_flight_search_passenger_mix(self, captured_search):
+        params = FlightSearchParams(
+            origin="OPO",
+            destination="HKG",
+            departure_date=_future(30),
+            passengers=2,
+            children=1,
+            infants_in_seat=1,
+        )
+        _search_flights_from_params(params)
+        info = captured_search["filters"].passenger_info
+        assert info.adults == 2
+        assert info.children == 1
+        assert info.infants_in_seat == 1
+        assert info.infants_on_lap == 0
+
+    def test_flight_search_defaults_to_adults_only(self, captured_search):
+        params = FlightSearchParams(
+            origin="JFK",
+            destination="LAX",
+            departure_date=_future(30),
+            passengers=1,
+        )
+        _search_flights_from_params(params)
+        info = captured_search["filters"].passenger_info
+        assert (info.children, info.infants_in_seat, info.infants_on_lap) == (0, 0, 0)
+
+    def test_date_search_passenger_mix(self, captured_dates):
+        params = DateSearchParams(
+            origin="OPO",
+            destination="HKG",
+            start_date=_future(30),
+            end_date=_future(60),
+            passengers=2,
+            children=1,
+            infants_on_lap=1,
+        )
+        _search_dates_from_params(params)
+        info = captured_dates["filters"].passenger_info
+        assert info.adults == 2
+        assert info.children == 1
+        assert info.infants_on_lap == 1
+        assert info.infants_in_seat == 0
+
+    def test_booking_options_passenger_mix(self, captured_search):
+        # ``get_booking_options`` builds its own ``FlightSearchParams`` and
+        # re-runs the search via ``_build_flight_filters`` rather than
+        # delegating to ``_search_flights_from_params``. Cover that separate
+        # construction site so a passenger-field typo there is caught too.
+        # The patched ``search`` returns ``[]``, so the booking path stops at
+        # its empty-result branch after the filter is captured.
+        params = FlightSearchParams(
+            origin="OPO",
+            destination="HKG",
+            departure_date=_future(30),
+            passengers=2,
+            children=1,
+            infants_in_seat=1,
+            infants_on_lap=1,
+        )
+        _get_booking_options_from_params(params)
+        info = captured_search["filters"].passenger_info
+        assert info.adults == 2
+        assert info.children == 1
+        assert info.infants_in_seat == 1
+        assert info.infants_on_lap == 1

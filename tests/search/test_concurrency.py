@@ -229,6 +229,8 @@ class TestParallelMap:
 
     def test_max_workers_cap_observed(self):
         """``max_workers=2`` should not run all 4 jobs concurrently."""
+        # Reset to a known state so get_executor creates a fresh 2-worker pool.
+        shutdown_executor()
         in_flight = 0
         peak = 0
         lock = threading.Lock()
@@ -244,8 +246,47 @@ class TestParallelMap:
             return x
 
         parallel_map(fn, list(range(4)), max_workers=2)
-        # The executor caps concurrency. Note: the shared pool may already
-        # be sized larger than 2, so this only verifies behaviour through
-        # the synchronous fallback at max_workers=1 elsewhere.
-        # Here we just verify completion + correct count.
         assert peak >= 1
+        assert peak <= 2
+
+    def test_generator_input_materialised_and_mapped(self):
+        result = parallel_map(lambda x: x * 3, (x for x in range(4)))
+        assert result == [0, 3, 6, 9]
+
+    def test_tuple_input_works(self):
+        result = parallel_map(lambda x: x + 1, (10, 20, 30))
+        assert result == [11, 21, 31]
+
+    def test_exception_in_last_item_propagates(self):
+        def fn(x):
+            if x == 2:
+                raise RuntimeError("last item error")
+            return x
+
+        with pytest.raises(RuntimeError, match="last item error"):
+            parallel_map(fn, [0, 1, 2])
+
+
+class TestShutdownExecutor:
+    def teardown_method(self):
+        shutdown_executor()
+        configure_concurrency(10)
+
+    def test_shutdown_then_get_creates_new_executor(self):
+        original = get_executor()
+        shutdown_executor()
+        new = get_executor()
+        assert new is not original
+
+    def test_shutdown_idempotent(self):
+        # Calling shutdown twice must not raise.
+        shutdown_executor()
+        shutdown_executor()
+
+
+class TestTokenBucketEdgeCases:
+    def test_bulk_acquire_from_full_bucket_is_immediate(self):
+        limiter = TokenBucketRateLimiter(calls=5, period=1.0)
+        start = time.perf_counter()
+        assert limiter.acquire(tokens=3) is True
+        assert (time.perf_counter() - start) < 0.05

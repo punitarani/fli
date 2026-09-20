@@ -1,12 +1,8 @@
-"""Tests for the GetBookingResults protobuf token builder + tfu URL parser.
+"""Tests for the GetBookingResults protobuf token builder and tfs deep-link token.
 
 The builder reproduces a byte-perfect copy of the captured token from a
 live booking-page URL. The captured fixture is the authoritative
 reference — any change to the builder must keep this byte-equal.
-
-The tfu parser extracts the same booking token from a ``tfu=`` URL
-parameter — the value Google's UI puts in the booking-page URL after a
-user clicks "Select flight".
 """
 
 from __future__ import annotations
@@ -16,10 +12,10 @@ import base64
 import pytest
 
 from fli.search._proto import (
+    LegSpec,
     build_booking_token,
+    build_tfs_token,
     decode_booking_token,
-    extract_booking_token_from_tfu,
-    extract_session_id_from_tfu,
 )
 
 # Captured live from a real booking page (2026-05-14):
@@ -63,17 +59,17 @@ class TestBuildBookingToken:
         assert decoded["field_7"] == 28
         assert decoded["field_14"] == 12345
 
-    def test_different_currencies(self):
-        for code in ("USD", "EUR", "GBP", "JPY", "INR"):
-            token = build_booking_token("S", "DL", "1", 1, 100, code)
-            decoded = decode_booking_token(token)
-            assert decoded["field_3"]["field_3"] == code
+    @pytest.mark.parametrize("code", ["USD", "EUR", "GBP", "JPY", "INR"])
+    def test_different_currencies(self, code):
+        token = build_booking_token("S", "DL", "1", 1, 100, code)
+        decoded = decode_booking_token(token)
+        assert decoded["field_3"]["field_3"] == code
 
-    def test_leg_index_in_field_2(self):
-        for idx in (0, 1, 2, 5, 10):
-            token = build_booking_token("S", "AA", "100", idx, 100, "USD")
-            decoded = decode_booking_token(token)
-            assert decoded["field_2"] == f"AA100#{idx}"
+    @pytest.mark.parametrize("idx", [0, 1, 2, 5, 10])
+    def test_leg_index_in_field_2(self, idx):
+        token = build_booking_token("S", "AA", "100", idx, 100, "USD")
+        decoded = decode_booking_token(token)
+        assert decoded["field_2"] == f"AA100#{idx}"
 
     def test_price_varint_encoding(self):
         # 34680 spans 3 varint bytes: 0xf8 0x8e 0x02. Confirm round-trip.
@@ -114,41 +110,33 @@ class TestVarintEncoding:
         assert decoded["field_1"] == "ABC"
 
 
-class TestBuildBookingTokenValidation:
-    """Reject empty / negative inputs upfront.
+@pytest.mark.parametrize(
+    "session_id, airline_code, flight_number, price_cents, currency, exc_match",
+    [
+        ("S", "AA", "1", -1, "USD", "price_cents must be non-negative"),
+        ("", "AA", "1", 100, "USD", "session_id must be non-empty"),
+        ("S", "", "1", 100, "USD", "airline_code must be non-empty"),
+        ("S", "AA", "", 100, "USD", "flight_number must be non-empty"),
+        ("S", "AA", "1", 100, "", "currency must be non-empty"),
+    ],
+)
+def test_build_booking_token_validation(
+    session_id, airline_code, flight_number, price_cents, currency, exc_match
+):
+    """Reject empty / negative inputs upfront."""
+    with pytest.raises(ValueError, match=exc_match):
+        build_booking_token(session_id, airline_code, flight_number, 1, price_cents, currency)
 
-    Guarantees no live POST is ever sent with a structurally broken token.
-    """
 
-    def test_negative_price_rejected(self):
-        with pytest.raises(ValueError, match="price_cents must be non-negative"):
-            build_booking_token("S", "AA", "1", 1, -1, "USD")
-
-    def test_empty_session_rejected(self):
-        with pytest.raises(ValueError, match="session_id must be non-empty"):
-            build_booking_token("", "AA", "1", 1, 100, "USD")
-
-    def test_empty_airline_rejected(self):
-        with pytest.raises(ValueError, match="airline_code must be non-empty"):
-            build_booking_token("S", "", "1", 1, 100, "USD")
-
-    def test_empty_flight_number_rejected(self):
-        with pytest.raises(ValueError, match="flight_number must be non-empty"):
-            build_booking_token("S", "AA", "", 1, 100, "USD")
-
-    def test_empty_currency_rejected(self):
-        with pytest.raises(ValueError, match="currency must be non-empty"):
-            build_booking_token("S", "AA", "1", 1, 100, "")
-
-    def test_non_ascii_session_id_encodes(self):
-        # If Google ever returns a non-ASCII session id, the builder must
-        # not crash — UTF-8 keeps round-trip equivalence for ASCII data
-        # while accepting arbitrary bytes for the future.
-        token = build_booking_token("Sé", "AA", "1", 1, 100, "USD")
-        decoded = decode_booking_token(token)
-        # decode_booking_token's ascii-decoder will replace the non-ascii
-        # byte, but the call doesn't raise.
-        assert "field_1" in decoded
+def test_non_ascii_session_id_encodes():
+    # If Google ever returns a non-ASCII session id, the builder must
+    # not crash — UTF-8 keeps round-trip equivalence for ASCII data
+    # while accepting arbitrary bytes for the future.
+    token = build_booking_token("Sé", "AA", "1", 1, 100, "USD")
+    decoded = decode_booking_token(token)
+    # decode_booking_token's ascii-decoder will replace the non-ascii
+    # byte, but the call doesn't raise.
+    assert "field_1" in decoded
 
 
 class TestDecodeBookingTokenEdgeCases:
@@ -161,49 +149,209 @@ class TestDecodeBookingTokenEdgeCases:
             decode_booking_token(bad_token)
 
 
-# Live `tfu` URL parameter captured 2026-05-14 from a JFK→LAX RT booking page.
-LIVE_TFU = (
-    "CmxDalJJVVZwUk1FOUJjRVZyZEVWQlEzaFRkVkZDUnkwdExTMHRMUzB0TFhCcVltWjZOMEZCUVVGQlIyOUd"
-    "PVlpGU0U5SVVXRkJFZ1pCUVRJNEl6RWFDd2o0amdJUUFob0RWVk5FT0J4dytJNEMSAggAIgA"
+@pytest.mark.parametrize(
+    "data, expected",
+    [
+        (b"\x00", (0, 1)),
+        (b"\x7f", (127, 1)),
+        (b"\x80\x01", (128, 2)),
+    ],
 )
-LIVE_BOOKING_URL = (
-    "https://www.google.com/travel/flights/booking"
-    "?tfs=CBwQAho_EgoyMDI2LTA3LTE1Ih8KA0pGSxIKMjAyNi0wNy0xNRoDTEFYKgJBQTIDMTcxagcIAR"
+def test_read_varint(data, expected):
+    from fli.search._proto import _read_varint
+
+    assert _read_varint(data, 0) == expected
+
+
+def test_read_varint_truncated_raises():
+    from fli.search._proto import _read_varint
+
+    with pytest.raises(IndexError):
+        _read_varint(b"\x80", 0)  # MSB set but no continuation byte
+
+
+# ---------------------------------------------------------------------------
+# Captured tfs booking-URL fixtures (2026-05-28)
+# ---------------------------------------------------------------------------
+
+# Round-trip JFK→LAX (AA171 outbound, AA28 return) — the authoritative
+# round-trip fixture, captured byte-for-byte from a live booking-page tfs.
+_LIVE_TFS_RT = (
+    "CBwQAho_EgoyMDI2LTA3LTE1Ih8KA0pGSxIKMjAyNi0wNy0xNRoDTEFYKgJBQTIDMTcxagcIAR"
     "IDSkZLcgcIARIDTEFYGj4SCjIwMjYtMDctMTkiHgoDTEFYEgoyMDI2LTA3LTE5GgNKRksqAkFBMgIy"
     "OGoHCAESA0xBWHIHCAESA0pGS0ABSAFwAYIBCwj___________8BmAEB"
-    f"&tfu={LIVE_TFU}&hl=en&gl=US&curr=USD"
+)
+
+# One-way nonstop LAX→ORD (UA729), captured 2026-05-28.  No segment-level f5
+# field — matches encoder output byte-for-byte.
+_LIVE_TFS_OW = (
+    "CBwQAho_EgoyMDI2LTA4LTE1Ih8KA0xBWBIKMjAyNi0wOC0xNRoDT1JEKgJVQTIDNzI5"
+    "agcIARIDTEFYcgcIARIDT1JEQAFIAXABggELCP___________wGYAQI"
+)
+
+# One-way 2-stop BOS→DEN(WN739)→SJC(WN389)→SEA(WN389), captured 2026-05-28.
+# Three repeated f4 legs within one f3 segment.
+_LIVE_TFS_3LEG = (
+    "CBwQAhqBARIKMjAyNi0wOC0xNSIfCgNCT1MSCjIwMjYtMDgtMTUaA0RFTioCV04yAzczOSIfCgNERU4S"
+    "CjIwMjYtMDgtMTUaA1NKQyoCV04yAzM4OSIfCgNTSkMSCjIwMjYtMDgtMTUaA1NFQSoCV04yAzM4OWoH"
+    "CAESA0JPU3IHCAESA1NFQUABSAFwAYIBCwj___________8BmAEC"
 )
 
 
-class TestExtractBookingTokenFromTfu:
-    def test_extract_from_bare_tfu_value(self):
-        token = extract_booking_token_from_tfu(LIVE_TFU)
-        # The extracted bytes must decode back to a recognisable booking token.
+def _b64url_to_bytes(s: str) -> bytes:
+    """Decode a urlsafe-base64 string (padding optional) to raw bytes."""
+    pad = "=" * ((4 - len(s) % 4) % 4)
+    return base64.urlsafe_b64decode(s + pad)
+
+
+class TestBuildTfsToken:
+    """Byte-perfect golden tests for build_tfs_token."""
+
+    def _tfs_bytes(self, tfs: str) -> bytes:
+        return _b64url_to_bytes(tfs)
+
+    def test_round_trip_byte_perfect(self):
+        """Two-segment round-trip reproduces the captured booking-page tfs byte-for-byte."""
+        segments = [
+            # Outbound: JFK→LAX on 2026-07-15, AA171
+            [LegSpec("JFK", "2026-07-15", "LAX", "AA", "171")],
+            # Return: LAX→JFK on 2026-07-19, AA28
+            [LegSpec("LAX", "2026-07-19", "JFK", "AA", "28")],
+        ]
+        built = build_tfs_token(segments, is_one_way=False)
+        capt_hex = self._tfs_bytes(_LIVE_TFS_RT).hex()
+        built_hex = _b64url_to_bytes(built).hex()
+        assert self._tfs_bytes(built) == self._tfs_bytes(_LIVE_TFS_RT), (
+            f"\nbuilt: {built_hex}\ncapt:  {capt_hex}"
+        )
+
+    def test_one_way_nonstop_byte_perfect(self):
+        """One-way nonstop (LAX→ORD UA729) reproduces captured tfs byte-for-byte."""
+        segments = [[LegSpec("LAX", "2026-08-15", "ORD", "UA", "729")]]
+        built = build_tfs_token(segments, is_one_way=True)
+        capt_hex = self._tfs_bytes(_LIVE_TFS_OW).hex()
+        built_hex = _b64url_to_bytes(built).hex()
+        assert self._tfs_bytes(built) == self._tfs_bytes(_LIVE_TFS_OW), (
+            f"\nbuilt: {built_hex}\ncapt:  {capt_hex}"
+        )
+
+    def test_multi_leg_connection_byte_perfect(self):
+        """Three-leg connection BOS→DEN→SJC→SEA reproduces captured tfs byte-for-byte."""
+        segments = [
+            [
+                LegSpec("BOS", "2026-08-15", "DEN", "WN", "739"),
+                LegSpec("DEN", "2026-08-15", "SJC", "WN", "389"),
+                LegSpec("SJC", "2026-08-15", "SEA", "WN", "389"),
+            ]
+        ]
+        built = build_tfs_token(segments, is_one_way=True)
+        capt_hex = self._tfs_bytes(_LIVE_TFS_3LEG).hex()
+        built_hex = _b64url_to_bytes(built).hex()
+        assert self._tfs_bytes(built) == self._tfs_bytes(_LIVE_TFS_3LEG), (
+            f"\nbuilt: {built_hex}\ncapt:  {capt_hex}"
+        )
+
+    def test_f19_one_way_is_2(self):
+        built = build_tfs_token(
+            [[LegSpec("SFO", "2026-09-01", "PHX", "AA", "100")]], is_one_way=True
+        )
+        raw = _b64url_to_bytes(built)
+        # f19 tag: (19 << 3) | 0 = 152 = 0x98 (needs second varint byte 0x01); value = 2
+        assert raw[-3:] == bytes([0x98, 0x01, 0x02])
+
+    def test_f19_round_trip_is_1(self):
+        segs = [
+            [LegSpec("JFK", "2026-09-01", "LAX", "AA", "1")],
+            [LegSpec("LAX", "2026-09-08", "JFK", "AA", "2")],
+        ]
+        built = build_tfs_token(segs, is_one_way=False)
+        raw = _b64url_to_bytes(built)
+        # f19 tag 0x98 0x01; value = 1
+        assert raw[-3:] == bytes([0x98, 0x01, 0x01])
+
+    def test_urlsafe_no_padding(self):
+        built = build_tfs_token([[LegSpec("SFO", "2026-09-01", "PHX", "AA", "100")]])
+        assert "=" not in built
+        assert "+" not in built
+        assert "/" not in built
+
+    def test_empty_segments_raises(self):
+        with pytest.raises(ValueError, match="non-empty"):
+            build_tfs_token([])
+
+    def test_empty_leg_list_raises(self):
+        with pytest.raises(ValueError, match="no legs"):
+            build_tfs_token([[]])
+
+    def test_multi_leg_connection_repeated_f4(self):
+        """Three legs in one segment → three repeated f4 fields (verified by byte count)."""
+        segments = [
+            [
+                LegSpec("BOS", "2026-08-15", "DEN", "WN", "739"),
+                LegSpec("DEN", "2026-08-15", "SJC", "WN", "389"),
+                LegSpec("SJC", "2026-08-15", "SEA", "WN", "389"),
+            ]
+        ]
+        built = build_tfs_token(segments, is_one_way=True)
+        raw = _b64url_to_bytes(built)
+        assert len(raw) == 159, f"expected 159 bytes, got {len(raw)}"
+
+    def test_f9_airline_code_in_proto(self):
+        """Frontier (F9) airline code is correctly encoded in the proto bytes."""
+        segments = [[LegSpec("SFO", "2026-09-01", "PHX", "F9", "2638")]]
+        built = build_tfs_token(segments)
+        raw = _b64url_to_bytes(built)
+        assert b"F9" in raw
+
+    def test_seat_defaults_to_economy(self):
+        """Field 9 is economy (1) when seat is omitted; matches captured tokens."""
+        built = build_tfs_token([[LegSpec("SFO", "2026-09-01", "PHX", "AA", "100")]])
+        raw = _b64url_to_bytes(built)
+        # f8=1 (0x40 0x01), f9=1 (0x48 0x01), f14=1 (0x70 0x01)
+        assert b"\x40\x01\x48\x01\x70\x01" in raw
+
+    def test_seat_business_encodes_field_9(self):
+        """Field 9 is business (3) when seat=3; golden tokens stay economy-only."""
+        segs = [[LegSpec("SFO", "2026-09-01", "PHX", "AA", "100")]]
+        economy = _b64url_to_bytes(build_tfs_token(segs))
+        business = _b64url_to_bytes(build_tfs_token(segs, seat=3))
+        assert b"\x48\x01" in economy
+        assert b"\x48\x03" in business
+        assert b"\x48\x03" not in economy
+        assert economy != business
+
+
+class TestToUrlsafeB64:
+    def test_converts_standard_to_urlsafe(self):
+        from fli.search._proto import _to_urlsafe_b64
+
+        # Bytes that produce + and / in standard base64
+        data = bytes([0xFB, 0xFF])  # standard b64: +/8=
+        result = _to_urlsafe_b64(data)
+        assert "+" not in result
+        assert "/" not in result
+        assert "=" not in result
+
+    def test_round_trips_to_original_bytes(self):
+        from fli.search._proto import _to_urlsafe_b64
+
+        data = b"\xde\xad\xbe\xef"
+        encoded = _to_urlsafe_b64(data)
+        pad = "=" * ((4 - len(encoded) % 4) % 4)
+        assert base64.urlsafe_b64decode(encoded + pad) == data
+
+
+class TestDecodeBookingTokenHexFallback:
+    def test_non_decodable_nested_field_stored_as_hex(self):
+        """A field neither printable ASCII nor a valid nested message.
+
+        Should be stored as a hex string instead of raising.
+        """
+        from fli.search._proto import _length_delim
+
+        # bytes([0x80]) is not valid ASCII and causes IndexError when parsed
+        # as a nested protobuf varint — the decoder should fall back to hex.
+        raw = _length_delim(3, bytes([0x80]))
+        token = base64.b64encode(raw).decode("ascii")
         decoded = decode_booking_token(token)
-        assert decoded["field_2"] == "AA28#1"
-        assert decoded["field_3"]["field_3"] == "USD"
-
-    def test_extract_from_full_booking_url(self):
-        token_url = extract_booking_token_from_tfu(LIVE_BOOKING_URL)
-        token_bare = extract_booking_token_from_tfu(LIVE_TFU)
-        assert token_url == token_bare
-
-    def test_extract_session_id_round_trip(self):
-        session = extract_session_id_from_tfu(LIVE_TFU)
-        # 50-ish base64-alphabet bytes, starts with H, has "--" separator
-        assert isinstance(session, str)
-        assert len(session) > 30
-        assert session.startswith("H")
-        assert "-" in session
-
-    def test_url_without_tfu_param_rejected(self):
-        with pytest.raises(ValueError):
-            extract_booking_token_from_tfu(
-                "https://www.google.com/travel/flights/booking?tfs=ABC&hl=en"
-            )
-
-    def test_invalid_base64_rejected(self):
-        # Garbage input should raise ValueError (specific message varies
-        # by which validation step rejects first).
-        with pytest.raises(ValueError):
-            extract_booking_token_from_tfu("!!!!not-valid-base64!!!!")
+        assert decoded["field_3"] == "80"

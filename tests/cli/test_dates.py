@@ -33,6 +33,17 @@ def test_basic_dates_search(runner, mock_search_dates, mock_console):
     assert args[0].trip_type == TripType.ONE_WAY
 
 
+def test_dates_with_passengers(runner, mock_search_dates, mock_console):
+    """Test dates search passes adult passenger count into filters."""
+    mock_search_dates.search.return_value = []
+    result = runner.invoke(app, ["dates", "JFK", "LAX", "--passengers", "2", "--format", "json"])
+    assert result.exit_code == 0
+    args, _ = mock_search_dates.search.call_args
+    assert args[0].passenger_info.adults == 2
+    payload = json.loads(result.stdout)
+    assert payload["query"]["passengers"] == 2
+
+
 def test_dates_with_date_range(runner, mock_search_dates, mock_console):
     """Test dates search with custom date range."""
     from_date = datetime.now().strftime("%Y-%m-%d")

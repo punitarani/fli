@@ -227,3 +227,138 @@ class TestExpandMultiLeg:
             )
         # Only the first outbound produced a combo.
         assert len(combos) == 1
+
+
+def _priceless_result(dep: Airport, arr: Airport, hour: int = 9) -> FlightResult:
+    """Mirrors ``_result`` but with ``price=None`` (issue #165 shape)."""
+    return FlightResult(
+        legs=[
+            FlightLeg(
+                airline=Airline.AA,
+                flight_number="100",
+                departure_airport=dep,
+                arrival_airport=arr,
+                departure_datetime=datetime(2026, 7, 15, hour, 0),
+                arrival_datetime=datetime(2026, 7, 15, hour + 3, 0),
+                duration=180,
+            )
+        ],
+        price=None,
+        currency="USD",
+        duration=180,
+        stops=0,
+        booking_token=f"TOKEN_{dep.name}_{arr.name}_{hour}",
+    )
+
+
+class TestExpandMultiLegPriceless:
+    """Issue #165: expansion must not crash when prices are ``None``.
+
+    The decoder change in ``_parse_price_info`` surfaces premium-cabin
+    round-trip outbound rows with ``price=None``. Those rows then drive
+    ``_expand_multi_leg``; the second-leg fetch may also return
+    ``price=None`` rows. The recursion must propagate those through
+    without touching the (None) prices for any arithmetic.
+    """
+
+    def test_all_priceless_rt_produces_combos(self):
+        """Outbound and return both priceless → tuples still assembled."""
+        client = SearchFlights()
+        outbound = [_priceless_result(Airport.JFK, Airport.LAX)]
+
+        def _fake_fetch(filters, **kwargs):
+            return [_priceless_result(Airport.LAX, Airport.JFK, hour=16)]
+
+        rt_filters = FlightSearchFilters(
+            trip_type=TripType.ROUND_TRIP,
+            passenger_info=PassengerInfo(adults=1),
+            flight_segments=[
+                FlightSegment(
+                    departure_airport=[[Airport.JFK, 0]],
+                    arrival_airport=[[Airport.LAX, 0]],
+                    travel_date=_future(60),
+                ),
+                FlightSegment(
+                    departure_airport=[[Airport.LAX, 0]],
+                    arrival_airport=[[Airport.JFK, 0]],
+                    travel_date=_future(63),
+                ),
+            ],
+        )
+        with patch.object(SearchFlights, "_fetch_flights", side_effect=_fake_fetch):
+            combos = client._expand_multi_leg(
+                outbound,
+                rt_filters,
+                top_n=5,
+                currency="USD",
+                language=None,
+                country=None,
+            )
+        assert len(combos) == 1
+        out_res, ret_res = combos[0]
+        assert out_res.price is None
+        assert ret_res.price is None
+        assert out_res.booking_token is not None
+        assert ret_res.booking_token is not None
+
+    def test_mixed_priced_and_priceless(self):
+        """Priced outbound + priceless return — combo assembled correctly."""
+        client = SearchFlights()
+        outbound = [_result(Airport.JFK, Airport.LAX)]  # priced
+
+        def _fake_fetch(filters, **kwargs):
+            return [_priceless_result(Airport.LAX, Airport.JFK, hour=16)]
+
+        rt_filters = FlightSearchFilters(
+            trip_type=TripType.ROUND_TRIP,
+            passenger_info=PassengerInfo(adults=1),
+            flight_segments=[
+                FlightSegment(
+                    departure_airport=[[Airport.JFK, 0]],
+                    arrival_airport=[[Airport.LAX, 0]],
+                    travel_date=_future(60),
+                ),
+                FlightSegment(
+                    departure_airport=[[Airport.LAX, 0]],
+                    arrival_airport=[[Airport.JFK, 0]],
+                    travel_date=_future(63),
+                ),
+            ],
+        )
+        with patch.object(SearchFlights, "_fetch_flights", side_effect=_fake_fetch):
+            combos = client._expand_multi_leg(
+                outbound,
+                rt_filters,
+                top_n=5,
+                currency="USD",
+                language=None,
+                country=None,
+            )
+        assert len(combos) == 1
+        out_res, ret_res = combos[0]
+        assert out_res.price == 300.0
+        assert ret_res.price is None
+
+    def test_multi_city_priceless_three_segments(self):
+        """3-segment multi-city with all priceless rows still tuples cleanly."""
+        client = SearchFlights()
+        outbound = [_priceless_result(Airport.JFK, Airport.LAX)]
+        leg2 = _priceless_result(Airport.LAX, Airport.SEA, hour=14)
+        leg3 = _priceless_result(Airport.SEA, Airport.JFK, hour=18)
+        responses = iter([[leg2], [leg3]])
+
+        def _fake_fetch(filters, **kwargs):
+            return next(responses)
+
+        with patch.object(SearchFlights, "_fetch_flights", side_effect=_fake_fetch):
+            combos = client._expand_multi_leg(
+                outbound,
+                _three_segment_filters(),
+                top_n=5,
+                currency="USD",
+                language=None,
+                country=None,
+            )
+        assert len(combos) == 1
+        assert len(combos[0]) == 3
+        assert all(item.price is None for item in combos[0])

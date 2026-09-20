@@ -6,6 +6,7 @@ from typing import Annotated
 import typer
 
 from fli.cli.enums import DayOfWeek, OutputFormat
+from fli.cli.errors import json_error_payload, report_cli_error
 from fli.cli.utils import (
     build_json_error_response,
     build_json_success_response,
@@ -32,7 +33,7 @@ from fli.models import (
     TimeRestrictions,
     TripType,
 )
-from fli.search import SearchDates
+from fli.search import SearchClientError, SearchDates
 
 
 def _build_selected_days(
@@ -253,6 +254,15 @@ def dates(
             min=1,
         ),
     ] = None,
+    passengers: Annotated[
+        int,
+        typer.Option(
+            "--passengers",
+            "-p",
+            help="Number of adult passengers",
+            min=1,
+        ),
+    ] = 1,
 ):
     """Find the cheapest dates to fly between two airports.
 
@@ -305,6 +315,7 @@ def dates(
             ),
             "sort_by_price": sort_by_price,
             "days": [day.value for day in selected_days],
+            "passengers": passengers,
         }
 
         # Build time restrictions from tuple
@@ -342,7 +353,7 @@ def dates(
         # Create search filters
         filters = DateSearchFilters(
             trip_type=trip_type,
-            passenger_info=PassengerInfo(adults=1),
+            passenger_info=PassengerInfo(adults=passengers),
             flight_segments=segments,
             stops=stops,
             seat_type=seat_type,
@@ -375,6 +386,9 @@ def dates(
         if sort_by_price:
             results.sort(key=lambda x: x.price)
 
+        origin_code = origin_airport.name.lstrip("_")
+        destination_code = destination_airport.name.lstrip("_")
+
         if output_format == OutputFormat.JSON:
             emit_json(
                 build_json_success_response(
@@ -383,7 +397,16 @@ def dates(
                     query=query,
                     results_key="dates",
                     results=[
-                        serialize_date_result(result, trip_type, default_currency=currency)
+                        serialize_date_result(
+                            result,
+                            trip_type,
+                            default_currency=currency,
+                            origin=origin_code,
+                            destination=destination_code,
+                            currency=currency,
+                            language=language,
+                            country=country,
+                        )
                         for result in results
                     ],
                 )
@@ -399,7 +422,16 @@ def dates(
             typer.echo(message)
             raise typer.Exit(1)
 
-        display_date_results(results, trip_type, default_currency=currency)
+        display_date_results(
+            results,
+            trip_type,
+            default_currency=currency,
+            origin=origin_code,
+            destination=destination_code,
+            currency=currency,
+            language=language,
+            country=country,
+        )
 
     except ParseError as e:
         if output_format == OutputFormat.JSON:
@@ -441,6 +473,18 @@ def dates(
             raise typer.Exit(1) from e
         typer.echo(f"Error: {str(e)}")
         raise typer.Exit(1) from e
+    except SearchClientError as e:
+        if output_format == OutputFormat.JSON:
+            message, error_type, log_path = json_error_payload(e, command="dates")
+            payload = build_json_error_response(
+                search_type="dates",
+                message=message,
+                error_type=error_type,
+            )
+            payload["error"]["log_path"] = str(log_path)
+            emit_json(payload)
+            raise typer.Exit(1) from e
+        raise report_cli_error(e, command="dates") from e
     except (AttributeError, ValueError) as e:
         if "module 'fli.search' has no attribute 'SearchDates'" in str(e):
             raise
@@ -484,3 +528,15 @@ def dates(
             raise typer.Exit(1) from e
         typer.echo(f"Error: {str(e)}")
         raise typer.Exit(1) from e
+    except Exception as e:  # noqa: BLE001 — fall back to clean reporting
+        if output_format == OutputFormat.JSON:
+            message, error_type, log_path = json_error_payload(e, command="dates")
+            payload = build_json_error_response(
+                search_type="dates",
+                message=message,
+                error_type=error_type,
+            )
+            payload["error"]["log_path"] = str(log_path)
+            emit_json(payload)
+            raise typer.Exit(1) from e
+        raise report_cli_error(e, command="dates") from e

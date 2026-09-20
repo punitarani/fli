@@ -1,5 +1,7 @@
 # 🛫 Fli - Flight Search MCP Server and Library
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/punitarani/fli)
+
 A powerful Python library that provides programmatic access to Google Flights data with an elegant CLI interface. Search
 flights, find the best deals, and filter results with ease.
 
@@ -25,7 +27,7 @@ fli-mcp
 fli-mcp-http  # serves at http://127.0.0.1:8000/mcp/
 ```
 
-![MCP Demo](https://github.com/punitarani/fli/blob/main/data/mcp-demo.gif)
+![MCP Demo](https://raw.githubusercontent.com/punitarani/fli/main/docs/assets/mcp-demo.gif)
 
 ### Connecting to Claude Desktop
 
@@ -113,7 +115,7 @@ pipx install flights
 fli --help
 ```
 
-![CLI Demo](https://github.com/punitarani/fli/blob/main/data/cli-demo.png)
+![CLI Demo](https://raw.githubusercontent.com/punitarani/fli/main/docs/assets/cli-demo.png)
 
 ## Features
 
@@ -366,17 +368,17 @@ for flight in flights:
 
 ### Running Examples
 
-We provide 11 comprehensive examples in the `examples/` directory that demonstrate various use cases:
+Runnable examples live in [`examples/python/`](examples/python):
 
 ```bash
 # Run examples with uv (recommended)
-uv run python examples/basic_one_way_search.py
-uv run python examples/round_trip_search.py
-uv run python examples/date_range_search.py
+uv run python examples/python/basic_one_way_search.py
+uv run python examples/python/round_trip_search.py
+uv run python examples/python/date_range_search.py
 
 # Or install dependencies first, then run directly
 pip install pydantic curl_cffi httpx
-python examples/basic_one_way_search.py
+python examples/python/basic_one_way_search.py
 ```
 
 **Available Examples:**
@@ -384,6 +386,8 @@ python examples/basic_one_way_search.py
 * `basic_one_way_search.py` - Simple one-way flight search
 * `round_trip_search.py` - Round-trip flight booking
 * `date_range_search.py` - Find cheapest dates
+* `multi_city_search.py` - Multi-city itinerary across several legs
+* `advanced_filters_search.py` - Alliances, airline exclusions, layovers, locale
 * `complex_flight_search.py` - Advanced filtering and multi-passenger
 * `time_restrictions_search.py` - Time-based filtering
 * `date_search_with_preferences.py` - Weekend filtering
@@ -393,32 +397,65 @@ python examples/basic_one_way_search.py
 * `complex_round_trip_validation.py` - Advanced round-trip with validation
 * `advanced_date_search_validation.py` - Complex date search with filtering
 
-> 💡 **Tip**: Examples include automatic dependency checking and will show helpful installation instructions if
-> dependencies are missing.
-
 ## Examples
 
-For comprehensive examples demonstrating all features, see the [`examples/`](examples/) directory:
+Examples are organized by language, with parallel scripts so you can compare the
+two APIs:
+
+* **Python** — [`examples/python/`](examples/python)
+* **TypeScript** — [`examples/typescript/`](examples/typescript)
 
 ```bash
-# Quick test - run a simple example
-uv run python examples/basic_one_way_search.py
+# Python
+uv run python examples/python/complex_flight_search.py
 
-# Run all examples to explore different features
-uv run python examples/round_trip_search.py
-uv run python examples/complex_flight_search.py
-uv run python examples/price_tracking.py
+# TypeScript (from examples/typescript, after `bun install`)
+bun run multi_city_search.ts
 ```
 
 **Example Categories:**
 
 * **Basic Usage**: One-way, round-trip, date searches
-* **Advanced Filtering**: Time restrictions, airlines, seat classes
+* **Advanced Filtering**: Time restrictions, airlines, alliances, seat classes, locale
 * **Data Analysis**: Price tracking, result processing with pandas
 * **Error Handling**: Retry logic, robust error management
-* **Complex Scenarios**: Multi-passenger, validation, business rules
+* **Complex Scenarios**: Multi-city, multi-passenger, validation, business rules
 
-Each example is self-contained and includes automatic dependency checking with helpful installation instructions.
+Each example is self-contained — change the airports, dates, and filters at the top of the script to fit your search.
+
+## TypeScript / JavaScript
+
+Fli is also available as a 1:1 TypeScript port, published to npm as
+[`fli-js`](https://www.npmjs.com/package/fli-js). Same models, same filter encoding,
+same direct-API approach.
+
+```bash
+bun add fli-js   # or: npm install fli-js
+```
+
+```ts
+import { Airport, FlightSearchFilters, FlightSegment, SearchFlights, SeatType } from "fli-js";
+
+const inDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+
+const filters = new FlightSearchFilters({
+  passenger_info: { adults: 1, children: 0, infants_in_seat: 0, infants_on_lap: 0 },
+  flight_segments: [
+    new FlightSegment({
+      departure_airport: [[[Airport.JFK, 0]]],
+      arrival_airport: [[[Airport.LAX, 0]]],
+      travel_date: inDays(30),
+    }),
+  ],
+  seat_type: SeatType.ECONOMY,
+});
+
+const results = await new SearchFlights().search(filters, { currency: "USD" });
+```
+
+The TypeScript source lives in [`fli-js/`](fli-js); see the
+[TypeScript Quick Start](https://punitarani.github.io/fli/typescript/quickstart/)
+for the full guide.
 
 ## Development
 

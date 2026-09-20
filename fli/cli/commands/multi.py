@@ -5,6 +5,7 @@ from typing import Annotated
 
 import typer
 
+from fli.cli.errors import report_cli_error
 from fli.cli.utils import display_flight_results, validate_time_range
 from fli.core import (
     build_multi_city_segments,
@@ -21,7 +22,7 @@ from fli.models import (
     PassengerInfo,
     TimeRestrictions,
 )
-from fli.search import SearchFlights
+from fli.search import SearchClientError, SearchFlights
 
 LEG_PATTERN = re.compile(r"^([A-Za-z]{3}),([A-Za-z]{3}),(\d{4}-\d{1,2}-\d{1,2})$")
 
@@ -94,6 +95,15 @@ def multi(
             help="Sort results by (CHEAPEST, DURATION, DEPARTURE_TIME, ARRIVAL_TIME)",
         ),
     ] = "CHEAPEST",
+    passengers: Annotated[
+        int,
+        typer.Option(
+            "--passengers",
+            "-p",
+            help="Number of adult passengers",
+            min=1,
+        ),
+    ] = 1,
 ):
     """Search for multi-city flights with multiple legs.
 
@@ -102,6 +112,7 @@ def multi(
     Example:
         fli multi --leg SEA,HKG,2026-12-26 --leg PEK,SEA,2027-01-02
         fli multi -l SEA,NRT,2026-12-26 -l NRT,HKG,2026-12-30 -l HKG,SEA,2027-01-05 -c BUSINESS
+        fli multi -l SEA,NRT,2026-12-26 -l HKG,SEA,2027-01-05 --passengers 2
 
     """
     try:
@@ -141,7 +152,7 @@ def multi(
         # Create search filters
         filters = FlightSearchFilters(
             trip_type=trip_type,
-            passenger_info=PassengerInfo(adults=1),
+            passenger_info=PassengerInfo(adults=passengers),
             flight_segments=segments,
             stops=stops,
             seat_type=seat_type,
@@ -165,3 +176,7 @@ def multi(
     except (AttributeError, ValueError) as e:
         typer.echo(f"Error: {str(e)}")
         raise typer.Exit(1) from e
+    except SearchClientError as e:
+        raise report_cli_error(e, command="multi") from e
+    except Exception as e:  # noqa: BLE001 — fall back to clean reporting
+        raise report_cli_error(e, command="multi") from e
