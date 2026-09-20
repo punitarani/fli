@@ -101,6 +101,11 @@ def _ca_bundle_from_env() -> str | None:
     almost always a typo or a bundle that hasn't been mounted into a
     container yet, and worth failing on immediately with a clear message
     rather than surfacing later as a confusing curl error.
+
+    Called once per thread, from ``Client._session()`` when that thread's
+    session is first created — see its docstring for the caching
+    consequence (changing the env var afterwards does not affect an
+    already-created session).
     """
     for name in _CA_BUNDLE_ENV_VARS:
         value = os.environ.get(name)
@@ -138,7 +143,17 @@ class Client:
         self._rate_limiter = TokenBucketRateLimiter(calls=calls_per_second, period=1.0)
 
     def _session(self) -> Session:
-        """Return this thread's ``Session``, creating it on first use."""
+        """Return this thread's ``Session``, creating it on first use.
+
+        The CA-bundle env vars (see ``_ca_bundle_from_env``) and
+        ``SOCS_COOKIE`` are only read the first time *this thread* needs a
+        session — once created, a thread's session is cached for its
+        lifetime (and the module-level singleton in ``get_client()``
+        extends that across the whole process). Changing ``FLI_CA_BUNDLE``
+        (or the other two) after a session already exists has no effect on
+        it; only a new thread, or a fresh ``Client()``, picks up the
+        change.
+        """
         session = getattr(self._sessions, "session", None)
         if session is None:
             # Deferred import: ``curl_cffi`` is heavy (~100ms cold) and
@@ -213,13 +228,12 @@ class Client:
 
 
 # libcurl's CURLE_PEER_FAILED_VERIFICATION code. curl_cffi's own
-# ``code2error`` dispatch maps this 1:1 to ``CertificateVerifyError``
-# (verified against the installed 0.15.0: exceptions.py's CODE2ERROR table
-# has no other entry for it), so the isinstance() check below is normally
-# enough on its own. This constant backs a belt-and-suspenders check for a
-# future release that raises the plain ``SSLError``/``ConnectionError``
-# base class with the same code instead — the same forward-compat spirit as
-# the ``getattr(curl_exc, "CertificateVerifyError", ())`` guard just below.
+# ``code2error`` dispatch maps this 1:1 to ``CertificateVerifyError`` on
+# both 0.15.0 and 0.16.3 (exceptions.py's CODE2ERROR table has no other
+# entry for it in either version), so the isinstance() check below is
+# normally enough on its own — see is_untyped_certificate_error in
+# _wrap_request_error for what this constant backs and why it's kept
+# despite being unreachable on those two versions.
 _CURLE_PEER_FAILED_VERIFICATION = 60
 
 
@@ -245,15 +259,26 @@ def _wrap_request_error(method: str, url: str, exc: BaseException) -> SearchClie
     # ``CertificateVerifyError`` is itself an ``SSLError`` -> ``ConnectionError``
     # subclass, so this must run before the generic ``curl_exc.ConnectionError``
     # branch below or a bad certificate would silently read as a vague "check
-    # your connection" message instead of naming the fix. ``getattr(..., ())``
-    # keeps this forward-compatible if a future curl_cffi release ever drops
-    # the class — ``isinstance(exc, ())`` is simply always False.
+    # your connection" message instead of naming the fix. Two independent
+    # forward-compat guards, kept as separate named conditions (fix round 1,
+    # M2) since they guard against different future breakages and reading
+    # them as one combined boolean took a re-read to untangle:
+    #
+    # - is_typed_certificate_error: the normal case today. ``getattr(...,
+    #   ())`` keeps this safe if a future curl_cffi release ever drops the
+    #   class entirely — ``isinstance(exc, ())`` is simply always False.
+    # - is_untyped_certificate_error: belt-and-suspenders for a future
+    #   release that raises the plain ``SSLError``/``ConnectionError`` base
+    #   class with the same code instead of the ``CertificateVerifyError``
+    #   subclass (see ``_CURLE_PEER_FAILED_VERIFICATION`` above — confirmed
+    #   unreachable on curl_cffi 0.15.0/0.16.3, kept anyway).
     certificate_error_cls = getattr(curl_exc, "CertificateVerifyError", ())
-    is_certificate_error = (certificate_error_cls and isinstance(exc, certificate_error_cls)) or (
+    is_typed_certificate_error = certificate_error_cls and isinstance(exc, certificate_error_cls)
+    is_untyped_certificate_error = (
         isinstance(exc, curl_exc.ConnectionError)
         and getattr(exc, "code", None) == _CURLE_PEER_FAILED_VERIFICATION
     )
-    if is_certificate_error:
+    if is_typed_certificate_error or is_untyped_certificate_error:
         env_vars = ", ".join(_CA_BUNDLE_ENV_VARS)
         return SearchCertificateError(
             f"TLS certificate verification failed for Google Flights ({host}). "
