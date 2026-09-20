@@ -647,6 +647,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "ratelimit" },
+    { name = "rich" },
     { name = "tenacity" },
     { name = "typer" },
 ]
@@ -655,6 +656,7 @@ dependencies = [
 all = [
     { name = "fastapi" },
     { name = "fastmcp" },
+    { name = "mcp" },
     { name = "pydantic-settings" },
     { name = "uvicorn" },
 ]
@@ -671,6 +673,7 @@ dev = [
 mcp = [
     { name = "fastapi" },
     { name = "fastmcp" },
+    { name = "mcp" },
     { name = "pydantic-settings" },
     { name = "uvicorn" },
 ]
@@ -683,6 +686,7 @@ requires-dist = [
     { name = "fastmcp", marker = "extra == 'mcp'", specifier = ">=3.2" },
     { name = "flights", extras = ["mcp"], marker = "extra == 'all'" },
     { name = "httpx", specifier = ">=0.28.1" },
+    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.2.0" },
     { name = "mkdocs-material", extras = ["imaging"], marker = "extra == 'dev'", specifier = ">=9.5.49" },
     { name = "mkdocstrings", extras = ["python"], marker = "extra == 'dev'", specifier = ">=0.27.0" },
     { name = "plotext", specifier = ">=5.3.2" },
@@ -694,6 +698,7 @@ requires-dist = [
     { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.6.1" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "ratelimit", specifier = ">=2.2.1" },
+    { name = "rich", specifier = ">=13.8.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8.4" },
     { name = "tenacity", specifier = ">=9.0.0" },
     { name = "twine", marker = "extra == 'dev'", specifier = ">=6.0.0" },
