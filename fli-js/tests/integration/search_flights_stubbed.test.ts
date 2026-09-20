@@ -264,6 +264,30 @@ describe("SearchFlights.search (stubbed)", () => {
       expect(await searchPayload(payload)).toBeNull();
     });
 
+    test("a block of scalar rows raises, rather than reporting no flights", async () => {
+      // Python hands each row to `parse_flight_row`, which raises
+      // `TypeError: 'int' object is not subscriptable`, so all three rows
+      // fail and the "parsed 0 of N" tripwire fires. Skipping them
+      // silently left the TS port returning `null` — "no flights on this
+      // route" — for a payload that is plainly the wrong shape.
+      const payload: unknown[] = Array.from({ length: 4 }, () => null);
+      payload[0] = [null, null, null, null, "sid"];
+      payload[2] = [[1, 2, 3]];
+      payload[3] = [[]];
+      await expect(searchPayload(payload)).rejects.toThrow(SearchParseError);
+      await expect(searchPayload(payload)).rejects.toThrow(/Parsed 0\/3 flight rows/);
+    });
+
+    test("one scalar row among good ones still does not sink the search", async () => {
+      const payload: unknown[] = Array.from({ length: 4 }, () => null);
+      payload[0] = [null, null, null, null, "sid"];
+      payload[2] = [[7, syntheticFlightRow(), null]];
+      payload[3] = [[]];
+      const results = (await searchPayload(payload)) as Array<{ price: number }>;
+      expect(results).toHaveLength(1);
+      expect(results[0]?.price).toBe(199.99);
+    });
+
     test("a non-list block is skipped, exactly as Python's isinstance check does", async () => {
       // Google parks other things in these slots; only a list is read.
       const payload: unknown[] = Array.from({ length: 4 }, () => null);

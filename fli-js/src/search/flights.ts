@@ -16,7 +16,7 @@ import { SeatType, SortBy, TripType } from "../models/google-flights/base.ts";
 import type { FlightSearchFilters } from "../models/google-flights/flights.ts";
 import { type Client, getClient } from "./client.ts";
 import { cloneFilters } from "./clone.ts";
-import { parallelMap } from "./concurrency.ts";
+import { parallelMap, throwIfAborted } from "./concurrency.ts";
 import { parseBookingChunk, parseFlightRow } from "./decoders.ts";
 import { SearchParseError } from "./exceptions.ts";
 import { getSearchLogger } from "./logging.ts";
@@ -163,6 +163,8 @@ export class SearchFlights {
       signal?: AbortSignal;
     },
   ): Promise<FlightResult[] | null> {
+    throwIfAborted(opts.signal);
+
     const dropped = unsupportedFilters(filters);
     if (dropped.length > 0) {
       getSearchLogger().warn(
@@ -232,16 +234,29 @@ export class SearchFlights {
     const flights: FlightResult[] = [];
     const failureSamples: string[] = [];
     let anyFailure = false;
+    const noteFailure = (reason: string): void => {
+      anyFailure = true;
+      if (!failureSamples.includes(reason) && failureSamples.length < 3) {
+        failureSamples.push(reason);
+      }
+    };
     for (const row of flightsRaw) {
-      if (!Array.isArray(row)) continue;
+      // A row that is not a list is a *failed* row, not an absent one.
+      // Python hands it to `parse_flight_row` and gets back
+      // `TypeError: 'int' object is not subscriptable`, which counts
+      // towards the "parsed 0 of N" tripwire below. Skipping it quietly
+      // meant a block of scalars came back as "no flights on this route".
+      // One bad row among good ones still costs only that row.
+      if (!Array.isArray(row)) {
+        noteFailure(`TypeError: '${row === null ? "null" : typeof row}' row is not subscriptable`);
+        continue;
+      }
       try {
         flights.push(parseFlightRow(row));
       } catch (err) {
-        anyFailure = true;
-        const reason = `${err instanceof Error ? err.name : "Error"}: ${err instanceof Error ? err.message : String(err)}`;
-        if (!failureSamples.includes(reason) && failureSamples.length < 3) {
-          failureSamples.push(reason);
-        }
+        noteFailure(
+          `${err instanceof Error ? err.name : "Error"}: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
 
