@@ -181,6 +181,9 @@ INFANT_RESULTS_MISSING = pytest.mark.xfail(
 )
 
 
+# The `search` fixture above is a bare SearchDates() with no HTTP mocking,
+# so every test below that uses it hits the real Google Flights network.
+@pytest.mark.live
 @pytest.mark.parametrize(
     "search_params_fixture",
     [
@@ -195,6 +198,7 @@ def test_search_functionality(search, search_params_fixture, request):
     assert isinstance(results, list)
 
 
+@pytest.mark.live
 @INFANT_RESULTS_MISSING
 def test_multiple_searches(search, basic_search_params, complex_search_params):
     """Test performing multiple searches with the same SearchDates instance."""
@@ -211,6 +215,7 @@ def test_multiple_searches(search, basic_search_params, complex_search_params):
     assert isinstance(results3, list)
 
 
+@pytest.mark.live
 def test_date_price_sorting(search, basic_search_params):
     """Test that date prices are sorted chronologically."""
     results = search.search(basic_search_params)
@@ -239,6 +244,7 @@ def test_parse_price_from_calendar_item():
     assert SearchDates._SearchDates__parse_price(CALENDAR_ITEM) == 118.0
 
 
+@pytest.mark.live
 def test_basic_round_trip_search(search, round_trip_search_params):
     """Test basic round trip date search functionality."""
     results = search.search(round_trip_search_params)
@@ -258,6 +264,7 @@ def test_basic_round_trip_search(search, round_trip_search_params):
         assert result.price > 0
 
 
+@pytest.mark.live
 def test_complex_round_trip_search(search, complex_round_trip_params):
     """Test complex round trip date search with multiple passengers and stops."""
     results = search.search(complex_round_trip_params)
@@ -277,6 +284,7 @@ def test_complex_round_trip_search(search, complex_round_trip_params):
         assert result.price > 0
 
 
+@pytest.mark.live
 @pytest.mark.parametrize(
     "search_params_fixture",
     [
@@ -346,8 +354,23 @@ class TestRoundTripDurationFallback:
         assert results and all(len(r.date) == 2 for r in results)
         # Outbound and return are 7 days apart in the fixture's segments.
         assert all((r.date[1] - r.date[0]).days == 7 for r in results)
-        tfs = urls[0].split("tfs=")[1].split("&")[0]
-        decoded = base64.urlsafe_b64decode(tfs + "=" * (-len(tfs) % 4)).decode("latin-1")
+
+        # The date sweep prices every candidate date on the shared thread
+        # pool (see fli/search/_concurrency.py), so `urls` fills in whatever
+        # order the fetches happen to complete in — NOT the order `results`
+        # ends up in (which is sorted after the fact). `urls[0]` is
+        # therefore not guaranteed to be the request that produced
+        # `results[0]`; decode every recorded URL and look up the one whose
+        # `tfs` token actually encodes the result under test instead.
+        def _decode_tfs(url: str) -> str:
+            tfs = url.split("tfs=")[1].split("&")[0]
+            return base64.urlsafe_b64decode(tfs + "=" * (-len(tfs) % 4)).decode("latin-1")
+
+        decoded_urls = [_decode_tfs(u) for u in urls]
         for r in results[:1]:
-            assert r.date[0].strftime("%Y-%m-%d") in decoded
-            assert r.date[1].strftime("%Y-%m-%d") in decoded
+            outbound_str = r.date[0].strftime("%Y-%m-%d")
+            return_str = r.date[1].strftime("%Y-%m-%d")
+            assert any(outbound_str in d and return_str in d for d in decoded_urls), (
+                f"no fetched URL encoded both {outbound_str} and {return_str} "
+                f"(checked {len(decoded_urls)} URLs)"
+            )
