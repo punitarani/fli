@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from fli.core.parsers import icao_to_iata
 from fli.models import Airport, display_name
 from fli.models.airport import AIRPORT_NAMES
 
@@ -70,7 +71,7 @@ for _city, _codes in CITY_AIRPORTS.items():
         if _code not in AIRPORT_NAMES:
             raise RuntimeError(f"CITY_AIRPORTS[{_city!r}] references unknown IATA code {_code!r}")
 
-MatchType = Literal["iata_exact", "iata_prefix", "city", "name"]
+MatchType = Literal["iata_exact", "icao_exact", "iata_prefix", "city", "name"]
 
 
 class AirportMatch(BaseModel):
@@ -90,6 +91,7 @@ def search_airports(query: str, limit: int = 10) -> list[AirportMatch]:
     Results are ranked by a 5-priority cascade, scored 0-100 (higher = better):
 
       1. iata_exact  (score 100) - query is an exact IATA code (e.g. "JFK")
+         icao_exact  (score 100) - query is a known ICAO code (e.g. "KJFK")
       2. city        (score 90)  - query is an exact city/alias in CITY_AIRPORTS
       3. city        (score 80)  - query is a prefix of a city in CITY_AIRPORTS
       4. name        (score <=70) - query is a substring of an airport's name;
@@ -124,6 +126,17 @@ def search_airports(query: str, limit: int = 10) -> list[AirportMatch]:
             )
         )
         seen_codes.add(query_upper)
+
+    # Priority 1b: Exact ICAO code match (e.g. "KJFK" -> JFK), mirroring resolve_airport().
+    iata_from_icao = icao_to_iata(query_upper)
+    if iata_from_icao in Airport.__members__ and iata_from_icao not in seen_codes:
+        airport = Airport[iata_from_icao]
+        results.append(
+            AirportMatch(
+                code=airport, name=display_name(airport), match_type="icao_exact", score=100.0
+            )
+        )
+        seen_codes.add(iata_from_icao)
 
     # Priority 2: Exact city name lookup (handles "new york" -> JFK, LGA, EWR)
     if query_lower in CITY_AIRPORTS:

@@ -47,6 +47,23 @@ def _load_icao_mapping() -> dict[str, str]:
     return _icao_to_iata
 
 
+def icao_to_iata(code: str) -> str | None:
+    """Translate a 4-letter ICAO airport code to its IATA code.
+
+    Args:
+        code: Candidate ICAO code (case-insensitive), e.g. ``"KJFK"``.
+
+    Returns:
+        The IATA code (e.g. ``"JFK"``), or ``None`` if ``code`` is not a known
+        ICAO code.
+
+    """
+    normalized = code.strip().upper()
+    if len(normalized) != 4 or not normalized.isalpha():
+        return None
+    return _load_icao_mapping().get(normalized)
+
+
 def resolve_enum(enum_cls: type[T], name: str) -> T:
     """Resolve an enum member by name with normalized errors.
 
