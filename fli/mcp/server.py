@@ -34,6 +34,7 @@ from fli.core import (
     search_airports,
 )
 from fli.core.parsers import ParseError
+from fli.mcp.errors import classify_error
 from fli.models import (
     Airport,
     BagsFilter,
@@ -738,11 +739,26 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
         }
 
     except ParseError as e:
-        return {"success": False, "error": str(e), "flights": []}
+        return {
+            "success": False,
+            "error": str(e),
+            "flights": [],
+            **classify_error(e).as_fields(),
+        }
     except ValidationError as e:
-        return {"success": False, "error": format_validation_error(e), "flights": []}
+        return {
+            "success": False,
+            "error": format_validation_error(e),
+            "flights": [],
+            **classify_error(e).as_fields(),
+        }
     except Exception as e:
-        return {"success": False, "error": _search_error_message(e), "flights": []}
+        return {
+            "success": False,
+            "error": _search_error_message(e),
+            "flights": [],
+            **classify_error(e).as_fields(),
+        }
 
 
 def _execute_booking_options(
@@ -792,6 +808,11 @@ def _execute_booking_options(
                 "available_flights": [_flight_idents(f) for f in flights[:20]],
                 "options": [],
                 "booking_url": booking_url,
+                # Not an exception — the caller passed flight_numbers that don't
+                # match any result from this search. Deterministic and
+                # caller-fixable, same bucket as a bad parameter.
+                "error_type": "validation_error",
+                "retryable": False,
             }
 
         options = search_client.get_booking_options(
@@ -833,14 +854,25 @@ def _execute_booking_options(
         return result
 
     except ParseError as e:
-        return {"success": False, "error": str(e), "options": []}
+        return {
+            "success": False,
+            "error": str(e),
+            "options": [],
+            **classify_error(e).as_fields(),
+        }
     except ValidationError as e:
-        return {"success": False, "error": format_validation_error(e), "options": []}
+        return {
+            "success": False,
+            "error": format_validation_error(e),
+            "options": [],
+            **classify_error(e).as_fields(),
+        }
     except Exception as e:
         return {
             "success": False,
             "error": _search_error_message(e, "Booking lookup failed"),
             "options": [],
+            **classify_error(e).as_fields(),
         }
 
 
@@ -941,11 +973,26 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
         }
 
     except ParseError as e:
-        return {"success": False, "error": str(e), "dates": []}
+        return {
+            "success": False,
+            "error": str(e),
+            "dates": [],
+            **classify_error(e).as_fields(),
+        }
     except ValidationError as e:
-        return {"success": False, "error": format_validation_error(e), "dates": []}
+        return {
+            "success": False,
+            "error": format_validation_error(e),
+            "dates": [],
+            **classify_error(e).as_fields(),
+        }
     except Exception as e:
-        return {"success": False, "error": _search_error_message(e), "dates": []}
+        return {
+            "success": False,
+            "error": _search_error_message(e),
+            "dates": [],
+            **classify_error(e).as_fields(),
+        }
 
 
 # =============================================================================
@@ -1457,6 +1504,7 @@ def _find_airports_impl(query: str, limit: int = 10) -> dict[str, Any]:
             "success": False,
             "error": str(exc),
             "query": query,
+            **classify_error(exc).as_fields(),
         }
 
     return {
