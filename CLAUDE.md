@@ -20,9 +20,10 @@ Fli is a Python library that provides programmatic access to Google Flights data
 uv sync --all-extras
 
 # Run tests (use these specific commands)
-make test                    # Standard test suite
+make test                    # Standard test suite (offline only)
 make test-fuzz              # Run fuzzing tests (pytest -vv --fuzz)
-make test-all               # Run all tests (pytest -vv --all)
+make test-all               # Run all offline tests, including fuzz (pytest -vv --all)
+make test-live              # Run live tests against real Google Flights (pytest -vv --all -m live --live)
 uv run pytest -vv           # Alternative direct command
 
 # Code quality
@@ -43,9 +44,21 @@ uv run mkdocs build         # Build static docs
 ```
 
 ### Test Configuration
-- Tests use pytest with custom markers: `fuzz` (requires `--fuzz` flag) and `parallel` (for pytest-xdist)
+- Tests use pytest with custom markers: `fuzz` (requires `--fuzz` flag), `parallel` (for
+  pytest-xdist), and `live` (requires `--live` flag)
 - Test structure mirrors source code: `tests/cli/`, `tests/models/`, `tests/search/`, `tests/mcp/`
 - Fuzzing tests are available but gated behind `--fuzz` flag
+- `live`-marked tests make real network calls to Google Flights (the fuzz case in
+  `test_search_flights_fuzz.py`, all of `test_search_flights_new_filters_live.py`, the four
+  search tests in `tests/mcp/test_mcp_server.py::TestMCPServer`, and a handful of
+  historically-unmocked cases in `test_search_flights.py` / `test_search_dates.py`). They're
+  skipped by default and **`--all` does not enable them** — `ci.yml` runs `pytest tests/ --all`,
+  which stays fully offline so a flaky Google response never blocks a merge. Run them explicitly
+  with `make test-live` (`pytest --all -m live --live` — `--all` is still required together with
+  `--live`, otherwise the pre-existing fuzz-gating drops the fuzz-marked live case before `-m
+  live` even sees it); they also run daily against the real network via the
+  `.github/workflows/live-canary.yml` scheduled workflow, which files/comments/closes a GitHub
+  issue on failure/recovery instead of failing a build
 
 ## Architecture Overview
 

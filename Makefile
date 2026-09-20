@@ -37,7 +37,7 @@ lint:
 lint-fix:
 	uv run --extra dev ruff check --fix $(TARGETS)
 
-# Run tests
+# Run tests (offline only — live tests are excluded by default)
 test:
 	uv run --extra dev pytest -vv
 test-mcp:
@@ -46,6 +46,12 @@ test-fuzz:
 	uv run --extra dev pytest -vv --fuzz
 test-all:
 	uv run --extra dev pytest -vv --all
+# Run tests marked 'live' against the real Google Flights network (also run
+# on a schedule by .github/workflows/live-canary.yml; not part of CI).
+# --all is required: without it the fuzz-gating below drops the fuzz-marked
+# live case before -m live even sees it.
+test-live:
+	uv run --extra dev pytest -vv --all -m live --live
 
 # Run CI locally using act (requires Docker and act: https://github.com/nektos/act)
 ci:
@@ -102,10 +108,11 @@ help:
 	@echo "  make format      - Format code using ruff"
 	@echo "  make lint        - Lint code using ruff"
 	@echo "  make lint-fix    - Lint and fix code using ruff"
-	@echo "  make test        - Run tests"
+	@echo "  make test        - Run tests (offline only)"
 	@echo "  make test-mcp    - Run tests with MCP"
 	@echo "  make test-fuzz   - Run tests with fuzzing"
 	@echo "  make test-all    - Run all tests"
+	@echo "  make test-live   - Run live tests against the real Google Flights network"
 	@echo "  make ci          - Run CI locally using act (requires Docker)"
 	@echo "  make ci-docker   - Run CI in Docker container"
 	@echo "  make devcontainer - Build dev container image"
@@ -113,4 +120,4 @@ help:
 	@echo "  make bump-preview - Preview next version (patch/minor/major)"
 	@echo "  make release-notes - Preview release notes since last tag"
 # Declare the targets as phony
-.PHONY: help install install-dev install-all mcp mcp-http docs format lint lint-fix test test-mcp test-fuzz test-all ci ci-docker devcontainer requirements bump-preview release-notes
+.PHONY: help install install-dev install-all mcp mcp-http docs format lint lint-fix test test-mcp test-fuzz test-all test-live ci ci-docker devcontainer requirements bump-preview release-notes

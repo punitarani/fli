@@ -545,7 +545,7 @@ cd fli
 # Install dependencies with uv
 uv sync --all-extras
 
-# Run tests
+# Run tests (offline only — no network access required)
 uv run pytest
 
 # Run linting
@@ -557,10 +557,17 @@ uv run mkdocs serve
 
 # Or use the Makefile for common tasks
 make install-all  # Install all dependencies
-make test         # Run tests
+make test         # Run tests (offline only)
+make test-live    # Run tests against the real Google Flights network
 make lint         # Check code style
 make format       # Format code
 ```
+
+Tests that call the real Google Flights API are marked `live` and skipped by
+default (they're also excluded from `--all`); run them with `make test-live`
+or `pytest --all -m live --live` if you want to exercise the live network
+path (`--all` is required alongside `-m live`/`--live`, or the fuzz-gated
+live case gets dropped before the marker filter ever sees it).
 
 ### Docker Development
 
