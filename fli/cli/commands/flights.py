@@ -586,10 +586,11 @@ def flights(
             "--top-n",
             help=(
                 "Round-trip only: number of outbound options to expand into return-flight "
-                "combinations (default 5, 1-10). Cost is `1 + top_n` page fetches. Results "
+                "combinations (default 5, 1-10). Cost is 1 + top_n page fetches. Results "
                 "all from one airline? Raise this to see more carriers, or change --sort. "
                 "Rejected if set on a one-way search."
             ),
+            show_default=False,
         ),
     ] = None,
 ):
