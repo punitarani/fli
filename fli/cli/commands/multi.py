@@ -213,5 +213,12 @@ def multi(
         raise typer.Exit(1) from e
     except SearchClientError as e:
         raise report_cli_error(e, command="multi") from e
+    except (typer.Exit, typer.Abort):
+        # click.exceptions.Exit/Abort are RuntimeError subclasses, so without
+        # this clause the broad except below would catch either of the
+        # deliberate `raise typer.Exit(1)` calls above (too few legs, empty
+        # results) and report it as a crash: bogus "Unexpected error" text
+        # plus a traceback log file for a perfectly normal outcome.
+        raise
     except Exception as e:  # noqa: BLE001 — fall back to clean reporting
         raise report_cli_error(e, command="multi") from e
