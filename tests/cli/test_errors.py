@@ -29,6 +29,17 @@ def _isolated_tmp_log_dir(monkeypatch, tmp_path):
     monkeypatch.setattr("fli.cli.errors._LOG_DIR", tmp_path / "fli-logs")
 
 
+# The CLI invocations below pass fixed travel dates; pin the models' clock so
+# they stay in the future no matter when the suite runs.
+PINNED_TODAY = "2026-01-01"
+
+
+@pytest.fixture(autouse=True)
+def _pinned_clock(pin_today):
+    """Freeze "today" well before every date literal in this module."""
+    pin_today(PINNED_TODAY)
+
+
 def test_write_log_creates_file_with_traceback(tmp_path):
     """`_write_log` should write a file containing the traceback details."""
     try:
@@ -77,15 +88,33 @@ def test_report_cli_error_returns_typer_exit_and_writes_log(tmp_path, capsys):
     assert len(log_files) == 1
 
 
-def test_multi_command_handles_timeout_cleanly(runner, monkeypatch, tmp_path):
-    """A curl timeout inside `multi` should produce a clean message + log file."""
+def test_search_command_handles_timeout_cleanly(runner, monkeypatch, tmp_path):
+    """A curl timeout inside a search should produce a clean message + log file."""
     from curl_cffi.requests import exceptions as curl_exc
 
-    def fake_post(self, url, **kwargs):
+    def fake_request(self, url, **kwargs):
         raise curl_exc.Timeout("curl: (28) timed out", 28, None)
 
-    monkeypatch.setattr("curl_cffi.requests.Session.post", fake_post)
+    # Search reads the public page over GET; booking calls still POST. Stub
+    # both so the test covers the failure wherever the request is made.
+    monkeypatch.setattr("curl_cffi.requests.Session.get", fake_request)
+    monkeypatch.setattr("curl_cffi.requests.Session.post", fake_request)
 
+    result = runner.invoke(app, ["flights", "SEA", "NRT", "2026-12-26"])
+
+    assert result.exit_code == 1
+    # Friendly message — no raw curl traceback in the output.
+    assert "Error" in result.output
+    assert "Timed out talking to Google Flights" in result.output
+    assert "Full traceback written to" in result.output
+    assert "Traceback (most recent call last)" not in result.output
+
+    log_files = list((tmp_path / "fli-logs").glob("fli-error-*.log"))
+    assert len(log_files) >= 1
+
+
+def test_multi_command_reports_unsupported(runner, tmp_path):
+    """Multi-city has no search-page transport — say so instead of pricing one leg."""
     result = runner.invoke(
         app,
         [
@@ -100,14 +129,8 @@ def test_multi_command_handles_timeout_cleanly(runner, monkeypatch, tmp_path):
     )
 
     assert result.exit_code == 1
-    # Friendly message — no raw curl traceback in the output.
-    assert "Error" in result.output
-    assert "Timed out talking to Google Flights" in result.output
-    assert "Full traceback written to" in result.output
+    assert "Multi-city search is not available" in result.output
     assert "Traceback (most recent call last)" not in result.output
-
-    log_files = list((tmp_path / "fli-logs").glob("fli-error-*.log"))
-    assert len(log_files) >= 1
 
 
 @pytest.mark.parametrize(
@@ -198,10 +221,11 @@ def test_flights_command_json_error_includes_log_path(runner, monkeypatch, tmp_p
 
     from curl_cffi.requests import exceptions as curl_exc
 
-    def fake_post(self, url, **kwargs):
+    def fake_request(self, url, **kwargs):
         raise curl_exc.ConnectionError("dns lookup failed", 6, None)
 
-    monkeypatch.setattr("curl_cffi.requests.Session.post", fake_post)
+    monkeypatch.setattr("curl_cffi.requests.Session.get", fake_request)
+    monkeypatch.setattr("curl_cffi.requests.Session.post", fake_request)
 
     result = runner.invoke(
         app,
@@ -214,3 +238,50 @@ def test_flights_command_json_error_includes_log_path(runner, monkeypatch, tmp_p
     assert payload["error"]["type"] == "connection_error"
     assert "log_path" in payload["error"]
     assert Path(payload["error"]["log_path"]).exists()
+
+
+class TestTransportErrorClassification:
+    """`SearchParseError` used to surface as "Unexpected error" in the CLI.
+
+    It is raised on the normal flight path whenever Google serves a
+    consent/blocked page, so it needs to read as a search failure with a
+    useful hint, not as a crash.
+    """
+
+    def test_parse_error_is_a_search_client_error(self):
+        from fli.search import SearchParseError as exported
+        from fli.search.exceptions import SearchClientError as base
+        from fli.search.flights import SearchParseError as from_flights
+
+        assert exported is from_flights
+        assert issubclass(exported, base)
+
+    def test_parse_error_message_is_actionable(self):
+        from fli.cli.errors import _friendly_message
+        from fli.search import SearchParseError
+
+        message = _friendly_message(SearchParseError("Search page carried no ds:1 payload"))
+        assert "Unexpected error" not in message
+        assert "ds:1" in message
+        assert "FLI_SOCS_COOKIE" in message
+
+    def test_rejected_error_message_is_specific(self):
+        from fli.cli.errors import _friendly_message
+        from fli.search import SearchRejectedError
+
+        message = _friendly_message(SearchRejectedError(13))
+        assert "Unexpected error" not in message
+        assert "declined the request" in message
+
+    @pytest.mark.parametrize(
+        ("exc_factory", "expected_type"),
+        [
+            (lambda: __import__("fli.search", fromlist=["x"]).SearchParseError("x"), "parse_error"),
+            (lambda: __import__("fli.search", fromlist=["x"]).SearchRejectedError(13), "rejected"),
+        ],
+    )
+    def test_json_error_types(self, exc_factory, expected_type):
+        from fli.cli.errors import json_error_payload
+
+        _, error_type, _ = json_error_payload(exc_factory(), command="flights")
+        assert error_type == expected_type

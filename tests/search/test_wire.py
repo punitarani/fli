@@ -2,7 +2,10 @@
 
 import json
 
+import pytest
+
 from fli.search._wire import iter_wrb_chunks, parse_first_wrb_payload
+from fli.search.exceptions import SearchRejectedError
 
 
 def _single_chunk(payload):
@@ -141,3 +144,42 @@ class TestParseFirstWrbPayloadEdgeCases:
         outer = [["wrb.fr", None, bad_inner], ["wrb.fr", None, good_inner]]
         body = ")]}'\n\n" + json.dumps(outer)
         assert parse_first_wrb_payload(body) == [42]
+
+
+class TestPayloadLessRowIsRejection:
+    """Google's gated RPC answers HTTP 200 with a payload-less row + error 13.
+
+    Yielding nothing there made a hard block indistinguishable from a route
+    with no service, which is what left every search reporting "no flights".
+    """
+
+    @staticmethod
+    def _rejection(code):
+        outer = [["wrb.fr", None, None, None, None, [code, "generic::internal: ..."], "generic"]]
+        return ")]}'\n\n" + json.dumps(outer)
+
+    def test_error_13_raises_search_rejected(self):
+        with pytest.raises(SearchRejectedError) as excinfo:
+            list(iter_wrb_chunks(self._rejection(13)))
+        assert excinfo.value.code == 13
+        assert "error 13" in str(excinfo.value)
+
+    def test_rejection_is_exported_from_fli_search(self):
+        from fli.search import SearchRejectedError as exported
+
+        assert exported is SearchRejectedError
+
+    def test_parse_first_payload_also_raises(self):
+        with pytest.raises(SearchRejectedError):
+            parse_first_wrb_payload(self._rejection(13))
+
+    def test_any_numeric_code_is_reported(self):
+        with pytest.raises(SearchRejectedError) as excinfo:
+            list(iter_wrb_chunks(self._rejection(7)))
+        assert excinfo.value.code == 7
+
+    def test_non_numeric_code_is_skipped_not_raised(self):
+        """Without a numeric code there is nothing to report — stay silent."""
+        outer = [["wrb.fr", None, None, None, None, ["not-a-code"]]]
+        body = ")]}'\n\n" + json.dumps(outer)
+        assert list(iter_wrb_chunks(body)) == []

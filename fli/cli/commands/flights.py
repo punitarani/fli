@@ -385,7 +385,7 @@ def flights(
         typer.Option(
             "--exclude-basic",
             "-e",
-            help="Exclude basic economy fares",
+            help="Exclude basic economy fares. [currently ignored by the search transport]",
         ),
     ] = False,
     layover: Annotated[
@@ -400,7 +400,9 @@ def flights(
         str,
         typer.Option(
             "--emissions",
-            help="Filter by emissions level (ALL, LESS)",
+            help=(
+                "Filter by emissions level (ALL, LESS). [currently ignored by the search transport]"
+            ),
         ),
     ] = "ALL",
     checked_bags: Annotated[
@@ -408,7 +410,10 @@ def flights(
         typer.Option(
             "--bags",
             "-b",
-            help="Number of checked bags to include in price (0, 1, or 2)",
+            help=(
+                "Checked bags included in price (0, 1, or 2). "
+                "[currently ignored by the search transport]"
+            ),
             min=0,
             max=2,
         ),
@@ -417,7 +422,7 @@ def flights(
         bool,
         typer.Option(
             "--carry-on",
-            help="Include carry-on bag fee in price",
+            help="Include carry-on bag fee in price. [currently ignored by the search transport]",
         ),
     ] = False,
     all_results: Annotated[

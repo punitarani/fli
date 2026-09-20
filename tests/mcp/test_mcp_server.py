@@ -1,6 +1,15 @@
-"""Test MCP server functionality."""
+"""Test MCP server functionality.
+
+The four search tests below talk to Google for real, including from CI
+runners. A transient search-page variant, a timeout or a hard rejection is a
+property of the network that day rather than of this code, so
+:func:`assert_live_search` reports those as skips — while every other failure,
+and every assertion on the success path, still fails the build.
+"""
 
 from datetime import datetime, timedelta
+
+import pytest
 
 from fli.mcp.server import (
     DateSearchParams,
@@ -19,6 +28,67 @@ def get_future_date(days: int = 30) -> str:
     return (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
 
 
+# Phrases that only a transport-level failure produces: the page arrived
+# without its payload, Google refused the call, or the request never completed.
+# Each one is a literal string from `fli.search.exceptions` / `_tfs` / the
+# client's error wrapper, not a generic word.
+#
+# Deliberately narrow on both sides. The MCP layer wraps every exception as
+# "Search failed: ...", so matching that prefix would mask real bugs; and a
+# bare "http" marker matched the `https://errors.pydantic.dev/...` URL that
+# every pydantic ValidationError ends with, which would have skipped a decoder
+# regression instead of failing it.
+TRANSPORT_FAILURES = (
+    "no ds:1 payload",  # SearchParseError / the date sweep's _NO_PAYLOAD
+    "declined the request",  # SearchRejectedError (error 13)
+    "timed out talking to google flights",  # SearchTimeoutError
+    "could not reach google flights",  # SearchConnectionError
+    "returned an error response",  # SearchHTTPError (non-2xx status)
+    "every date in the range failed",  # the date sweep's total-failure error
+    "no date in the range could be priced",  # same, when the breaker tripped
+)
+
+# Phrases that mean we failed to understand a response we did receive. These
+# must fail even though they can co-occur with transport wording.
+PARSE_FAILURES = (
+    "validationerror",
+    "errors.pydantic.dev",
+    "flight rows",  # "Parsed 0/N flight rows …"
+    "shape changed",
+    "shape may have changed",
+)
+
+
+def assert_live_search(result: dict, *, results_key: str, trip_type: str) -> None:
+    """Assert a live search result's shape, skipping on transport failures.
+
+    The error response shape carries no ``trip_type``/``count``, so asserting
+    those unconditionally turns any transient failure into a red build. A
+    decoder regression, on the other hand, must always fail — so a message that
+    mentions parsing rows is never skipped, whatever else it says.
+    """
+    assert isinstance(result, dict)
+    assert "success" in result
+    assert results_key in result
+
+    if not result["success"]:
+        # Error shape: a non-empty message and an empty result list.
+        assert "error" in result
+        assert isinstance(result["error"], str) and result["error"]
+        assert result[results_key] == []
+        error = result["error"].lower()
+        parse_failure = any(marker in error for marker in PARSE_FAILURES)
+        transport_failure = any(marker in error for marker in TRANSPORT_FAILURES)
+        if transport_failure and not parse_failure:
+            pytest.skip(f"live search unavailable: {result['error']}")
+        raise AssertionError(f"search failed for a non-transport reason: {result['error']}")
+
+    assert "trip_type" in result, f"success response is missing trip_type: {sorted(result)}"
+    assert result["trip_type"] == trip_type
+    assert "count" in result
+    assert isinstance(result[results_key], list)
+
+
 class TestMCPServer:
     """Test suite for MCP server tools."""
 
@@ -35,15 +105,7 @@ class TestMCPServer:
 
         result = search_flights_fn(params)
 
-        assert isinstance(result, dict)
-        assert "success" in result
-        assert "flights" in result
-        assert "trip_type" in result
-
-        if result["success"]:
-            assert result["trip_type"] == "ONE_WAY"
-            assert "count" in result
-            assert isinstance(result["flights"], list)
+        assert_live_search(result, results_key="flights", trip_type="ONE_WAY")
 
     def test_search_flights_round_trip(self):
         """Test round-trip flight search."""
@@ -61,15 +123,7 @@ class TestMCPServer:
 
         result = search_flights_fn(params)
 
-        assert isinstance(result, dict)
-        assert "success" in result
-        assert "flights" in result
-        assert "trip_type" in result
-
-        if result["success"]:
-            assert result["trip_type"] == "ROUND_TRIP"
-            assert "count" in result
-            assert isinstance(result["flights"], list)
+        assert_live_search(result, results_key="flights", trip_type="ROUND_TRIP")
 
     def test_search_dates_one_way(self):
         """Test one-way date search."""
@@ -89,16 +143,9 @@ class TestMCPServer:
 
         result = search_dates_fn(params)
 
-        assert isinstance(result, dict)
-        assert "success" in result
-        assert "dates" in result
-        assert "trip_type" in result
-
+        assert_live_search(result, results_key="dates", trip_type="ONE_WAY")
         if result["success"]:
-            assert result["trip_type"] == "ONE_WAY"
-            assert "count" in result
             assert "date_range" in result
-            assert isinstance(result["dates"], list)
 
     def test_search_dates_round_trip(self):
         """Test round-trip date search."""
@@ -121,17 +168,9 @@ class TestMCPServer:
 
         result = search_dates_fn(params)
 
-        assert isinstance(result, dict)
-        assert "success" in result
-        assert "dates" in result
-        assert "trip_type" in result
-
+        assert_live_search(result, results_key="dates", trip_type="ROUND_TRIP")
         if result["success"]:
-            assert result["trip_type"] == "ROUND_TRIP"
-            assert "count" in result
-            assert "duration" in result
             assert result["duration"] == 7
-            assert isinstance(result["dates"], list)
 
     def test_invalid_airport_code(self):
         """Test error handling for invalid airport code."""

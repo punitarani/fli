@@ -22,6 +22,17 @@ from fli.models.airline import Airline
 from fli.models.airport import Airport
 
 
+def utc_today() -> date:
+    """Return today's date in UTC.
+
+    Every date check in this package reads the clock through this one
+    function, which gives tests a single seam: pinning ``utc_today`` freezes
+    validation's notion of "today" so fixtures captured from Google on a
+    fixed date keep working after that date has passed.
+    """
+    return datetime.now(timezone.utc).date()
+
+
 def earliest_searchable_date() -> date:
     """Return the earliest date that is still "today" somewhere on Earth.
 
@@ -38,7 +49,7 @@ def earliest_searchable_date() -> date:
     The cost is that a genuinely past date may reach Google, which simply
     returns no flights — a better failure than refusing a valid search.
     """
-    return datetime.now(timezone.utc).date() - timedelta(days=1)
+    return utc_today() - timedelta(days=1)
 
 
 class SeatType(Enum):

@@ -378,3 +378,36 @@ def test_dates_json_empty_results(runner, mock_search_dates, mock_console):
     assert payload["success"] is True
     assert payload["count"] == 0
     assert payload["dates"] == []
+
+
+def test_dates_over_the_cap_reports_cleanly(runner, mock_console):
+    """A range wider than the per-search date cap fails with a readable message.
+
+    Deliberately not mocking ``SearchDates``: the cap is enforced before any
+    request, and the point is that the CLI surfaces it rather than dumping a
+    traceback.
+    """
+    from_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    to_date = (datetime.now() + timedelta(days=200)).strftime("%Y-%m-%d")
+
+    result = runner.invoke(app, ["dates", "JFK", "LAX", "--from", from_date, "--to", to_date])
+
+    assert result.exit_code == 1
+    assert "93-date limit" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_dates_over_the_cap_json(runner, mock_console):
+    """The same cap error is a structured JSON error, not a crash."""
+    from_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    to_date = (datetime.now() + timedelta(days=200)).strftime("%Y-%m-%d")
+
+    result = runner.invoke(
+        app,
+        ["dates", "JFK", "LAX", "--from", from_date, "--to", to_date, "--format", "json"],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert "93-date limit" in payload["error"]["message"]

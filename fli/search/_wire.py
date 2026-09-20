@@ -58,8 +58,9 @@ def iter_wrb_chunks(body: str | bytes) -> Iterator[Any]:
     if not (b"0" <= raw[:1] <= b"9"):
         try:
             outer = json.loads(raw.decode("utf-8"))
-        except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
-            logger.warning("Failed to decode single-chunk wrb.fr body as JSON", exc_info=True)
+        except (ValueError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            logger.warning("Failed to decode single-chunk wrb.fr body as JSON: %s", exc)
+            logger.debug("single-chunk wrb.fr decode failed", exc_info=True)
             return
         yield from _chunks_from_outer(outer)
         return
@@ -88,8 +89,9 @@ def iter_wrb_chunks(body: str | bytes) -> Iterator[Any]:
         cursor += chunk_bytes
         try:
             outer = json.loads(payload.strip().decode("utf-8"))
-        except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
-            logger.warning("Discarding malformed wrb.fr chunk", exc_info=True)
+        except (ValueError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            logger.warning("Discarding malformed wrb.fr chunk: %s", exc)
+            logger.debug("malformed wrb.fr chunk", exc_info=True)
             continue
         yield from _chunks_from_outer(outer)
 
@@ -105,11 +107,20 @@ def _chunks_from_outer(outer: Any) -> Iterator[Any]:
             continue
         inner = row[2]
         if not isinstance(inner, str) or not inner:
+            # Payload-less row: Google declined the call and parked an error
+            # code in slot 5. Raise instead of yielding nothing, so callers
+            # don't report a hard block as "no flights on this route".
+            code = row[5][0] if len(row) > 5 and isinstance(row[5], list) and row[5] else None
+            if isinstance(code, int):
+                from fli.search.exceptions import SearchRejectedError
+
+                raise SearchRejectedError(code)
             continue
         try:
             yield json.loads(inner)
-        except (ValueError, json.JSONDecodeError):
-            logger.warning("Failed to decode wrb.fr inner JSON payload", exc_info=True)
+        except (ValueError, json.JSONDecodeError) as exc:
+            logger.warning("Failed to decode wrb.fr inner JSON payload: %s", exc)
+            logger.debug("wrb.fr inner JSON decode failed", exc_info=True)
             continue
 
 

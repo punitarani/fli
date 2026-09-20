@@ -28,3 +28,48 @@ class SearchHTTPError(SearchClientError):
         """Store the HTTP status alongside the message for richer logging."""
         super().__init__(message)
         self.status_code = status_code
+
+
+class SearchRejectedError(SearchClientError):
+    """Google answered HTTP 200 but declined to serve results.
+
+    The response carries a ``wrb.fr`` row with no payload and an error
+    code (13 = INTERNAL). Since 2026-08 ``GetShoppingResults`` requires an
+    ``x-goog-batchexecute-bgr`` header signed by the page's own JavaScript
+    over the exact request bytes, so a plain HTTP client always lands here.
+    Without this error the caller saw an empty list and reported "no
+    flights found", which is indistinguishable from a route with no service.
+    """
+
+    def __init__(self, code: int | None = None):
+        """Record the numeric error code alongside the user-facing message."""
+        self.code = code
+        suffix = f" (error {code})" if code is not None else ""
+        super().__init__(
+            f"Google Flights declined the request{suffix} and returned no data. "
+            "Its API now requires a browser-signed x-goog-batchexecute-bgr header, "
+            "which this client cannot produce. See github.com/punitarani/fli#223."
+        )
+
+
+class SearchUnsupportedError(SearchClientError):
+    """The requested search cannot be served by the current transport.
+
+    Distinct from an empty result: the query is well formed and Google
+    would answer it in a browser, but the public search page carries no
+    inline payload for it, so this client has nothing to read.
+    """
+
+
+class SearchParseError(SearchClientError):
+    """A successful HTTP response could not be parsed into flights.
+
+    Distinct from network / HTTP errors: this says "Google responded but
+    the shape changed", not "Google didn't respond". In practice it is
+    either a consent/blocked page (no ``ds:1`` blob at all) or a change in
+    the flight rows themselves.
+
+    It belongs to the :class:`SearchClientError` family so that callers
+    already catching search failures — the CLI's error reporter among them
+    — classify it as one instead of an unexpected crash.
+    """

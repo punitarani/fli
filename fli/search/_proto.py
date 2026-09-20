@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import base64
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -242,6 +243,134 @@ def _to_urlsafe_b64(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
 
 
+# ``tfs`` is the itinerary parameter shared by booking deep links and the
+# public search page. Both builders below write the same message, so the
+# field layout lives here once:
+#
+#   1  = 28 (constant)          8  = passenger kind, repeated
+#   2  = 2 (constant)           9  = cabin class
+#   3  = segment, repeated      14 = 1 (constant)
+#   3.2  = departure date       16 = max-uint64 pin (deep links only)
+#   3.4  = selected leg, rep.   19 = 2 one-way / multi-city, 1 round-trip
+#   3.5  = stop ceiling
+#   3.6  = carrier include, repeated (IATA code or alliance name)
+#   3.7  = carrier exclude, repeated (same values as 3.6)
+#   3.13 = origin  3.14 = destination
+#   3.15 = layover airport include, repeated
+#   3.17 = min layover minutes  3.18 = max layover minutes
+#
+# Reverse-engineered from live browser captures; see
+# ``.reverse-eng/notes/booking_results.md``.
+
+_MAX_U64 = (1 << 64) - 1
+
+
+def encode_tfs_segment(
+    origin: str,
+    dest: str,
+    date: str,
+    legs: Sequence[LegSpec] = (),
+    max_stops: int | None = None,
+    carriers: Sequence[str] = (),
+    carriers_exclude: Sequence[str] = (),
+    layover_airports: Sequence[str] = (),
+    min_layover: int | None = None,
+    max_layover: int | None = None,
+) -> bytes:
+    """Encode one travel direction of a ``tfs`` itinerary.
+
+    Args:
+        origin: IATA code the direction departs from.
+        dest: IATA code the direction arrives at.
+        date: Departure date in ``YYYY-MM-DD`` format.
+        legs: Physical flights pinned for this direction, if any. Supplying
+            them narrows a search to itineraries that include them — that is
+            how a round-trip search asks for return options against a chosen
+            outbound.
+        max_stops: Stop ceiling, zero-based (``0`` = non-stop, ``1`` = one
+            stop or fewer). ``None`` leaves the search unconstrained;
+            passing ``0`` for "any" would pin it to non-stop instead.
+        carriers: Only itineraries on these carriers. Google takes airline
+            IATA codes and alliance names (``"STAR_ALLIANCE"``) in the same
+            list.
+        carriers_exclude: The same values, as an exclude list.
+        layover_airports: Only these airports may be used as layover stops.
+        min_layover: Minimum layover wait, in minutes.
+        max_layover: Maximum layover wait, in minutes.
+
+    Returns:
+        The length-delimited field 3 bytes for this segment.
+
+    """
+    body = _length_delim(2, date.encode())
+    if max_stops is not None:
+        body += _varint_field(5, max_stops)
+    for code in carriers:
+        body += _length_delim(6, code.encode())
+    for code in carriers_exclude:
+        body += _length_delim(7, code.encode())
+    for leg in legs:
+        body += _length_delim(
+            4,
+            _length_delim(1, leg.origin.encode())
+            + _length_delim(2, leg.dep_date.encode())
+            + _length_delim(3, leg.dest.encode())
+            + _length_delim(5, leg.airline.encode())
+            + _length_delim(6, leg.flight_number.encode()),
+        )
+    for code in [origin] if isinstance(origin, str) else origin:
+        body += _length_delim(13, _varint_field(1, 1) + _length_delim(2, code.encode()))
+    for code in [dest] if isinstance(dest, str) else dest:
+        body += _length_delim(14, _varint_field(1, 1) + _length_delim(2, code.encode()))
+    for code in layover_airports:
+        body += _length_delim(15, code.encode())
+    if min_layover is not None:
+        body += _varint_field(17, min_layover)
+    if max_layover is not None:
+        body += _varint_field(18, max_layover)
+    return _length_delim(3, body)
+
+
+def encode_tfs_payload(
+    segments: bytes,
+    *,
+    is_one_way: bool,
+    passengers: Sequence[int] = (1,),
+    seat: int = 1,
+    pin_max_u64: bool = False,
+) -> str:
+    """Wrap encoded segments in the ``tfs`` envelope and base64 it.
+
+    Args:
+        segments: Concatenated output of :func:`encode_tfs_segment`.
+        is_one_way: ``True`` for one-way, ``False`` for round-trip.
+            Controls field 19. Multi-city is a third value (3) that the
+            search page cannot serve — see :func:`fli.search._tfs.build_tfs`.
+        passengers: Passenger kind codes, one entry per traveller
+            (1 = adult, 2 = child, 3 = infant on lap, 4 = infant in own
+            seat). The two infant codes are the ones to get right: a lap
+            infant prices at ~10% of the adult fare and an infant in its own
+            seat at ~100%, and transposing them produces a plausible wrong
+            quote rather than an error. See ``_PASSENGER_FIELDS`` in
+            :mod:`fli.search._tfs` for the live fare evidence.
+        seat: Cabin class (1 = economy, 2 = premium, 3 = business, 4 = first).
+        pin_max_u64: Emit the field 16 constant that booking deep links
+            carry. The search page does not need it.
+
+    Returns:
+        URL-safe base64 string with padding stripped.
+
+    """
+    payload = _varint_field(1, 28) + _varint_field(2, 2) + segments
+    for kind in passengers:
+        payload += _varint_field(8, kind)
+    payload += _varint_field(9, seat) + _varint_field(14, 1)
+    if pin_max_u64:
+        payload += _length_delim(16, _varint_field(1, _MAX_U64))
+    payload += _varint_field(19, 2 if is_one_way else 1)
+    return _to_urlsafe_b64(payload)
+
+
 def build_tfs_token(
     segments: list[list[LegSpec]],
     *,
@@ -263,8 +392,8 @@ def build_tfs_token(
         segments: Ordered list of travel directions.  Each element is a list
             of :class:`LegSpec` describing every physical leg in that
             direction (one leg for nonstop, two or more for connections).
-        is_one_way: ``True`` for one-way (including multi-city); ``False``
-            for round-trip.  Controls the ``f19`` constant.
+        is_one_way: ``True`` for one-way; ``False`` for round-trip.
+            Controls the ``f19`` constant.
         seat: Cabin class encoded in field 9.  ``1`` = economy, ``2`` =
             premium economy, ``3`` = business, ``4`` = first.  Defaults to
             economy so existing callers keep producing the captured tokens.
@@ -283,46 +412,8 @@ def build_tfs_token(
         if not seg:
             raise ValueError(f"segment {i} has no legs")
 
-    segment_protos = b""
-    for seg in segments:
-        # Each leg becomes a repeated f4 within this segment.
-        legs_proto = b""
-        for leg in seg:
-            leg_proto = (
-                _length_delim(1, leg.origin.encode())
-                + _length_delim(2, leg.dep_date.encode())
-                + _length_delim(3, leg.dest.encode())
-                + _length_delim(5, leg.airline.encode())
-                + _length_delim(6, leg.flight_number.encode())
-            )
-            legs_proto += _length_delim(4, leg_proto)
-
-        origin_iata = seg[0].origin
-        dest_iata = seg[-1].dest
-        seg_date = seg[0].dep_date
-
-        seg_proto = (
-            _length_delim(2, seg_date.encode())
-            + legs_proto
-            + _length_delim(13, _varint_field(1, 1) + _length_delim(2, origin_iata.encode()))
-            + _length_delim(14, _varint_field(1, 1) + _length_delim(2, dest_iata.encode()))
-        )
-        segment_protos += _length_delim(3, seg_proto)
-
-    # f16 constant: max uint64 (0xFFFFFFFFFFFFFFFF)
-    _MAX_U64 = (1 << 64) - 1
-
-    # f19: 2 = one-way / multi-city, 1 = round-trip
-    f19 = 2 if is_one_way else 1
-
-    payload = (
-        _varint_field(1, 28)
-        + _varint_field(2, 2)
-        + segment_protos
-        + _varint_field(8, 1)
-        + _varint_field(9, seat)  # 1=economy 2=premium 3=business 4=first
-        + _varint_field(14, 1)
-        + _length_delim(16, _varint_field(1, _MAX_U64))
-        + _varint_field(19, f19)
+    encoded = b"".join(
+        encode_tfs_segment(seg[0].origin, seg[-1].dest, seg[0].dep_date, legs=seg)
+        for seg in segments
     )
-    return _to_urlsafe_b64(payload)
+    return encode_tfs_payload(encoded, is_one_way=is_one_way, seat=seat, pin_max_u64=True)

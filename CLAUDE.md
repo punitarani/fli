@@ -93,6 +93,53 @@ uv run mkdocs build         # Build static docs
 - **Shared Utilities**: Core parsing/building logic shared between CLI and MCP
 - **Validation**: Pydantic models ensure data integrity throughout
 
+## Search transport
+
+Searches go through Google's public search page, not the
+`FlightsFrontendService` RPC. Since 2026-08 `GetShoppingResults` and
+`GetCalendarGraph` require an `x-goog-batchexecute-bgr` header that only the
+page's JavaScript can produce, so the client issues
+`GET https://www.google.com/travel/flights?tfs=<protobuf>` and reads the
+`AF_initDataCallback` blob keyed `ds:1`. Request encoding lives in
+`fli/search/_tfs.py` and `fli/search/_proto.py`.
+
+Consequences to keep in mind when changing search code:
+
+- `emissions`, `bags` and `exclude_basic_economy` have no `tfs` field and no
+  post-hoc equivalent; `unsupported_filters()` names them and the caller warns.
+- Airline include/exclude, price cap, max duration and departure windows are
+  applied after fetching by `apply_client_side_filters()`; stops, cabin,
+  passengers, alliances and layover bounds are encoded into the request.
+- Multi-city raises `SearchUnsupportedError` — the page inlines no rows for it.
+- `get_booking_options` hits `GetBookingResults`, which is still gated, so it
+  currently raises `SearchRejectedError`. Booking deep links (`tfs`) are built
+  offline and unaffected.
+- A search returns fewer rows than the old RPC (~20-45), and client-side
+  filtering is not back-filled.
+- Date searches have no calendar grid: one page fetch per date, capped at
+  `fli.search.dates.MAX_DATES_PER_SEARCH` (93) per `SearchDates.search`. At the
+  cap that is several hundred MB of pages and parsed JSON at peak.
+- `_SweepHealth` (`SWEEP_FAILURE_THRESHOLD`, 5) is the sweep's circuit breaker.
+  It counts **only** payload-less pages — that failure is deterministic, so the
+  untried dates will fail the same way; a timeout or connection error says
+  nothing about them and deliberately does not count. It is armed only while no
+  date has loaded a page and disarmed permanently by the first success, so a
+  working sweep keeps the full retry budget for transient misses.
+  Measured with the real backoff, it turns a fully blocked 93-date sweep from
+  279 page fetches (up to 837 HTTP requests once the client's own retries
+  multiply) into 42 in ~4s, bounded at
+  (threshold + pool workers) x `PAGE_FETCH_ATTEMPTS` = 45 regardless of range —
+  the bound scales with `configure_concurrency`.
+  When it trips but prices still come back, `_collect` emits exactly one
+  warning naming the skipped count: a truncated answer must never be silent.
+- ~1 page in 60 arrives HTTP 200 with no `ds:1` blob. `fetch_payload` in
+  `fli/search/_tfs.py` is the single fetch path for both flights and dates and
+  retries exactly that case (`PAGE_FETCH_ATTEMPTS`, `PAGE_RETRY_BACKOFF`);
+  HTTP errors and error-13 rejections are not retried there.
+- `FLI_SOCS_COOKIE` overrides the pre-accepted `SOCS` consent cookie the client
+  sends so EU/EEA IPs skip Google's consent interstitial; set it empty to send
+  no cookie.
+
 ## Key Files and Entry Points
 
 - `fli/cli/main.py` - CLI entry point and command registration
@@ -150,6 +197,11 @@ Find cheapest travel dates within a range.
 Flights for that specific date (and return date for round trips).
 
 ### `get_booking_options`
+**Currently unavailable:** it calls `GetBookingResults`, which is gated behind
+the browser-signed header (see "Search transport"), so it raises
+`SearchRejectedError`. Use a flight's `booking_url` deep link instead. The rest
+of this section describes the tool for when that RPC becomes reachable again.
+
 Get bookable fares (vendor names, prices, and direct booking URLs) for a
 single itinerary. Runs a fresh search, selects the flight identified by
 `flight_numbers` (or the top result when omitted), then calls
@@ -185,10 +237,14 @@ one-line `Error: ...` and a non-zero exit code; the MCP tools surface
 other validators).
 
 ### Note on emissions
-Both tools accept the `emissions` filter (forwarded to Google's
-"less emissions" toggle as `LESS`), but raw CO₂ figures are intentionally
-**not** returned in CLI output or MCP tool responses. The filter operates
-server-side; the data is not displayed in the current release.
+The API surface still accepts the `emissions` filter, but the search-page
+transport has no `tfs` field for it, so it is **currently ignored** — the
+search logs a warning naming it and returns unfiltered results. The same is
+true of `checked_bags` / `carry_on` and `exclude_basic_economy`. See
+"Search transport" above.
+
+Independently of that: raw CO₂ figures are intentionally **not** returned in
+CLI output or MCP tool responses, and that is unchanged.
 
 ## Releasing
 

@@ -43,6 +43,7 @@ from fli.models import (
     TripType,
 )
 from fli.search import SearchDates, SearchFlights
+from fli.search.dates import MAX_DATES_PER_SEARCH
 
 
 class FlightSearchConfig(BaseSettings):
@@ -109,6 +110,12 @@ async def health_check(_request: Request) -> JSONResponse:
 # Request/Response Models
 # =============================================================================
 
+# Filters the API surface still accepts but the current transport cannot
+# honour (see "Search transport" in README.md). Spelled out in every
+# parameter description because an LLM caller reads the tool schema, not the
+# README.
+_IGNORED_BY_TRANSPORT = "Currently ignored by the search-page transport (logged as a warning)."
+
 
 class FlightSearchParams(BaseModel):
     """Parameters for searching flights on a specific date."""
@@ -151,13 +158,23 @@ class FlightSearchParams(BaseModel):
     )
     infants_on_lap: int = Field(0, ge=0, description="Number of lap infants (under 2, no seat)")
     exclude_basic_economy: bool = Field(
-        False, description="Exclude basic economy fares from results"
+        False,
+        description=f"Exclude basic economy fares from results. {_IGNORED_BY_TRANSPORT}",
     )
-    emissions: str = Field("ALL", description="Filter by emissions level: ALL or LESS")
+    emissions: str = Field(
+        "ALL",
+        description=f"Filter by emissions level: ALL or LESS. {_IGNORED_BY_TRANSPORT}",
+    )
     checked_bags: int = Field(
-        0, ge=0, le=2, description="Number of checked bags to include in price (0, 1, or 2)"
+        0,
+        ge=0,
+        le=2,
+        description=f"Number of checked bags in price (0-2). {_IGNORED_BY_TRANSPORT}",
     )
-    carry_on: bool = Field(False, description="Include carry-on bag fee in displayed price")
+    carry_on: bool = Field(
+        False,
+        description=f"Include carry-on bag fee in displayed price. {_IGNORED_BY_TRANSPORT}",
+    )
     show_all_results: bool = Field(
         True, description="Return all available results instead of curated ~30"
     )
@@ -212,7 +229,12 @@ class DateSearchParams(BaseModel):
         description="Arrival airport IATA code(s), comma-separated for multiple (e.g., 'LHR,CDG')"
     )
     start_date: str = Field(description="Start of date range in YYYY-MM-DD format")
-    end_date: str = Field(description="End of date range in YYYY-MM-DD format")
+    end_date: str = Field(
+        description=(
+            "End of date range in YYYY-MM-DD format. A range may span at most "
+            f"{MAX_DATES_PER_SEARCH} dates; each date costs its own page fetch."
+        )
+    )
     trip_duration: int = Field(
         3, ge=1, description="Trip duration in days (for round-trip searches)"
     )
@@ -440,9 +462,11 @@ def _serialize_layover(layover: Any) -> dict[str, Any]:
 def _flight_extras(flight: Any) -> dict[str, Any]:
     """Surface optional rich fields when populated by the parser.
 
-    Emissions fields (``co2_emissions_g`` etc.) are deliberately omitted —
-    the ``--emissions LESS`` filter still flows through to Google, but
-    raw CO₂ numbers are not part of the tool's response shape.
+    Emissions fields (``co2_emissions_g`` etc.) are deliberately omitted:
+    raw CO₂ numbers are not part of the tool's response shape. Note the
+    ``emissions`` filter itself is currently ignored by the search-page
+    transport too — it has no ``tfs`` field — and the search logs a warning
+    naming it. See "Search transport" in README.md.
     """
     out: dict[str, Any] = {}
     for src, key in (
@@ -629,6 +653,28 @@ def _build_flight_filters(
     return filters, trip_type, origins, destinations
 
 
+def _search_error_message(exc: Exception, prefix: str = "Search failed") -> str:
+    """Render a search exception for an MCP response, with actionable hints.
+
+    `SearchParseError` means a page arrived that we could not read, which is
+    most often Google's regional consent interstitial. The CLI already points
+    at `FLI_SOCS_COOKIE` for that; an MCP caller has no log file to consult, so
+    it needs the hint in the response itself.
+    """
+    from fli.search.exceptions import SearchParseError
+
+    if isinstance(exc, SearchParseError):
+        return (
+            f"{prefix}: {exc} This is usually a transient page variant or a regional "
+            "consent interstitial — retry, or check FLI_SOCS_COOKIE if you are in the "
+            "EU/EEA."
+        )
+    # Everything else already carries its own actionable text —
+    # `SearchRejectedError` names the gated header and the issue, and the
+    # client's typed errors name the host and what to check.
+    return f"{prefix}: {exc}"
+
+
 def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
     """Execute a flight search and return formatted results."""
     try:
@@ -696,7 +742,7 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
     except ValidationError as e:
         return {"success": False, "error": format_validation_error(e), "flights": []}
     except Exception as e:
-        return {"success": False, "error": f"Search failed: {e}", "flights": []}
+        return {"success": False, "error": _search_error_message(e), "flights": []}
 
 
 def _execute_booking_options(
@@ -791,7 +837,11 @@ def _execute_booking_options(
     except ValidationError as e:
         return {"success": False, "error": format_validation_error(e), "options": []}
     except Exception as e:
-        return {"success": False, "error": f"Booking lookup failed: {e}", "options": []}
+        return {
+            "success": False,
+            "error": _search_error_message(e, "Booking lookup failed"),
+            "options": [],
+        }
 
 
 def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
@@ -895,7 +945,7 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
     except ValidationError as e:
         return {"success": False, "error": format_validation_error(e), "dates": []}
     except Exception as e:
-        return {"success": False, "error": f"Search failed: {str(e)}", "dates": []}
+        return {"success": False, "error": _search_error_message(e), "dates": []}
 
 
 # =============================================================================
@@ -971,19 +1021,23 @@ def search_flights(
     ] = 0,
     exclude_basic_economy: Annotated[
         bool,
-        Field(description="Exclude basic economy fares from results"),
+        Field(description=f"Exclude basic economy fares from results. {_IGNORED_BY_TRANSPORT}"),
     ] = False,
     emissions: Annotated[
         str,
-        Field(description="Filter by emissions level: ALL or LESS"),
+        Field(description=f"Filter by emissions level: ALL or LESS. {_IGNORED_BY_TRANSPORT}"),
     ] = "ALL",
     checked_bags: Annotated[
         int,
-        Field(description="Number of checked bags to include in price (0, 1, or 2)", ge=0, le=2),
+        Field(
+            description=f"Number of checked bags in price (0-2). {_IGNORED_BY_TRANSPORT}",
+            ge=0,
+            le=2,
+        ),
     ] = 0,
     carry_on: Annotated[
         bool,
-        Field(description="Include carry-on bag fee in displayed price"),
+        Field(description=f"Include carry-on bag fee in displayed price. {_IGNORED_BY_TRANSPORT}"),
     ] = False,
     show_all_results: Annotated[
         bool,
@@ -1092,7 +1146,15 @@ def search_dates(
         ),
     ],
     start_date: Annotated[str, Field(description="Start of date range in YYYY-MM-DD format")],
-    end_date: Annotated[str, Field(description="End of date range in YYYY-MM-DD format")],
+    end_date: Annotated[
+        str,
+        Field(
+            description=(
+                "End of date range in YYYY-MM-DD format. A range may span at most "
+                f"{MAX_DATES_PER_SEARCH} dates; each date costs its own page fetch."
+            )
+        ),
+    ],
     trip_duration: Annotated[
         int,
         Field(description="Trip duration in days for round-trips", ge=1),
@@ -1271,7 +1333,7 @@ def get_booking_options(
     ] = None,
     exclude_basic_economy: Annotated[
         bool,
-        Field(description="Exclude basic economy fares from results"),
+        Field(description=f"Exclude basic economy fares from results. {_IGNORED_BY_TRANSPORT}"),
     ] = False,
     currency: Annotated[
         str | None,
@@ -1318,15 +1380,19 @@ def get_booking_options(
     ] = None,
     emissions: Annotated[
         str,
-        Field(description="Filter by emissions level: ALL or LESS"),
+        Field(description=f"Filter by emissions level: ALL or LESS. {_IGNORED_BY_TRANSPORT}"),
     ] = "ALL",
     checked_bags: Annotated[
         int,
-        Field(description="Number of checked bags to include in price (0, 1, or 2)", ge=0, le=2),
+        Field(
+            description=f"Number of checked bags in price (0-2). {_IGNORED_BY_TRANSPORT}",
+            ge=0,
+            le=2,
+        ),
     ] = 0,
     carry_on: Annotated[
         bool,
-        Field(description="Include carry-on bag fee in displayed price"),
+        Field(description=f"Include carry-on bag fee in displayed price. {_IGNORED_BY_TRANSPORT}"),
     ] = False,
 ) -> dict[str, Any]:
     """Get bookable fares (vendor names, prices, and direct booking URLs) for a flight.
