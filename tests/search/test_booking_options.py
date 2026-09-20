@@ -306,17 +306,24 @@ class TestGetBookingOptionsRejectionEnvelope:
             sf.get_booking_options(flight, filters, currency="USD")
         assert excinfo.value.code == 13
 
-    def test_rejection_reaches_the_cli_and_mcp_friendly_messages(self):
+    def test_rejection_reaches_the_cli_and_mcp_friendly_messages(self, monkeypatch, tmp_path):
         """The typed error stays classified, not an "unexpected error"."""
         from fli.cli.errors import _friendly_message, json_error_payload
         from fli.mcp.server import _search_error_message
         from fli.search import SearchRejectedError
+
+        # ``json_error_payload`` writes a real traceback file. Send it to
+        # tmp_path instead of the user's ~/.fli/logs, the way the autouse
+        # fixture in tests/cli/test_errors.py does for the same helper.
+        log_dir = tmp_path / "fli-logs"
+        monkeypatch.setattr("fli.cli.errors._LOG_DIR", log_dir)
 
         exc = SearchRejectedError(13, detail="req-abc123")
         assert "declined the request" in _friendly_message(exc)
         assert "Unexpected error" not in _friendly_message(exc)
         assert json_error_payload(exc, command="flights")[1] == "rejected"
         assert "declined the request" in _search_error_message(exc)
+        assert list(log_dir.iterdir()), "the log file should have landed under tmp_path"
 
     def test_genuinely_empty_response_still_returns_no_options(self):
         """A well-formed response with no vendor rows keeps returning []."""

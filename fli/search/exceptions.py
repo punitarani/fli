@@ -33,6 +33,7 @@ class SearchHTTPError(SearchClientError):
 # Google reports a rejected request with gRPC's canonical status codes, so
 # the bare number can be named instead of left for the reader to look up.
 _GRPC_STATUS_NAMES = {
+    0: "OK",
     1: "CANCELLED",
     2: "UNKNOWN",
     3: "INVALID_ARGUMENT",
@@ -76,7 +77,9 @@ class SearchRejectedError(SearchClientError):
         self.detail = detail
         self.status_name = _GRPC_STATUS_NAMES.get(code) if code is not None else None
         named = f"{code} ({self.status_name})" if self.status_name else code
-        suffix = f" with error {named}" if code is not None else ""
+        # ``0`` is gRPC's OK, so there is no error number to name — it reads
+        # the same as no code at all rather than claiming "error 0".
+        suffix = f" with error {named}" if code else ""
         message = (
             f"Google Flights declined the request{suffix} and returned no data. "
             "Its API now requires a browser-signed x-goog-batchexecute-bgr header, "

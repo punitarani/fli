@@ -23,7 +23,9 @@ characters rather than UTF-8 bytes, so any response carrying non-ASCII text
 and an ASCII response hides the difference entirely. Rather than encode a
 guess about Google's convention, this reader ignores the announced length
 and lets the JSON grammar delimit each chunk, which is correct either way.
-The headers are still used to re-synchronise after a malformed chunk.
+The headers' *positions* are still used — to re-synchronise after a
+malformed chunk, and to bound each decode to one chunk's worth of text —
+but their values never are.
 
 This module centralises that reader and exposes :func:`iter_wrb_chunks` which
 yields the decoded inner JSON of each ``wrb.fr`` chunk.
@@ -37,7 +39,7 @@ import re
 from collections.abc import Iterator
 from typing import Any, NamedTuple
 
-from fli.search.exceptions import SearchRejectedError
+from fli.search.exceptions import _GRPC_STATUS_NAMES, SearchRejectedError
 
 logger = logging.getLogger(__name__)
 
@@ -48,12 +50,29 @@ _PREFIX = ")]}'"
 _FRAMING_CHARS = "0123456789 \t\r\n"
 
 # A chunk boundary in the raw stream: newline, decimal length header,
-# newline, then the "[" that opens the next chunk. Literal newlines are
-# escaped inside JSON strings, so this can never match within a payload.
+# newline, then the "[" that opens the next chunk.
+#
+# This pattern cannot occur inside a well-formed JSON document, so the
+# next match is always at or after the current chunk's end. A raw newline
+# is illegal inside a JSON string (it has to be escaped), so the digits
+# would have to be a number token sitting between two newlines — and a
+# number immediately followed by "[" with only whitespace between them is
+# not valid JSON in any container. That makes the match position a safe
+# upper bound for where the current chunk ends, which is what lets the
+# decode below work on a bounded window. Only the header's *position* is
+# used; its value is still never trusted.
 _CHUNK_BOUNDARY = re.compile(r"\n\d+\n(?=\[)")
 
 # Error details are echoed into the exception message, so cap them.
 _MAX_DETAIL_CHARS = 200
+
+# A body of nothing but bad chunks would otherwise emit one warning per
+# chunk. Warn on the first few, then say how many there were in total.
+_MAX_MALFORMED_WARNINGS = 5
+
+# Row kinds emitted by :func:`_rows_from_outer`.
+_ROW_CHUNK = "chunk"
+_ROW_ERROR = "error"
 
 
 class _RejectionStatus(NamedTuple):
@@ -70,17 +89,23 @@ def iter_wrb_chunks(body: str | bytes) -> Iterator[Any]:
     ``GetShoppingResults`` / ``GetCalendarGraph`` shape) — those parse the
     same way, since chunk boundaries are derived from the JSON itself.
 
-    A response may mix payload chunks and an error row. Raising the moment
-    the error row is read would make the outcome depend on how far the
-    caller drains the generator: a caller taking only the first chunk would
-    never see an error that trails it, while a caller draining fully would
-    lose every chunk it had already accumulated to the exception. So an
-    error is recorded and only raised once the body is exhausted without a
-    single chunk — whatever Google did send is always delivered.
+    A response may mix payload chunks and an error row, and where the error
+    sits decides what happens:
+
+    * an error row reached **before** any usable chunk means the request
+      itself was rejected, so it raises immediately — handing the caller
+      the chunks behind it would pass off a partial answer as a whole one;
+    * an error row **trailing** chunks that already parsed keeps those
+      chunks and logs the rejection, so the outcome does not depend on how
+      far the caller happens to drain the generator.
+
+    Nothing else escapes: a chunk that cannot be decoded — malformed,
+    truncated or nested past the decoder's recursion limit — is skipped
+    with a warning.
 
     Raises:
-        SearchRejectedError: If Google answered with an error envelope and
-            no usable chunk at all. See :func:`_error_status`.
+        SearchRejectedError: If Google answered with an error envelope
+            before any usable chunk. See :func:`_error_status`.
 
     """
     # ``errors="replace"`` keeps a corrupted transfer from raising here;
@@ -93,40 +118,69 @@ def iter_wrb_chunks(body: str | bytes) -> Iterator[Any]:
     text = text.lstrip()
 
     decoder = json.JSONDecoder()
-    errors: list[_RejectionStatus] = []
+    trailing: list[_RejectionStatus] = []
+    malformed = 0
     yielded = 0
     cursor = 0
-    while cursor < len(text):
-        while cursor < len(text) and text[cursor] in _FRAMING_CHARS:
+    size = len(text)
+    while cursor < size:
+        while cursor < size and text[cursor] in _FRAMING_CHARS:
             cursor += 1
-        if cursor >= len(text):
+        if cursor >= size:
             break
+
+        # Decode the chunk alone rather than the whole body from an offset.
+        # A failed decode builds a ``JSONDecodeError``, and that constructor
+        # counts the newlines before the error position — O(offset) over
+        # whatever string it was handed. Passing the full body made a stream
+        # of bad chunks quadratic; a window keeps every failure O(chunk).
+        boundary = _CHUNK_BOUNDARY.search(text, cursor)
+        if boundary is None:
+            window, start, offset = text, cursor, 0
+        else:
+            window, start, offset = text[cursor : boundary.start()], 0, cursor
+
         try:
-            outer, cursor = decoder.raw_decode(text, cursor)
-        except ValueError as exc:
-            logger.warning("Discarding malformed wrb.fr chunk: %s", exc)
-            logger.debug("malformed wrb.fr chunk", exc_info=True)
-            boundary = _CHUNK_BOUNDARY.search(text, cursor)
+            outer, consumed = decoder.raw_decode(window, start)
+        except (ValueError, RecursionError) as exc:
+            # ``RecursionError`` is a ``RuntimeError``: deeply nested input
+            # would otherwise escape the generator entirely.
+            malformed += 1
+            if malformed <= _MAX_MALFORMED_WARNINGS:
+                logger.warning("Discarding malformed wrb.fr chunk: %s", exc)
+                logger.debug("malformed wrb.fr chunk", exc_info=True)
             if boundary is None:
                 break
             cursor = boundary.end()
             continue
-        for chunk in _chunks_from_outer(outer, errors):
-            yielded += 1
-            yield chunk
+        cursor = offset + consumed
 
-    if not errors:
-        return
-    rejection = SearchRejectedError(errors[0].code, detail=errors[0].detail)
-    if not yielded:
-        raise rejection
-    logger.warning(
-        "Google Flights reported error %d (%s) alongside %d usable chunk(s); "
-        "keeping the partial payload",
-        errors[0].code,
-        errors[0].detail or rejection.status_name or "unknown",
-        yielded,
-    )
+        for kind, value in _rows_from_outer(outer):
+            if kind is _ROW_ERROR:
+                if not yielded:
+                    raise _rejection(value)
+                trailing.append(value)
+                continue
+            yielded += 1
+            yield value
+
+    if malformed > _MAX_MALFORMED_WARNINGS:
+        logger.warning("Discarded %d malformed wrb.fr chunks in total", malformed)
+
+    if trailing:
+        status = trailing[0]
+        logger.warning(
+            "Google Flights reported error %d (%s) alongside %d usable chunk(s); "
+            "keeping the partial payload",
+            status.code,
+            status.detail or _GRPC_STATUS_NAMES.get(status.code) or "unknown",
+            yielded,
+        )
+
+
+def _rejection(status: _RejectionStatus) -> SearchRejectedError:
+    """Build the exception describing a rejected request."""
+    return SearchRejectedError(status.code, detail=status.detail)
 
 
 def _error_status(row: list[Any]) -> _RejectionStatus | None:
@@ -156,15 +210,28 @@ def _error_status(row: list[Any]) -> _RejectionStatus | None:
 
 
 def _error_detail(status: list[Any]) -> str | None:
-    """Summarise the message and detail block trailing a status code."""
+    """Summarise the message and detail block trailing a status code.
+
+    Every part of this is Google-controlled text of unbounded length, and
+    it ends up in the exception message, in a warning record and — via the
+    CLI's error reporter — in a file under ``~/.fli/logs``. Both halves are
+    capped, and so is the join, so nothing downstream has to defend itself.
+    """
     parts: list[str] = []
     message = status[1] if len(status) > 1 else None
     if isinstance(message, str) and message:
-        parts.append(message)
+        parts.append(_truncate(message))
     details = status[2] if len(status) > 2 else None
     if details:
         parts.append(_compact(details))
-    return "; ".join(parts) or None
+    return _truncate("; ".join(parts)) or None
+
+
+def _truncate(text: str) -> str:
+    """Cap ``text`` at :data:`_MAX_DETAIL_CHARS`, marking the cut with an ellipsis."""
+    if len(text) > _MAX_DETAIL_CHARS:
+        return text[: _MAX_DETAIL_CHARS - 1] + "…"
+    return text
 
 
 def _compact(value: Any) -> str:
@@ -173,13 +240,17 @@ def _compact(value: Any) -> str:
         text = json.dumps(value, separators=(",", ":"), ensure_ascii=False)
     except (TypeError, ValueError):  # pragma: no cover - values come from json.loads
         text = repr(value)
-    if len(text) > _MAX_DETAIL_CHARS:
-        text = text[: _MAX_DETAIL_CHARS - 1] + "…"
-    return text
+    return _truncate(text)
 
 
-def _chunks_from_outer(outer: Any, errors: list[_RejectionStatus]) -> Iterator[Any]:
-    """Yield a top-level chunk list's payloads, recording rejections into ``errors``."""
+def _rows_from_outer(outer: Any) -> Iterator[tuple[str, Any]]:
+    """Yield a top-level chunk list's rows in order, tagged by kind.
+
+    Emits ``(_ROW_CHUNK, payload)`` for a decoded inner payload and
+    ``(_ROW_ERROR, status)`` for an error envelope. The caller needs the
+    original order to tell a rejection from a trailing error, so the two
+    cannot be collected separately.
+    """
     if not isinstance(outer, list):
         return
     for row in outer:
@@ -191,14 +262,17 @@ def _chunks_from_outer(outer: Any, errors: list[_RejectionStatus]) -> Iterator[A
         if not isinstance(inner, str) or not inner:
             status = _error_status(row)
             if status is not None:
-                errors.append(status)
+                yield _ROW_ERROR, status
             continue
         try:
-            yield json.loads(inner)
-        except (ValueError, json.JSONDecodeError) as exc:
+            payload = json.loads(inner)
+        except (ValueError, RecursionError) as exc:
+            # ``RecursionError`` for pathologically nested inner JSON; it is
+            # a ``RuntimeError``, so ``ValueError`` alone would let it out.
             logger.warning("Failed to decode wrb.fr inner JSON payload: %s", exc)
             logger.debug("wrb.fr inner JSON decode failed", exc_info=True)
             continue
+        yield _ROW_CHUNK, payload
 
 
 def parse_first_wrb_payload(body: str | bytes) -> Any:

@@ -192,6 +192,49 @@ def _payload_row(payload: object) -> list[object]:
     return ["wrb.fr", None, json.dumps(payload, separators=(",", ":"))]
 
 
+def _malformed_chunks(count: int) -> str:
+    """Build a header-framed body whose every chunk fails to decode.
+
+    Each chunk fails at a fixed, tiny offset into itself, so the number of
+    decode failures equals ``count`` and the only thing that grows is how
+    far into the body each failure happens.
+    """
+    chunk = "[not json]"
+    parts = [")]}'\n\n"]
+    parts.extend(f"{len(chunk) + 2}\n{chunk}\n" for _ in range(count))
+    return "".join(parts)
+
+
+def _sized_body(megabytes: float) -> str:
+    """Build a valid two-chunk body of roughly ``megabytes`` characters."""
+    # ~37 characters per element, so the row count sets the size directly.
+    rows = int(megabytes * 1_000_000 / 37)
+    return _google_framed(["Aéroport de Paris-Charles de Gaulle"] * rows, [1, "beta"])
+
+
+def _elapsed_over_body(body: str, repeats: int = 3) -> float:
+    """Return the fastest of ``repeats`` full reads of ``body``, in seconds."""
+    best = float("inf")
+    for _ in range(repeats):
+        started = time.perf_counter()
+        list(iter_wrb_chunks(body))
+        best = min(best, time.perf_counter() - started)
+    return best
+
+
+def _elapsed_over_malformed_chunks(count: int) -> float:
+    """Time a full read of a body made of ``count`` undecodable chunks."""
+    # Logging is the other per-bad-chunk cost; silence it so the timing
+    # measures the reader rather than the handler attached to the root.
+    logger = logging.getLogger("fli.search._wire")
+    previous = logger.level
+    logger.setLevel(logging.CRITICAL)
+    try:
+        return _elapsed_over_body(_malformed_chunks(count))
+    finally:
+        logger.setLevel(previous)
+
+
 class TestNonAsciiFraming:
     """Chunks must survive non-ASCII payloads (issue: 'No flights found')."""
 
@@ -295,17 +338,64 @@ class TestGrammarDelimitingRobustness:
         # Tracebacks belong at debug level, not in the operator's log.
         assert warnings[0].exc_info is None
 
-    def test_multi_megabyte_body_is_read_in_linear_time(self):
-        # Guards against a quadratic reader (repeated slicing / re-scanning):
-        # ~5 MB parses in well under a second, a quadratic one takes minutes.
-        payload = [["CDG", "Aéroport de Paris-Charles de Gaulle", index] for index in range(45_000)]
-        body = _google_framed(payload, payload)
-        assert len(body) > 5_000_000
-        started = time.perf_counter()
-        chunks = list(iter_wrb_chunks(body))
-        elapsed = time.perf_counter() - started
-        assert chunks == [payload, payload]
-        assert elapsed < 10, f"5 MB body took {elapsed:.2f}s — reader is not linear"
+    def test_pathologically_nested_chunk_does_not_escape_the_iterator(self, caplog):
+        # 20k unclosed brackets exhaust the decoder's recursion budget.
+        # ``RecursionError`` is a ``RuntimeError``, not a ``ValueError``, so
+        # it used to sail straight out of the generator and past every
+        # caller's ``except SearchClientError``.
+        nested = "[" * 20_000
+        good = json.dumps([_payload_row([1, "alpha"])], separators=(",", ":"))
+        body = f")]}}'\n\n{len(nested) + 2}\n{nested}\n{len(good) + 2}\n{good}\n"
+        with caplog.at_level(logging.WARNING, logger="fli.search._wire"):
+            assert list(iter_wrb_chunks(body)) == [[1, "alpha"]]
+        warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert len(warnings) == 1
+        assert warnings[0].exc_info is None
+
+    def test_deeply_nested_inner_payload_does_not_escape_either(self):
+        # Same hazard one level down: the inner JSON string is decoded by a
+        # separate ``json.loads`` inside the row walk.
+        body = _rows_body(["wrb.fr", None, "[" * 20_000], _payload_row([1, "alpha"]))
+        assert list(iter_wrb_chunks(body)) == [[1, "alpha"]]
+
+    def test_repeated_malformed_chunks_do_not_flood_the_log(self, caplog):
+        # One warning per bad chunk turns a garbage body into thousands of
+        # log lines. Warn on the first few, then summarise.
+        with caplog.at_level(logging.WARNING, logger="fli.search._wire"):
+            assert list(iter_wrb_chunks(_malformed_chunks(500))) == []
+        warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert len(warnings) <= 6, f"{len(warnings)} warning lines for 500 bad chunks"
+        assert "500" in warnings[-1].getMessage()
+
+    def test_malformed_chunk_resync_scales_linearly(self):
+        # A failed decode must cost O(chunk), not O(offset-into-the-body).
+        # ``JSONDecodeError.__init__`` counts the newlines before the error
+        # position, so handing it the whole document once per bad chunk is
+        # quadratic: measured at 4x per doubling before the fix.
+        base = _elapsed_over_malformed_chunks(4_000)
+        doubled = _elapsed_over_malformed_chunks(8_000)
+        quadrupled = _elapsed_over_malformed_chunks(16_000)
+        ratio = quadrupled / max(base, 1e-6)
+        # Linear is ~4x for 4x the work; quadratic measured ~15x. The bound
+        # is deliberately loose so a noisy CI box cannot fail it.
+        assert ratio < 8, (
+            f"4x the bad chunks took {ratio:.1f}x the time "
+            f"({base * 1000:.1f} / {doubled * 1000:.1f} / {quadrupled * 1000:.1f} ms) "
+            "— resync is not linear"
+        )
+
+    def test_valid_path_scales_linearly_with_body_size(self):
+        # The happy path must stay linear too. Kept to ~2 MB: a ratio over
+        # three sizes proves the shape without a multi-hundred-MB peak.
+        base = _elapsed_over_body(_sized_body(0.5))
+        doubled = _elapsed_over_body(_sized_body(1.0))
+        quadrupled = _elapsed_over_body(_sized_body(2.0))
+        ratio = quadrupled / max(base, 1e-6)
+        assert ratio < 8, (
+            f"4x the body took {ratio:.1f}x the time "
+            f"({base * 1000:.1f} / {doubled * 1000:.1f} / {quadrupled * 1000:.1f} ms) "
+            "— the reader is not linear"
+        )
 
 
 class TestErrorEnvelope:
@@ -389,18 +479,87 @@ class TestErrorEnvelopeDetail:
         assert len(excinfo.value.detail) == 200
         assert excinfo.value.detail.endswith("…")
 
+    def test_oversized_status_message_is_truncated(self):
+        # The message half of the status is Google-controlled text of any
+        # length. Uncapped it reached the exception string, the warning
+        # record and, through the CLI reporter, a file under ~/.fli/logs.
+        status = [13, "M" * 5_000_000]
+        with pytest.raises(SearchRejectedError) as excinfo:
+            list(iter_wrb_chunks(_rows_body(_error_status_row(status))))
+        assert len(excinfo.value.detail) <= 200
+        assert excinfo.value.detail.endswith("…")
+        assert len(str(excinfo.value)) < 1_000
+
+    def test_oversized_message_and_block_together_stay_bounded(self):
+        status = [13, "M" * 5_000_000, [["type.googleapis.com/x", ["y" * 5_000_000]]]]
+        with pytest.raises(SearchRejectedError) as excinfo:
+            list(iter_wrb_chunks(_rows_body(_error_status_row(status))))
+        assert len(excinfo.value.detail) <= 200
+        assert len(str(excinfo.value)) < 1_000
+
+    def test_oversized_message_does_not_reach_the_log_record(self, caplog):
+        # Trailing error + a usable chunk is the one path that logs the
+        # detail instead of raising it.
+        status = [13, "M" * 5_000_000]
+        body = _rows_body(_payload_row([1, "alpha"]), _error_status_row(status))
+        with caplog.at_level(logging.WARNING, logger="fli.search._wire"):
+            assert list(iter_wrb_chunks(body)) == [[1, "alpha"]]
+        warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert len(warnings) == 1
+        assert len(warnings[0].getMessage()) < 1_000
+
+
+class TestSearchRejectedErrorRendering:
+    """The exception is built from Google-controlled input; it has to read sanely."""
+
+    def test_zero_is_grpc_ok_so_no_error_number_is_claimed(self):
+        # 0 is gRPC's OK. `_wire` never raises it, but a direct caller can,
+        # and "declined the request with error 0" is nonsense.
+        exc = SearchRejectedError(0)
+        assert exc.code == 0
+        assert exc.status_name == "OK"
+        assert "error 0" not in str(exc)
+        assert "declined the request and returned no data" in str(exc)
+
+    def test_no_code_reads_the_same_as_before(self):
+        assert "with error" not in str(SearchRejectedError())
+
+    def test_named_code_is_spelled_out(self):
+        assert "with error 13 (INTERNAL)" in str(SearchRejectedError(13))
+
+    def test_unknown_code_keeps_the_bare_number(self):
+        assert "with error 9999 and" in str(SearchRejectedError(9999))
+
 
 class TestErrorEnvelopeWithPartialResults:
-    """An error row must not destroy chunks Google already sent."""
+    """A TRAILING error row must not destroy chunks Google already sent."""
 
     def test_error_after_a_valid_chunk_keeps_the_chunk(self):
         body = _rows_body(_payload_row([1, "alpha"]), _error_status_row([13]))
         assert list(iter_wrb_chunks(body)) == [[1, "alpha"]]
 
-    def test_error_before_a_valid_chunk_keeps_the_chunk(self):
-        # Position must not decide the outcome: same body, rows swapped.
+    def test_error_before_a_valid_chunk_raises(self):
+        # Position DOES decide the outcome. An error row that arrives
+        # before any usable payload means the request itself was rejected;
+        # returning the chunks behind it would hand the caller a partial
+        # vendor list under a stderr warning nobody reads.
         body = _rows_body(_error_status_row([13]), _payload_row([1, "alpha"]))
-        assert list(iter_wrb_chunks(body)) == [[1, "alpha"]]
+        with pytest.raises(SearchRejectedError) as excinfo:
+            list(iter_wrb_chunks(body))
+        assert excinfo.value.code == 13
+
+    def test_error_before_a_valid_chunk_raises_for_parse_first_too(self):
+        body = _rows_body(_error_status_row([13]), _payload_row([1, "alpha"]))
+        with pytest.raises(SearchRejectedError):
+            parse_first_wrb_payload(body)
+
+    def test_error_in_an_earlier_chunk_of_a_multi_chunk_body_raises(self):
+        # Same ruling across chunk boundaries, not just across rows.
+        bad = json.dumps([_error_status_row([13])], separators=(",", ":"))
+        good = json.dumps([_payload_row([1, "alpha"])], separators=(",", ":"))
+        body = f")]}}'\n\n{len(bad) + 2}\n{bad}\n{len(good) + 2}\n{good}\n"
+        with pytest.raises(SearchRejectedError):
+            list(iter_wrb_chunks(body))
 
     def test_error_in_a_later_chunk_of_a_multi_chunk_body(self):
         good = json.dumps([_payload_row([1, "alpha"])], separators=(",", ":"))
