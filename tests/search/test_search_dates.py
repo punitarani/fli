@@ -181,6 +181,9 @@ INFANT_RESULTS_MISSING = pytest.mark.xfail(
 )
 
 
+# The `search` fixture above is a bare SearchDates() with no HTTP mocking,
+# so every test below that uses it hits the real Google Flights network.
+@pytest.mark.live
 @pytest.mark.parametrize(
     "search_params_fixture",
     [
@@ -195,6 +198,7 @@ def test_search_functionality(search, search_params_fixture, request):
     assert isinstance(results, list)
 
 
+@pytest.mark.live
 @INFANT_RESULTS_MISSING
 def test_multiple_searches(search, basic_search_params, complex_search_params):
     """Test performing multiple searches with the same SearchDates instance."""
@@ -211,6 +215,7 @@ def test_multiple_searches(search, basic_search_params, complex_search_params):
     assert isinstance(results3, list)
 
 
+@pytest.mark.live
 def test_date_price_sorting(search, basic_search_params):
     """Test that date prices are sorted chronologically."""
     results = search.search(basic_search_params)
@@ -239,6 +244,7 @@ def test_parse_price_from_calendar_item():
     assert SearchDates._SearchDates__parse_price(CALENDAR_ITEM) == 118.0
 
 
+@pytest.mark.live
 def test_basic_round_trip_search(search, round_trip_search_params):
     """Test basic round trip date search functionality."""
     results = search.search(round_trip_search_params)
@@ -258,6 +264,7 @@ def test_basic_round_trip_search(search, round_trip_search_params):
         assert result.price > 0
 
 
+@pytest.mark.live
 def test_complex_round_trip_search(search, complex_round_trip_params):
     """Test complex round trip date search with multiple passengers and stops."""
     results = search.search(complex_round_trip_params)
@@ -277,6 +284,7 @@ def test_complex_round_trip_search(search, complex_round_trip_params):
         assert result.price > 0
 
 
+@pytest.mark.live
 @pytest.mark.parametrize(
     "search_params_fixture",
     [
