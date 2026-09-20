@@ -395,7 +395,10 @@ The underlying Google Flights HTTP client (shared with the CLI, not
 | `REQUESTS_CA_BUNDLE` | Fallback CA bundle path, used when the two above are unset | unset |
 
 If a search fails with `error_type: "certificate_error"`, configure one of
-the CA bundle variables above instead of disabling TLS verification.
+the CA bundle variables above instead of disabling TLS verification. These
+are read once per worker thread, the first time that thread makes a
+request — for a long-running MCP server process, restart it after changing
+one so already-created sessions pick up the new value.
 
 ## Example Conversations
 

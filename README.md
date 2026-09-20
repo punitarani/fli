@@ -223,6 +223,8 @@ What that means in practice:
   to a PEM CA bundle path. A bad or missing path, or a certificate the bundle
   doesn't cover, raises `SearchCertificateError` naming the variable — the
   client does not retry it, since a fixed bundle either verifies or it doesn't.
+  Read once per worker thread on its first request; changing the value
+  doesn't affect a thread's already-created session.
 
 ## CLI Usage
 
