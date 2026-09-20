@@ -7,7 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 from fli.cli.main import app
-from fli.models import Airline, Airport, FlightLeg, FlightResult
+from fli.models import Airline, Airport, FlightLeg, FlightResult, SeatType
 from fli.models.google_flights.base import TripType
 
 
@@ -152,6 +152,11 @@ def test_flights_with_cabin_class(runner, mock_search_flights, mock_console):
     )
     assert result.exit_code == 0
     mock_search_flights.search.assert_called_once()
+    args, _ = mock_search_flights.search.call_args
+    assert args[0].seat_type == SeatType.BUSINESS
+    mock_search_flights.build_flight_booking_url.assert_called()
+    _, kwargs = mock_search_flights.build_flight_booking_url.call_args
+    assert kwargs["seat_type"] == SeatType.BUSINESS
 
 
 def test_flights_with_stops(runner, mock_search_flights, mock_console):

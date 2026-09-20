@@ -355,4 +355,24 @@ describe("buildTfsToken", () => {
   test("empty leg list throws", () => {
     expect(() => buildTfsToken([[]])).toThrow("no legs");
   });
+
+  test("seat defaults to economy (field 9 = 1)", () => {
+    const built = buildTfsToken([
+      [{ origin: "SFO", depDate: "2026-09-01", dest: "PHX", airline: "AA", flightNumber: "100" }],
+    ]);
+    const raw = tfsBytes(built);
+    const text = Buffer.from(raw);
+    expect(text.includes(Buffer.from([0x40, 0x01, 0x48, 0x01, 0x70, 0x01]))).toBe(true);
+  });
+
+  test("seat=3 encodes field 9 as business", () => {
+    const segs: LegSpec[][] = [
+      [{ origin: "SFO", depDate: "2026-09-01", dest: "PHX", airline: "AA", flightNumber: "100" }],
+    ];
+    const economy = tfsBytes(buildTfsToken(segs));
+    const business = tfsBytes(buildTfsToken(segs, { seat: 3 }));
+    expect(Buffer.from(economy).includes(Buffer.from([0x48, 0x01]))).toBe(true);
+    expect(Buffer.from(business).includes(Buffer.from([0x48, 0x03]))).toBe(true);
+    expect(Buffer.from(economy).equals(Buffer.from(business))).toBe(false);
+  });
 });

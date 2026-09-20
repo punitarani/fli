@@ -1,10 +1,15 @@
 """Tests for FlightSegment validation."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from fli.models import Airport, FlightSegment, TimeRestrictions
+
+
+def utc_today():
+    """Today's date in UTC — the anchor the validators reference."""
+    return datetime.now(timezone.utc).date()
 
 
 @pytest.fixture
@@ -28,7 +33,7 @@ def test_flight_segment_normal():
 
 def test_flight_segment_past_date():
     """Test FlightSegment rejects past travel dates."""
-    past = datetime.now() - timedelta(days=1)
+    past = utc_today() - timedelta(days=2)
     with pytest.raises(ValueError, match="Travel date cannot be in the past"):
         FlightSegment(
             departure_airport=[[Airport.PHX, 0]],
@@ -46,6 +51,24 @@ def test_flight_segment_today():
         travel_date=today.strftime("%Y-%m-%d"),
     )
     assert segment.travel_date == today.strftime("%Y-%m-%d")
+
+
+def test_flight_segment_accepts_yesterday_in_utc():
+    """Test FlightSegment accepts the day before the UTC date.
+
+    Travel dates are local to the origin airport, but the validator can only see
+    the server clock. At 17:00 in San Francisco the UTC date has already rolled
+    over, so a same-day evening SFO departure looks like "yesterday" to a UTC
+    container. Rejecting it blinds every westward user to same-day flights for
+    the last hours of their day, so utc_today - 1 must remain searchable.
+    """
+    yesterday_utc = utc_today() - timedelta(days=1)
+    segment = FlightSegment(
+        departure_airport=[[Airport.SFO, 0]],
+        arrival_airport=[[Airport.LAX, 0]],
+        travel_date=yesterday_utc.strftime("%Y-%m-%d"),
+    )
+    assert segment.travel_date == yesterday_utc.strftime("%Y-%m-%d")
 
 
 def test_flight_segment_same_airports():

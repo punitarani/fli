@@ -71,12 +71,12 @@ function safeAirline(code: unknown): Airline | null {
   return null;
 }
 
-function parseAmenities(slots: unknown): Amenities | null {
-  if (!Array.isArray(slots) || slots.length === 0) return null;
+function parseAmenities(slots: unknown, seatQuality: unknown = null): Amenities | null {
   const wifi = asBool(safeGet(slots, 1));
   const power = asBool(safeGet(slots, 5));
   const onDemandVideo = asBool(safeGet(slots, 9));
-  const legroomRating = asNonNegativeInt(safeGet(slots, 11));
+  // leg[12][11] is the Wi-Fi tier; seat quality lives separately at leg[13].
+  const legroomRating = asNonNegativeInt(seatQuality);
   if (wifi == null && power == null && onDemandVideo == null && legroomRating == null) {
     return null;
   }
@@ -121,7 +121,7 @@ function parseLeg(fl: unknown[]): FlightLeg {
   const opCode = safeGet(airlineInfo, 2);
   const operatingAirline = opCode ? safeAirline(opCode) : null;
 
-  const amenities = parseAmenities(safeGet(fl, 12));
+  const amenities = parseAmenities(safeGet(fl, 12), safeGet(fl, 13));
   const aircraft = asStr(safeGet(fl, 17));
   const legroomShort = asStr(safeGet(fl, 14));
   const legroomLong = asStr(safeGet(fl, 30));
