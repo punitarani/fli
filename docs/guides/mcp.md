@@ -265,6 +265,88 @@ you can retry with a valid identifier.
     specific flight's booking page directly, or fall back to the top-level
     `booking_url` for the search page.
 
+### `get_seat_availability`
+
+Find how many seats a single itinerary can still be booked for, and at what
+fares. Google Flights never reports a seat count, so this tool walks the party
+size upward from 1 and records the fare returned at each step, stopping at the
+first size the itinerary can no longer be booked for.
+
+Use `search_flights` first to discover flight numbers, then call this tool when
+you need to know whether a group fits on a given flight, or where the cheap
+fares run out.
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `origin` | string | Yes | - | Departure airport IATA code (e.g., 'JFK') |
+| `destination` | string | Yes | - | Arrival airport IATA code (e.g., 'LHR') |
+| `departure_date` | string | Yes | - | Travel date in YYYY-MM-DD format |
+| `flight_numbers` | list | No | null | Ordered flight numbers identifying the itinerary to probe. Omit to probe the top result for one passenger. |
+| `max_passengers` | int | No | 9 | Highest party size to probe (1–9; Google caps bookings at 9) |
+| `return_date` | string | No | null | Return date for round trips |
+| `cabin_class` | string | No | ECONOMY | ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST |
+| `max_stops` | string | No | ANY | ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS |
+| `airlines` | list | No | null | Filter by airline codes (e.g., ['BA', 'AA']) |
+| `exclude_basic_economy` | bool | No | false | Exclude basic economy fares |
+| `departure_window` | string | No | null | Time window in 'HH-HH' format (e.g., '6-20') |
+| `sort_by` | string | No | CHEAPEST | Sort order — matters when `flight_numbers` is omitted |
+| `exclude_airlines` | list | No | null | Airline IATA codes to **exclude** |
+| `alliance` / `exclude_alliance` | list | No | null | Restrict / exclude ONEWORLD, SKYTEAM, STAR_ALLIANCE |
+| `min_layover` / `max_layover` | int | No | null | Layover duration bounds (minutes) |
+| `emissions` | string | No | ALL | ALL or LESS |
+| `checked_bags` | int | No | 0 | Checked bags included in price (0–2) |
+| `carry_on` | bool | No | false | Include carry-on bag fee in price |
+| `currency` | string | No | null | ISO 4217 currency code (`curr=`) |
+| `language` | string | No | null | BCP-47 language code (`hl=`) |
+| `country` | string | No | null | ISO 3166-1 alpha-2 country (`gl=`) |
+
+> **Tip:** Pass the **same filters you used for `search_flights`**. Each probe
+> re-runs the search and looks for the itinerary among its results, so a flight
+> discovered under narrower filters can be absent here and get reported as
+> `max_bookable: 0`.
+
+**Example Response:**
+
+```json
+{
+  "success": true,
+  "flight": ["AM37"],
+  "max_bookable": 5,
+  "probed_up_to": 6,
+  "capped_by_probe_limit": false,
+  "fare_ladder": [
+    { "passengers": 1, "price_total": 2369.0, "price_per_passenger": 2369.0 },
+    { "passengers": 2, "price_total": 5489.0, "price_per_passenger": 2744.5 },
+    { "passengers": 3, "price_total": 10303.0, "price_per_passenger": 3434.33 },
+    { "passengers": 4, "price_total": 17308.0, "price_per_passenger": 4327.0 },
+    { "passengers": 5, "price_total": 21634.0, "price_per_passenger": 4326.8 }
+  ]
+}
+```
+
+Every passenger on one booking pays the cheapest fare bucket large enough for
+the whole party, so `price_per_passenger` rises as the party grows. A jump in
+the ladder marks the point where a cheaper bucket ran out — above, only two
+seats remained under $2,745 each.
+
+!!! warning "`max_bookable` is a floor, not inventory"
+    The number is the largest party size that actually priced, which is a
+    lower bound on real availability rather than the airline's seat count.
+    `capped_by_probe_limit: true` means the probe stopped at `max_passengers`
+    instead of running out of seats. `probed_up_to` reports the last party
+    size actually attempted, which is one past `max_bookable` when the probe
+    stopped early.
+
+!!! note "This tool is slow"
+    It costs up to `max_passengers` searches against a rate-limited client.
+    Because an empty response can mean "throttled" rather than "sold out",
+    each miss is re-checked once before the probe stops, so a full run can
+    issue a few more requests than party sizes probed. Narrow the itinerary
+    with `flight_numbers` and lower `max_passengers` when you only need to
+    confirm a small group fits.
+
 ## Available Prompts
 
 The MCP server also provides prompt templates to help guide searches:

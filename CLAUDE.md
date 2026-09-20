@@ -73,7 +73,7 @@ uv run mkdocs build         # Build static docs
    - All models use Pydantic for validation
 
 5. **MCP Server** (`fli/mcp/`)
-   - FastMCP-based server with four tools: `search_flights`, `search_dates`, `get_booking_options`, `find_airports`
+   - FastMCP-based server with five tools: `search_flights`, `search_dates`, `get_booking_options`, `get_seat_availability`, `find_airports`
    - Industry-standard parameter naming: `origin`, `destination`, `cabin_class`, `max_stops`
    - Per-flight booking deep-link URLs (`tfs` protobuf) in every search result
    - Prompt templates for guided searches
@@ -166,6 +166,43 @@ options — each with a clickable `booking_url` and `google_click_url`.
   `flight_numbers` is omitted) the priced "top result" may differ from what the
   user saw.
 - `currency`, `language`, `country` - Same locale knobs as `search_flights`
+
+### `get_seat_availability`
+Find how many seats a single itinerary can still be booked for, and at what
+fares. Google Flights never reports a seat count, so this walks the party size
+from 1 upward and records the fare returned at each step, stopping at the first
+size the itinerary can no longer be booked for.
+
+**Key Parameters:**
+- `origin` / `destination` / `departure_date` / `return_date` - Same as `search_flights`
+- `flight_numbers` - Ordered flight numbers identifying the itinerary to probe,
+  taken from a prior `search_flights` result. Omit to probe whichever itinerary
+  is the top result for one passenger.
+- `max_passengers` - Highest party size to probe (default and ceiling `9`,
+  which is Google's own per-booking limit)
+- `cabin_class`, `max_stops`, `airlines`, `exclude_basic_economy` - Same as `search_flights`
+- `departure_window`, `sort_by`, `exclude_airlines`, `alliance`, `exclude_alliance`,
+  `min_layover`, `max_layover`, `emissions`, `checked_bags`, `carry_on` - Same as
+  `search_flights`. Pass the **same filters used for `search_flights`**: each
+  probe re-runs the search and looks for the itinerary among its results, so a
+  flight found under narrower filters can be absent here and be reported as
+  `max_bookable: 0`.
+- `currency`, `language`, `country` - Same locale knobs as `search_flights`
+
+**Response:** `max_bookable` is the largest party size that still priced, and
+`fare_ladder` gives `price_total` plus `price_per_passenger` at every step.
+All passengers on one booking share the cheapest fare bucket large enough for
+the party, so a jump in the ladder marks where a cheaper bucket ran out.
+`capped_by_probe_limit` is true when the probe hit `max_passengers` rather than
+running out of seats, and `probed_up_to` reports the last party size actually
+attempted rather than the configured cap.
+
+Two caveats worth surfacing to users: `max_bookable` is a **confirmed floor**
+observed by probing, not true airline inventory; and the tool costs up to
+`max_passengers` searches, making it markedly slower than `search_flights`.
+Because the underlying client is rate limited, an empty response is re-checked
+once before being treated as unavailable, so a throttled reply is not mistaken
+for a sold-out flight.
 
 ### Note on emissions
 Both tools accept the `emissions` filter (forwarded to Google's

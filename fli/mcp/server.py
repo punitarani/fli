@@ -793,6 +793,132 @@ def _execute_booking_options(
         return {"success": False, "error": f"Booking lookup failed: {e}", "options": []}
 
 
+def _serialized_leg_parts(leg: dict[str, Any]) -> tuple[str, str]:
+    """Split a serialized leg into ``(airline_code, bare_flight_number)``."""
+    number = str(leg.get("flight_number", "")).upper().replace(" ", "")
+    code = str(leg.get("airline_code", "")).upper()
+    # Strip a leading airline-code prefix if the flight_number already carries
+    # it, so we never produce a double-prefixed token ("BABA178").
+    bare = number[len(code) :] if code and number.startswith(code) else number
+    return code, bare
+
+
+def _serialized_leg_identifiers(leg: dict[str, Any]) -> set[str]:
+    """Return the accepted identifier spellings for a serialized leg.
+
+    Yields both '178' and 'BA178' so callers may name a leg either way,
+    mirroring :func:`_leg_identifiers`, which does the same for raw
+    result objects.
+    """
+    code, bare = _serialized_leg_parts(leg)
+    return {bare, f"{code}{bare}"}
+
+
+def _serialized_flight_idents(flight: dict[str, Any]) -> list[str]:
+    """Canonical airline+number label for each leg of a serialized result."""
+    return [f"{code}{bare}" for code, bare in map(_serialized_leg_parts, flight.get("legs", []))]
+
+
+def _probe_party_size(
+    params: FlightSearchParams,
+    passengers: int,
+    flight_numbers: list[str] | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Search at one party size and return ``(matching_flight, error)``.
+
+    ``matching_flight`` is ``None`` when the itinerary cannot be booked for
+    that many passengers, which is also how a rate-limited response looks.
+    Callers are expected to confirm a ``None`` before trusting it.
+    """
+    result = _execute_flight_search(params.model_copy(update={"passengers": passengers}))
+    if not result.get("success"):
+        return None, result.get("error")
+
+    flights = result.get("flights") or []
+    if not flight_numbers:
+        return (flights[0] if flights else None), None
+
+    # Match each leg against either spelling ('178' or 'BA178'), order
+    # sensitive, exactly as _match_flight does for raw result objects.
+    want = [fn.upper().replace(" ", "") for fn in flight_numbers]
+    for flight in flights:
+        legs = flight.get("legs", [])
+        if len(legs) != len(want):
+            continue
+        if all(
+            token in _serialized_leg_identifiers(leg) for token, leg in zip(want, legs, strict=True)
+        ):
+            return flight, None
+    return None, None
+
+
+def _execute_seat_availability(
+    params: FlightSearchParams,
+    flight_numbers: list[str] | None,
+    max_passengers: int,
+) -> dict[str, Any]:
+    """Probe how many seats one itinerary can actually be booked for.
+
+    Google Flights exposes no seat count, so this walks the party size upward
+    and records the fare returned at each step. Every passenger on a booking
+    pays the cheapest fare bucket that fits the whole party, so the resulting
+    ladder shows where inventory tiers change, and the last party size that
+    still returns the itinerary is the confirmed floor on remaining seats.
+
+    An empty response is re-checked once before it is treated as unavailable:
+    the underlying client is rate limited, so a miss can mean "throttled"
+    rather than "sold out".
+    """
+    ladder: list[dict[str, Any]] = []
+    idents = flight_numbers
+    max_bookable = 0
+    probed_up_to = 0
+
+    for passengers in range(1, max_passengers + 1):
+        probed_up_to = passengers
+        flight, error = _probe_party_size(params, passengers, idents)
+        if flight is None and error is None:
+            flight, error = _probe_party_size(params, passengers, idents)
+        if error:
+            return {"success": False, "error": error, "fare_ladder": ladder}
+        if flight is None:
+            break
+
+        # Lock onto whichever itinerary matched first so later, pricier party
+        # sizes cannot silently drift to a different flight. Normalizing to the
+        # canonical airline+number labels also means the response echoes one
+        # consistent form whether or not the caller supplied flight_numbers.
+        if not ladder:
+            idents = _serialized_flight_idents(flight)
+
+        total = flight.get("price")
+        ladder.append(
+            {
+                "passengers": passengers,
+                "price_total": total,
+                "price_per_passenger": (
+                    round(total / passengers, 2) if isinstance(total, int | float) else None
+                ),
+            }
+        )
+        max_bookable = passengers
+
+    return {
+        "success": True,
+        "flight": idents,
+        "max_bookable": max_bookable,
+        "probed_up_to": probed_up_to,
+        "capped_by_probe_limit": max_bookable == max_passengers,
+        "fare_ladder": ladder,
+        "note": (
+            "max_bookable is a confirmed floor observed by probing, not airline "
+            "inventory. Every passenger on one booking shares the cheapest fare "
+            "bucket that fits the whole party, so price_per_passenger rises as the "
+            "party grows."
+        ),
+    }
+
+
 def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
     """Execute a date search and return formatted results."""
     try:
@@ -1379,6 +1505,181 @@ def _get_booking_options_from_params(
 ) -> dict[str, Any]:
     """Entry point for tests that call the tool via a params object."""
     return _execute_booking_options(params, flight_numbers)
+
+
+@mcp.tool(
+    annotations={
+        "title": "Get Seat Availability",
+        "readOnlyHint": True,
+        "idempotentHint": True,
+    },
+)
+def get_seat_availability(
+    origin: Annotated[
+        str,
+        Field(description="Departure airport IATA code(s), comma-separated for multiple"),
+    ],
+    destination: Annotated[
+        str,
+        Field(description="Arrival airport IATA code(s), comma-separated for multiple"),
+    ],
+    departure_date: Annotated[str, Field(description="Travel date in YYYY-MM-DD format")],
+    flight_numbers: Annotated[
+        list[str] | None,
+        Field(
+            description=(
+                "Flight numbers identifying the itinerary to probe, in order, taken from a "
+                "prior search_flights result (e.g. ['BA178'] one-way, ['AA100', 'AA200'] "
+                "round-trip). Accepts bare numbers ('178') or airline-prefixed ('BA178'). "
+                "Omit to probe whichever itinerary is the top result for one passenger."
+            )
+        ),
+    ] = None,
+    max_passengers: Annotated[
+        int,
+        Field(
+            description=(
+                "Highest party size to probe. Google Flights accepts at most 9 passengers "
+                "per booking, so 9 is both the default and the ceiling."
+            ),
+            ge=1,
+            le=9,
+        ),
+    ] = 9,
+    return_date: Annotated[
+        str | None,
+        Field(description="Return date in YYYY-MM-DD format (omit for one-way)"),
+    ] = None,
+    cabin_class: Annotated[
+        str,
+        Field(description="Cabin class: ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST"),
+    ] = CONFIG.default_cabin_class,
+    max_stops: Annotated[
+        str,
+        Field(description="Maximum stops: ANY, NON_STOP, ONE_STOP, TWO_PLUS_STOPS"),
+    ] = "ANY",
+    airlines: Annotated[
+        list[str] | None,
+        Field(description="Filter by airline IATA codes (e.g., ['BA', 'AA'])"),
+    ] = None,
+    exclude_basic_economy: Annotated[
+        bool,
+        Field(description="Exclude basic economy fares from results"),
+    ] = False,
+    currency: Annotated[
+        str | None,
+        Field(description="ISO 4217 currency code (USD, EUR, GBP, JPY...) for prices."),
+    ] = None,
+    language: Annotated[
+        str | None,
+        Field(description="Optional BCP-47 language code (e.g., 'en-GB') for the `hl` URL param."),
+    ] = None,
+    country: Annotated[
+        str | None,
+        Field(description="Optional ISO 3166-1 alpha-2 country code (e.g., 'GB')."),
+    ] = None,
+    departure_window: Annotated[
+        str | None,
+        Field(description="Departure time window in 'HH-HH' 24h format (e.g., '6-20')"),
+    ] = None,
+    sort_by: Annotated[
+        str,
+        Field(
+            description=(
+                "Sort order: TOP_FLIGHTS, BEST, CHEAPEST, DEPARTURE_TIME, ARRIVAL_TIME, "
+                "DURATION, EMISSIONS. Matters when flight_numbers is omitted, since the "
+                "probe locks onto the top result."
+            )
+        ),
+    ] = CONFIG.default_sort_by,
+    exclude_airlines: Annotated[
+        list[str] | None,
+        Field(description="Airline IATA codes to EXCLUDE from results."),
+    ] = None,
+    alliance: Annotated[
+        list[str] | None,
+        Field(description="Restrict to alliances: ONEWORLD, SKYTEAM, STAR_ALLIANCE."),
+    ] = None,
+    exclude_alliance: Annotated[
+        list[str] | None,
+        Field(description="Alliance names to EXCLUDE from results."),
+    ] = None,
+    min_layover: Annotated[
+        int | None,
+        Field(description="Minimum layover duration in minutes.", ge=1),
+    ] = None,
+    max_layover: Annotated[
+        int | None,
+        Field(description="Maximum layover duration in minutes.", ge=1),
+    ] = None,
+    emissions: Annotated[
+        str,
+        Field(description="Filter by emissions level: ALL or LESS"),
+    ] = "ALL",
+    checked_bags: Annotated[
+        int,
+        Field(description="Number of checked bags to include in price (0, 1, or 2)", ge=0, le=2),
+    ] = 0,
+    carry_on: Annotated[
+        bool,
+        Field(description="Include carry-on bag fee in displayed price"),
+    ] = False,
+) -> dict[str, Any]:
+    """Find how many seats one itinerary can still be booked for, and at what fares.
+
+    Google Flights never reports a seat count, so this walks the party size
+    from 1 upward and records the fare returned at each step, stopping at the
+    first size the itinerary can no longer be booked for.
+
+    Returns ``max_bookable`` (the largest party size that still priced) plus a
+    ``fare_ladder`` showing ``price_per_passenger`` at every step. Because all
+    passengers on one booking share the cheapest fare bucket large enough for
+    the party, a jump in the ladder marks the point where a cheaper bucket ran
+    out.
+
+    ``max_bookable`` is a confirmed floor rather than true airline inventory,
+    and it is capped at 9 by Google Flights itself. Costs up to
+    ``max_passengers`` searches, so it is markedly slower than
+    ``search_flights``.
+
+    Pass the **same filters used for search_flights**. Each probe re-runs the
+    search and looks for the itinerary in its results, so a flight discovered
+    under narrower filters can be missing here and be reported as
+    ``max_bookable: 0``.
+    """
+    params = FlightSearchParams(
+        origin=origin,
+        destination=destination,
+        departure_date=departure_date,
+        return_date=return_date,
+        departure_window=departure_window,
+        cabin_class=cabin_class,
+        max_stops=max_stops,
+        sort_by=sort_by,
+        airlines=airlines,
+        exclude_airlines=exclude_airlines,
+        alliance=alliance,
+        exclude_alliance=exclude_alliance,
+        min_layover=min_layover,
+        max_layover=max_layover,
+        exclude_basic_economy=exclude_basic_economy,
+        emissions=emissions,
+        checked_bags=checked_bags,
+        carry_on=carry_on,
+        currency=currency,
+        language=language,
+        country=country,
+    )
+    return _execute_seat_availability(params, flight_numbers, max_passengers)
+
+
+def _get_seat_availability_from_params(
+    params: FlightSearchParams,
+    flight_numbers: list[str] | None = None,
+    max_passengers: int = 9,
+) -> dict[str, Any]:
+    """Entry point for tests that call the tool via a params object."""
+    return _execute_seat_availability(params, flight_numbers, max_passengers)
 
 
 def _find_airports_impl(query: str, limit: int = 10) -> dict[str, Any]:
