@@ -40,6 +40,10 @@ run_http(host="0.0.0.0", port=8000)
 
 Once running, the MCP endpoint is served at `/mcp/`, for example: `http://127.0.0.1:8000/mcp/`.
 
+A liveness probe is available at `/health` (returns `{"status": "ok"}`). It is what the
+`docker-compose.yml` healthcheck calls, and it does not contact Google Flights, so an upstream
+outage will not cause a healthy container to be restarted.
+
 ## Claude Desktop Configuration
 
 Add this configuration to your `claude_desktop_config.json`:
