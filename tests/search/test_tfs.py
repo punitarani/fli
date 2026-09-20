@@ -97,6 +97,32 @@ def _decode(tfs: str) -> bytes:
     return base64.urlsafe_b64decode(tfs + "=" * (-len(tfs) % 4))
 
 
+def _passenger_codes(tfs: str) -> list[int]:
+    """Read the repeated field 8 (passenger kinds) out of a ``tfs`` token.
+
+    Walks the top-level message properly instead of scanning for the 0x40
+    tag byte, which also occurs inside length-delimited payloads.
+    """
+    from fli.search._proto import _read_varint
+
+    raw = _decode(tfs)
+    codes: list[int] = []
+    offset = 0
+    while offset < len(raw):
+        tag, offset = _read_varint(raw, offset)
+        field, wire = tag >> 3, tag & 0x7
+        if wire == 0:
+            value, offset = _read_varint(raw, offset)
+            if field == 8:
+                codes.append(value)
+        elif wire == 2:
+            length, offset = _read_varint(raw, offset)
+            offset += length
+        else:  # pragma: no cover - the encoder emits only wire types 0 and 2
+            raise AssertionError(f"unexpected wire type {wire} at offset {offset}")
+    return codes
+
+
 def _flight(
     airline: Airline = Airline.AA,
     price: float = 300,
@@ -260,6 +286,63 @@ class TestBuildTfs:
         )
         with pytest.raises(SearchUnsupportedError, match="Multi-city"):
             build_tfs(spec)
+
+
+class TestPassengerCodes:
+    """Each ``PassengerInfo`` field must map to the wire code Google means.
+
+    These codes are money: on an international route a lap infant prices at
+    roughly 10% of the adult fare while an infant in its own seat prices like
+    a child, at roughly 100%. Swapping the two codes produces a plausible,
+    non-erroring search that quotes the wrong fare — verified live on a fixed
+    BA178 JFK->LHR economy itinerary, where ``[1, 3]`` quoted $324 (+10%) and
+    ``[1, 4]`` quoted $589 (+100%) against a $295 solo-adult baseline.
+
+    The legacy RPC struct in ``fli.models.google_flights.flights`` orders the
+    same four counts ``[adults, children, infants_on_lap, infants_in_seat]``,
+    which is the ordering these codes follow.
+    """
+
+    @pytest.mark.parametrize(
+        ("field", "code"),
+        [
+            ("adults", 1),
+            ("children", 2),
+            ("infants_on_lap", 3),
+            ("infants_in_seat", 4),
+        ],
+    )
+    def test_each_passenger_kind_has_its_wire_code(self, field: str, code: int) -> None:
+        counts = {"adults": 0, field: 1}
+        spec = _filters(
+            [("JFK", "LAX", OUTBOUND_DATE)],
+            passenger_info=PassengerInfo(**counts),
+        )
+        assert _passenger_codes(build_tfs(spec)) == [code]
+
+    def test_lap_infant_is_three_not_four(self):
+        """Pinned separately: this is the swap that quoted a lap infant a seat fare."""
+        lap = _filters(
+            [("JFK", "LAX", OUTBOUND_DATE)],
+            passenger_info=PassengerInfo(adults=1, infants_on_lap=1),
+        )
+        seat = _filters(
+            [("JFK", "LAX", OUTBOUND_DATE)],
+            passenger_info=PassengerInfo(adults=1, infants_in_seat=1),
+        )
+        assert _passenger_codes(build_tfs(lap)) == [1, 3]
+        assert _passenger_codes(build_tfs(seat)) == [1, 4]
+
+    def test_family_mix_emits_one_entry_per_traveller(self):
+        spec = _filters(
+            [("JFK", "LAX", OUTBOUND_DATE)],
+            passenger_info=PassengerInfo(adults=2, children=1, infants_in_seat=1, infants_on_lap=1),
+        )
+        assert _passenger_codes(build_tfs(spec)) == [1, 1, 2, 3, 4]
+
+    def test_default_is_a_single_adult(self):
+        spec = _filters([("JFK", "LAX", OUTBOUND_DATE)])
+        assert _passenger_codes(build_tfs(spec)) == [1]
 
 
 class TestPageUrl:

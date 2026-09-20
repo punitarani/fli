@@ -153,14 +153,31 @@ def complex_round_trip_params():
     )
 
 
-# Google's search page inlines no results for some searches carrying infant
-# passengers — the same query with adults and children returns rows, and the
-# same infant query returns rows on other routes. Nothing in the request is
-# rejected: the page simply comes back without a results grid, so these
-# searches yield an empty list. Marked non-strict so a fix on Google's side
-# shows up as an unexpected pass rather than a failure.
+# Infant searches themselves work: the ``tfs`` passenger codes are verified
+# against Google's own pricing (1=adult, 2=child, 3=lap infant, 4=infant in
+# seat — see TestPassengerCodes in test_tfs.py and TestLapInfantPricing in
+# test_search_flights_new_filters_live.py), and JFK->LHR economy with a lap
+# infant returns 15 rows.
+#
+# What still comes back empty is this particular combination. Probed live
+# 2026-09-20, one-stop-or-fewer, 60 days out:
+#
+#   2a+1c        FIRST    JFK->LAX   22 rows
+#   1a           ECONOMY  JFK->LAX   35 rows
+#   1a           FIRST    JFK->LHR   10 rows
+#   2a+1c+1lap   FIRST    JFK->LAX    0 rows   <- this fixture
+#   2a+1c+1lap   ECONOMY  JFK->LAX    0 rows
+#   2a+1c+1seat  ECONOMY  JFK->LAX    0 rows
+#   2a+1c+1lap   ECONOMY  JFK->LHR   15 rows
+#   2a+1c+1lap   FIRST    JFK->LHR    0 rows
+#
+# So any infant on JFK->LAX, and any lap infant in FIRST, yields a page with
+# no results grid, while the same passenger mix on other route/cabin pairs is
+# served normally. Nothing in the request is rejected — Google simply inlines
+# no rows — which reads as inventory rather than encoding. Non-strict so a
+# change on Google's side surfaces as an unexpected pass.
 INFANT_RESULTS_MISSING = pytest.mark.xfail(
-    reason="Google's page serves no inline results for this infant search",
+    reason="Google inlines no results for an infant on this route/cabin pair",
     strict=False,
 )
 
@@ -367,3 +384,83 @@ class TestSearchParseErrorMessage:
         msg = str(excinfo.value)
         assert msg.count("not numeric") == 1
         assert "0/10" in msg
+
+
+class TestTransientPageRetryOnFlightSearch:
+    """Roughly one page in 60 arrives HTTP 200 with no ``ds:1`` blob.
+
+    A round trip fetches six pages, so the per-search failure rate compounds.
+    The retry lives in the shared page-fetch helper, so this exercises the same
+    code path the date sweep uses.
+    """
+
+    BLANK = "<html>no data callback here</html>"
+
+    @staticmethod
+    def _filters() -> FlightSearchFilters:
+        return FlightSearchFilters(
+            passenger_info=PassengerInfo(adults=1),
+            flight_segments=[
+                FlightSegment(
+                    departure_airport=[[Airport.JFK, 0]],
+                    arrival_airport=[[Airport.LAX, 0]],
+                    travel_date=(datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
+                )
+            ],
+        )
+
+    @staticmethod
+    def _good_page() -> str:
+        import json
+
+        from tests.search.test_parse_flights_data import _leg, _row
+
+        payload = [
+            [None, None, None, None, "FAKE_SESSION"],
+            None,
+            [[_row(legs=[_leg(dep_iata="JFK", arr_iata="LAX")])]],
+            None,
+        ]
+        return (
+            "<script>AF_initDataCallback({key: 'ds:1', hash: '1', data:"
+            + json.dumps(payload, separators=(",", ":"))
+            + ", sideChannel: {}});</script>"
+        )
+
+    def _sequenced(self, monkeypatch, bodies: list[str]):
+        from fli.search import _tfs as tfs_module
+
+        calls: list[str] = []
+        slept: list[float] = []
+        monkeypatch.setattr(tfs_module, "_sleep", slept.append)
+
+        sf = SearchFlights()
+
+        def _fake_get(url, **kwargs):  # noqa: ANN001
+            body = bodies[min(len(calls), len(bodies) - 1)]
+            calls.append(url)
+            return type("R", (), {"text": body, "raise_for_status": lambda self: None})()
+
+        monkeypatch.setattr(sf.client, "get", _fake_get)
+        return sf, calls, slept
+
+    def test_healthy_page_is_fetched_once(self, monkeypatch):
+        sf, calls, slept = self._sequenced(monkeypatch, [self._good_page()])
+        assert sf.search(self._filters())
+        assert len(calls) == 1
+        assert slept == []
+
+    def test_missing_once_then_present_succeeds_in_two_fetches(self, monkeypatch):
+        sf, calls, slept = self._sequenced(monkeypatch, [self.BLANK, self._good_page()])
+        assert sf.search(self._filters())
+        assert len(calls) == 2
+        assert slept == [0.5]
+
+    def test_missing_three_times_raises_after_exactly_three_fetches(self, monkeypatch):
+        from fli.search.flights import SearchParseError
+
+        sf, calls, slept = self._sequenced(monkeypatch, [self.BLANK])
+        with pytest.raises(SearchParseError, match="no ds:1 payload"):
+            sf.search(self._filters())
+        assert len(calls) == 3
+        assert slept == [0.5, 1.5]

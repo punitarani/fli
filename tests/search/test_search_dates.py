@@ -147,14 +147,31 @@ def complex_round_trip_params():
     )
 
 
-# Google's search page inlines no results for some searches carrying infant
-# passengers — the same query with adults and children returns rows, and the
-# same infant query returns rows on other routes. Nothing in the request is
-# rejected: the page simply comes back without a results grid, so these
-# searches yield an empty list. Marked non-strict so a fix on Google's side
-# shows up as an unexpected pass rather than a failure.
+# Infant searches themselves work: the ``tfs`` passenger codes are verified
+# against Google's own pricing (1=adult, 2=child, 3=lap infant, 4=infant in
+# seat — see TestPassengerCodes in test_tfs.py and TestLapInfantPricing in
+# test_search_flights_new_filters_live.py), and JFK->LHR economy with a lap
+# infant returns 15 rows.
+#
+# What still comes back empty is this particular combination. Probed live
+# 2026-09-20, one-stop-or-fewer, 60 days out:
+#
+#   2a+1c        FIRST    JFK->LAX   22 rows
+#   1a           ECONOMY  JFK->LAX   35 rows
+#   1a           FIRST    JFK->LHR   10 rows
+#   2a+1c+1lap   FIRST    JFK->LAX    0 rows   <- this fixture
+#   2a+1c+1lap   ECONOMY  JFK->LAX    0 rows
+#   2a+1c+1seat  ECONOMY  JFK->LAX    0 rows
+#   2a+1c+1lap   ECONOMY  JFK->LHR   15 rows
+#   2a+1c+1lap   FIRST    JFK->LHR    0 rows
+#
+# So any infant on JFK->LAX, and any lap infant in FIRST, yields a page with
+# no results grid, while the same passenger mix on other route/cabin pairs is
+# served normally. Nothing in the request is rejected — Google simply inlines
+# no rows — which reads as inventory rather than encoding. Non-strict so a
+# change on Google's side surfaces as an unexpected pass.
 INFANT_RESULTS_MISSING = pytest.mark.xfail(
-    reason="Google's page serves no inline results for this infant search",
+    reason="Google inlines no results for an infant on this route/cabin pair",
     strict=False,
 )
 

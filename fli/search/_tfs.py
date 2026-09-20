@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from typing import TYPE_CHECKING, Any
 
 from fli.models.google_flights.base import TripType
@@ -46,13 +47,41 @@ logger = logging.getLogger(__name__)
 
 PAGE_URL = "https://www.google.com/travel/flights"
 
+# Roughly one page in sixty comes back HTTP 200 with every other
+# ``AF_initDataCallback`` block present but no ``ds:1`` one — a transient
+# variant, not a block: the identical request succeeds seconds later. A round
+# trip fetches six pages and a date sweep one per date, so at that rate an
+# unretried search fails noticeably often.
+#
+# Retry only this exact case. HTTP errors and error-13 rejections are already
+# handled (and retried, where appropriate) by the client, and re-fetching them
+# here would just multiply a hard failure. Worst case is 3 fetches per page,
+# so a healthy N-date sweep stays N requests.
+PAGE_FETCH_ATTEMPTS = 3
+PAGE_RETRY_BACKOFF = (0.5, 1.5)
+
+# Indirection so tests can observe the backoff without sleeping and without
+# patching the global ``time`` module.
+_sleep = time.sleep
+
 # ``AF_initDataCallback({key: 'ds:1', hash: '..', data:[...], sideChannel: {}});``
 _DS_BLOB = re.compile(r"AF_initDataCallback\((\{.*?\})\);", re.S)
 _DS_KEY = re.compile(r"key:\s*'([^']+)'")
 _DS_DATA = re.compile(r"data:(.*?), sideChannel", re.S)
 
-# Passenger kinds, in the order Google's repeated field 8 expects them.
-_PASSENGER_FIELDS = ("adults", "children", "infants_in_seat", "infants_on_lap")
+# Passenger kinds, in the order Google's repeated field 8 numbers them:
+# 1 = adult, 2 = child, 3 = infant on lap, 4 = infant in own seat.
+#
+# The two infant codes are easy to transpose and the mistake is expensive
+# rather than loud: on an international route a lap infant prices at ~10% of
+# the adult fare and an infant in its own seat at ~100%, so a swap quotes a
+# plausible but wrong fare instead of erroring. Pricing one fixed itinerary
+# (BA178 JFK->LHR, economy) confirms the mapping — $295 for ``[1]``, $324 for
+# ``[1, 3]`` (+10%, lap), $589 for ``[1, 4]`` (+100%, own seat, same as the
+# ``[1, 2]`` child fare). The legacy RPC struct orders the same four counts
+# ``[adults, children, infants_on_lap, infants_in_seat]``; see
+# ``FlightSearchFilters.format`` in :mod:`fli.models.google_flights.flights`.
+_PASSENGER_FIELDS = ("adults", "children", "infants_on_lap", "infants_in_seat")
 
 # Filters with no ``tfs`` encoding and no reliable post-hoc equivalent —
 # the decoded rows don't carry the data needed to apply them locally.
@@ -188,6 +217,44 @@ def extract_payload(html: str) -> Any | None:
     return None
 
 
+def fetch_payload(client: Any, url: str) -> Any | None:
+    """Fetch a search page and return its ``ds:1`` payload, or ``None``.
+
+    The single entry point both the flight search and the date sweep use, so
+    the transient-page retry described at :data:`PAGE_FETCH_ATTEMPTS` applies
+    identically to each. Only a 200 with no ``ds:1`` blob is retried; HTTP and
+    network errors propagate on the first attempt exactly as before.
+
+    Args:
+        client: Anything with a ``get(url, **kwargs)`` returning a response
+            with ``.text`` and ``.raise_for_status()``.
+        url: The fully built search-page URL.
+
+    Returns:
+        The decoded payload, or ``None`` when every attempt came back without
+        one — the caller decides whether that is fatal.
+
+    """
+    for attempt in range(PAGE_FETCH_ATTEMPTS):
+        response = client.get(url, impersonate="chrome", allow_redirects=True)
+        response.raise_for_status()
+        payload = extract_payload(response.text)
+        if payload is not None:
+            if attempt:
+                logger.info("Search page carried ds:1 on attempt %d", attempt + 1)
+            return payload
+        if attempt + 1 < PAGE_FETCH_ATTEMPTS:
+            delay = PAGE_RETRY_BACKOFF[min(attempt, len(PAGE_RETRY_BACKOFF) - 1)]
+            logger.debug(
+                "Search page carried no ds:1 payload (attempt %d/%d); retrying in %.1fs",
+                attempt + 1,
+                PAGE_FETCH_ATTEMPTS,
+                delay,
+            )
+            _sleep(delay)
+    return None
+
+
 def unsupported_filters(filters: Any) -> list[str]:
     """Name the set filters this transport can neither encode nor emulate."""
     named = []
@@ -250,9 +317,18 @@ def apply_client_side_filters(flights: list[Any], filters: Any) -> list[Any]:
 
 
 def _within_window(flight: Any, restrictions: Any) -> bool:
-    """Check a flight's departure/arrival hours against a segment's window."""
+    """Check a flight's departure/arrival hours against a segment's window.
+
+    ``FlightResult.legs`` has no minimum length and ``parse_flight_row``
+    happily returns a row whose ``detail[2]`` was empty, so an unguarded
+    ``legs[0]`` here raises ``IndexError`` out of the whole search on one odd
+    row. A flight with no legs has no departure time to judge, so it cannot
+    satisfy a time window — drop it rather than crash.
+    """
     if restrictions is None:
         return True
+    if not flight.legs:
+        return False
     departure = flight.legs[0].departure_datetime.hour
     arrival = flight.legs[-1].arrival_datetime.hour
     checks = (

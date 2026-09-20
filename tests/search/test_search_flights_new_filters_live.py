@@ -346,3 +346,51 @@ class TestRichResponseFields:
             if f.booking_token:
                 return
         pytest.fail("Expected at least one result with booking_token set")
+
+
+class TestLapInfantPricing:
+    """Google must read our lap-infant passenger code as a lap infant.
+
+    ``tfs`` field 8 numbers passengers 1=adult, 2=child, 3=infant on lap,
+    4=infant in own seat. The two infant codes were transposed, which does not
+    error: Google prices a lap infant like a seat infant, roughly doubling the
+    quoted fare on an international route instead of adding ~10%.
+
+    Unit tests pin the bytes we emit; only a live call can confirm Google reads
+    them the way we think. Asserting a ratio rather than a price keeps this
+    durable against fare movement.
+    """
+
+    ROUTE = (Airport.JFK, Airport.LHR)
+
+    def _cheapest_common_flight(self, client, passengers: PassengerInfo):
+        filters = FlightSearchFilters(
+            trip_type=TripType.ONE_WAY,
+            passenger_info=passengers,
+            flight_segments=_segments(*self.ROUTE),
+            airlines=[Airline.BA],
+        )
+        results = client.search(filters, currency="USD")
+        return {
+            f.legs[0].flight_number: f.price
+            for f in (results or [])
+            if len(f.legs) == 1 and f.price
+        }
+
+    def test_lap_infant_adds_about_ten_percent_not_a_second_fare(self, client):
+        adult_only = self._cheapest_common_flight(client, PassengerInfo(adults=1))
+        with_infant = self._cheapest_common_flight(
+            client, PassengerInfo(adults=1, infants_on_lap=1)
+        )
+        shared = sorted(set(adult_only) & set(with_infant))
+        if not shared:
+            pytest.skip("no non-stop BA itinerary priced in both searches right now")
+
+        number = shared[0]
+        ratio = with_infant[number] / adult_only[number]
+        # A lap infant is a fraction of the adult fare; the transposed code
+        # priced a second seat, landing near 2.0x.
+        assert 1.0 <= ratio < 1.5, (
+            f"BA{number}: {adult_only[number]} -> {with_infant[number]} ({ratio:.2f}x) — "
+            "a lap infant should add roughly 10%, not a second fare"
+        )
