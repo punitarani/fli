@@ -290,15 +290,6 @@ class TestDateCountCap:
         end = datetime.strptime(params["end_date"].default, "%Y-%m-%d")
         assert (end - start).days + 1 <= dates_module.MAX_DATES_PER_SEARCH
 
-    def test_mcp_prompt_default_range_fits_under_the_cap(self):
-        from fli.mcp.server import find_budget_window_prompt
-
-        text = find_budget_window_prompt(origin="JFK", destination="LHR")
-        start_s, end_s = text.split("for trips between ")[1].split(". ")[0].split(" and ")
-        start = datetime.strptime(start_s.strip(), "%Y-%m-%d")
-        end = datetime.strptime(end_s.strip(), "%Y-%m-%d")
-        assert (end - start).days + 1 <= dates_module.MAX_DATES_PER_SEARCH
-
 
 # ---------------------------------------------------------------------------
 # 5. Client-side filters apply to the sweep too

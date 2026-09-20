@@ -624,3 +624,16 @@ class TestDateSearchCapSurfacing:
         assert result["success"] is False
         assert "93-date limit" in result["error"]
         assert result["dates"] == []
+
+    def test_budget_window_prompt_default_range_fits_under_the_cap(self):
+        """The prompt's default window must not suggest an over-cap search."""
+        from datetime import datetime
+
+        from fli.mcp.server import find_budget_window_prompt
+        from fli.search.dates import MAX_DATES_PER_SEARCH
+
+        text = find_budget_window_prompt(origin="JFK", destination="LHR")
+        start_s, end_s = text.split("for trips between ")[1].split(". ")[0].split(" and ")
+        start = datetime.strptime(start_s.strip(), "%Y-%m-%d")
+        end = datetime.strptime(end_s.strip(), "%Y-%m-%d")
+        assert (end - start).days + 1 <= MAX_DATES_PER_SEARCH
