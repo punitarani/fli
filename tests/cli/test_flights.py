@@ -17,6 +17,8 @@ from fli.search.exceptions import (
     SearchParseError,
     SearchTimeoutError,
 )
+from tests.search._pages import as_search_page
+from tests.search.test_parse_flights_data import _leg, _row
 
 
 @pytest.fixture
@@ -515,6 +517,104 @@ def test_flights_no_results(runner, mock_search_flights, mock_console):
     )
     assert result.exit_code == 1
     assert "No flights found" in result.stdout
+    assert "client-side" not in result.stdout
+
+
+def test_flights_no_results_with_child_explains_the_sparsity(runner, mock_search_flights):
+    """An empty result for a party with children/infants gets the extra hint.
+
+    Google's search page inlines fewer (sometimes zero) rows for those
+    parties — see SPARSE_PASSENGER_MIX_WARNING in fli.search.flights. The
+    CLI reads search_client.sparse_passenger_mix rather than recomputing
+    it, so the mock sets it the way the real library would for this party.
+    """
+    mock_search_flights.search.return_value = []
+    mock_search_flights.sparse_passenger_mix = True
+
+    result = runner.invoke(
+        app,
+        [
+            "flights",
+            "JFK",
+            "LAX",
+            datetime.now().strftime("%Y-%m-%d"),
+            "--passengers",
+            "2",
+            "--children",
+            "1",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "No flights found" in result.stdout
+    assert "client-side" in result.stdout
+
+
+def test_flights_no_results_with_infant_explains_the_sparsity(runner, mock_search_flights):
+    mock_search_flights.search.return_value = []
+    mock_search_flights.sparse_passenger_mix = True
+
+    result = runner.invoke(
+        app,
+        [
+            "flights",
+            "JFK",
+            "LAX",
+            datetime.now().strftime("%Y-%m-%d"),
+            "--infants-on-lap",
+            "1",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "client-side" in result.stdout
+
+
+class TestFlightsNoteTracksGoogleNotTheCallersFilter:
+    """End-to-end (stubbed page, real ``SearchFlights.search``) — mirrors the MCP-level check.
+
+    A page that genuinely carries no rows still gets the hint; a page that
+    carries a row the caller's own airline filter then removes does not —
+    that emptiness is the filter's doing, not Google's.
+    """
+
+    def _page(self, rows: list) -> str:
+        payload = [[None, None, None, None, "FAKE_SESSION"], None, [rows], None]
+        return as_search_page(payload)
+
+    def _stub_get(self, monkeypatch, body: str) -> None:
+        def _fake_get(self, url, **kwargs):  # noqa: ANN001
+            return type("R", (), {"text": body, "raise_for_status": lambda self: None})()
+
+        monkeypatch.setattr("fli.search.client.Client.get", _fake_get)
+
+    def test_genuinely_empty_page_prints_the_hint(self, runner, monkeypatch):
+        self._stub_get(monkeypatch, self._page([]))
+        result = runner.invoke(
+            app,
+            ["flights", "JFK", "LHR", datetime.now().strftime("%Y-%m-%d"), "--children", "1"],
+        )
+        assert result.exit_code == 1
+        assert "No flights found" in result.stdout
+        assert "client-side" in result.stdout
+
+    def test_rows_filtered_out_by_airline_prints_no_hint(self, runner, monkeypatch):
+        row = _row(legs=[_leg(dep_iata="JFK", arr_iata="LHR", airline_code="DL")])
+        self._stub_get(monkeypatch, self._page([row]))
+        result = runner.invoke(
+            app,
+            [
+                "flights",
+                "JFK",
+                "LHR",
+                datetime.now().strftime("%Y-%m-%d"),
+                "--children",
+                "1",
+                "--airlines",
+                "AA",
+            ],
+        )
+        assert result.exit_code == 1
+        assert "No flights found" in result.stdout
+        assert "client-side" not in result.stdout
 
 
 def test_basic_round_trip_flights(runner, mock_search_flights, mock_console):
@@ -702,6 +802,37 @@ def test_flights_json_no_results(runner, mock_search_flights, mock_console):
     assert payload["success"] is True
     assert payload["count"] == 0
     assert payload["flights"] == []
+    assert "note" not in payload
+
+
+def test_flights_json_no_results_with_child_carries_a_note(
+    runner, mock_search_flights, mock_console
+):
+    """The JSON empty payload gets the same explanation as a `note` key."""
+    mock_search_flights.search.return_value = []
+    mock_search_flights.sparse_passenger_mix = True
+
+    result = runner.invoke(
+        app,
+        [
+            "flights",
+            "JFK",
+            "LAX",
+            datetime.now().strftime("%Y-%m-%d"),
+            "--passengers",
+            "2",
+            "--children",
+            "1",
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["success"] is True
+    assert payload["count"] == 0
+    assert "client-side" in payload["note"]
 
 
 def test_given_comma_separated_origin_list_then_returns_flights_from_all(

@@ -5,6 +5,7 @@ from typing import Annotated, Any
 import typer
 from pydantic import ValidationError
 
+from fli.cli.console import console
 from fli.cli.enums import OutputFormat
 from fli.cli.errors import json_error_payload, report_cli_error
 from fli.cli.utils import (
@@ -40,6 +41,7 @@ from fli.models import (
     TripType,
 )
 from fli.search import SearchClientError, SearchFlights
+from fli.search.flights import SPARSE_PASSENGER_MIX_WARNING
 
 
 def _search_flights_core(
@@ -224,6 +226,16 @@ def _search_flights_core(
         )
 
         if not results:
+            # Read the library's own verdict rather than recomputing "empty +
+            # children/infants" here: SearchFlights.search already knows
+            # whether the empty result traces back to a page Google itself
+            # served with zero rows, versus the caller's own airline/price/
+            # duration/window filter removing rows Google did inline — that
+            # distinction lives in the fetch path, not in these arguments,
+            # so it can only be answered correctly once, there.
+            sparse_note = (
+                SPARSE_PASSENGER_MIX_WARNING if search_client.sparse_passenger_mix else None
+            )
             if output_format == OutputFormat.JSON:
                 emit_json(
                     build_json_success_response(
@@ -233,11 +245,14 @@ def _search_flights_core(
                         results_key="flights",
                         results=[],
                         booking_url=booking_url,
+                        note=sparse_note,
                     )
                 )
                 return
 
             typer.echo("No flights found.")
+            if sparse_note:
+                console.print(sparse_note, style="dim", soft_wrap=True)
             raise typer.Exit(1)
 
         # Build per-flight booking deep-links (tfs; never raises).

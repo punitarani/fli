@@ -233,6 +233,16 @@ What that means in practice:
 * **Fewer rows per search.** Expect roughly 20–45 itineraries, fewer than
   the old RPC returned — and a client-side filter cannot back-fill the
   list the way Google's server-side one did.
+* **Children and infants thin the results — sometimes to nothing.** Google
+  prices those parties client-side, so the page inlines fewer itineraries
+  for them, and in premium cabins often none (measured 2026-09: JFK→LHR
+  economy 23 rows for one adult, 16 with an infant; SFO→NRT business 9
+  rows for one or two adults, 0 with a child). Extra adults cost nothing.
+  An empty result for such a search does not mean the route has no
+  flights — and neither does it mean this is why: `search()` only warns
+  when the fetched page itself came back with zero rows, not when the
+  caller's own airline/price/duration/window filter removed rows Google
+  did return. An adults-only search shows the schedule.
 * **Date searches cost one page fetch per date**, capped at 93 dates. A
   sweep that never loads a single page stops once five dates have come
   back payload-less and throws, rather than paying the retry budget on

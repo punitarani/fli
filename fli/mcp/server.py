@@ -47,6 +47,7 @@ from fli.models import (
 )
 from fli.search import SearchDates, SearchFlights
 from fli.search.dates import MAX_DATES_PER_SEARCH
+from fli.search.flights import SPARSE_PASSENGER_MIX_WARNING
 
 
 class FlightSearchConfig(BaseSettings):
@@ -725,13 +726,23 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
         )
 
         if not flights:
-            return {
+            response: dict[str, Any] = {
                 "success": True,
                 "flights": [],
                 "count": 0,
                 "trip_type": trip_type.name,
                 "booking_url": booking_url,
             }
+            # Read the library's own verdict rather than recomputing "empty +
+            # children/infants" here: SearchFlights.search already knows
+            # whether the empty result traces back to a page Google itself
+            # served with zero rows, versus the caller's own airline/price/
+            # duration/window filter removing rows Google did inline — that
+            # distinction lives in the fetch path, not in params, so it can
+            # only be answered correctly once, there.
+            if search_client.sparse_passenger_mix:
+                response["note"] = SPARSE_PASSENGER_MIX_WARNING
+            return response
 
         # Serialize results; attach per-flight deep-link booking URL.
         is_round_trip = trip_type == TripType.ROUND_TRIP

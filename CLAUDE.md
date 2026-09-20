@@ -141,6 +141,20 @@ Consequences to keep in mind when changing search code:
   offline and unaffected.
 - A search returns fewer rows than the old RPC (~20-45), and client-side
   filtering is not back-filled.
+- **Children and infants thin the results — sometimes to nothing.** Google
+  prices those parties client-side, so the page inlines fewer itineraries for
+  them, and in premium cabins often none (measured 2026-09: JFK→LHR economy
+  23 rows for one adult, 16 with an infant; SFO→NRT business 9 rows for one
+  or two adults, 0 with a child). Extra adults cost nothing. An empty result
+  for such a search does not mean the route has no flights — and neither
+  does it mean this is why: `SearchFlights.search` / `SearchDates.search`
+  only warn (`SPARSE_PASSENGER_MIX_WARNING`) when the fetched page itself
+  came back with zero rows, not when the caller's own airline/price/
+  duration/window filter removed rows Google did return (see
+  `SearchFlights.sparse_passenger_mix`). The MCP `search_flights` empty
+  response carries the same text as `note`, and the CLI prints it under
+  "No flights found.", both reading that attribute rather than recomputing
+  the condition — an adults-only search shows the schedule.
 - Date searches have no calendar grid: one page fetch per date, capped at
   `fli.search.dates.MAX_DATES_PER_SEARCH` (93) per `SearchDates.search`. At the
   cap that is several hundred MB of pages and parsed JSON at peak.
