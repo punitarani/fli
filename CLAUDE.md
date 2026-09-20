@@ -23,7 +23,8 @@ uv sync --all-extras
 make test                    # Standard test suite (offline only)
 make test-fuzz              # Run fuzzing tests (pytest -vv --fuzz)
 make test-all               # Run all offline tests, including fuzz (pytest -vv --all)
-make test-live              # Run live tests against real Google Flights (pytest -vv --all -m live --live)
+make test-live              # Run the small, stable live tests (pytest -vv -m live --live)
+make test-live-fuzz         # Also run the flakier fuzz-gated live test (opt-in only)
 uv run pytest -vv           # Alternative direct command
 
 # Code quality
@@ -45,7 +46,8 @@ uv run mkdocs build         # Build static docs
 
 ### Test Configuration
 - Tests use pytest with custom markers: `fuzz` (requires `--fuzz` flag), `parallel` (for
-  pytest-xdist), and `live` (requires `--live` flag)
+  pytest-xdist), and `live` (requires `--live` flag). `--strict-markers` is set in `pytest.ini`,
+  so a typo'd marker fails collection instead of silently running (or silently not being gated).
 - Test structure mirrors source code: `tests/cli/`, `tests/models/`, `tests/search/`, `tests/mcp/`
 - Fuzzing tests are available but gated behind `--fuzz` flag
 - `live`-marked tests make real network calls to Google Flights (the fuzz case in
@@ -53,12 +55,22 @@ uv run mkdocs build         # Build static docs
   search tests in `tests/mcp/test_mcp_server.py::TestMCPServer`, and a handful of
   historically-unmocked cases in `test_search_flights.py` / `test_search_dates.py`). They're
   skipped by default and **`--all` does not enable them** — `ci.yml` runs `pytest tests/ --all`,
-  which stays fully offline so a flaky Google response never blocks a merge. Run them explicitly
-  with `make test-live` (`pytest --all -m live --live` — `--all` is still required together with
-  `--live`, otherwise the pre-existing fuzz-gating drops the fuzz-marked live case before `-m
-  live` even sees it); they also run daily against the real network via the
-  `.github/workflows/live-canary.yml` scheduled workflow, which files/comments/closes a GitHub
-  issue on failure/recovery instead of failing a build
+  which stays fully offline so a flaky Google response never blocks a merge.
+  - **How `--fuzz` / `--live` / `--all` interact**: each gate is independent and skip-only —
+    `--all` enables `fuzz`-marked tests but deliberately does *not* enable `live`-marked ones (you
+    always need `--live` for those), and `--live` alone does *not* enable `fuzz`-marked ones (a
+    test marked both `fuzz` *and* `live`, i.e. the one case in `test_search_flights_fuzz.py`, needs
+    **both** `--all` (or `--fuzz`) *and* `--live` together — `-m live --live` alone silently drops
+    it from collection before the marker filter even runs).
+  - `make test-live` (`pytest -m live --live`, no `--all`) runs the small, stable live set — the
+    same set `.github/workflows/live-canary.yml` runs daily against the real network, which
+    files/comments/closes a GitHub issue on failure/recovery instead of failing a build. It
+    retries a single failure batch once (`--last-failed`) after a short pause before treating the
+    run as failed, to absorb a lone transient page.
+  - `make test-live-fuzz` (`pytest --all -m live --live tests/search/test_search_flights_fuzz.py`)
+    additionally runs the 100-case fuzz-gated live test, which is opt-in for humans only — it
+    measured ~11% per-case failures under a fast back-to-back burst in testing, well above the
+    stable set's rate, so it is never scheduled.
 
 ## Architecture Overview
 

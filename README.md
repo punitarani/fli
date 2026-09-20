@@ -558,16 +558,19 @@ uv run mkdocs serve
 # Or use the Makefile for common tasks
 make install-all  # Install all dependencies
 make test         # Run tests (offline only)
-make test-live    # Run tests against the real Google Flights network
+make test-live    # Run the small, stable live tests (real network)
 make lint         # Check code style
 make format       # Format code
 ```
 
 Tests that call the real Google Flights API are marked `live` and skipped by
-default (they're also excluded from `--all`); run them with `make test-live`
-or `pytest --all -m live --live` if you want to exercise the live network
-path (`--all` is required alongside `-m live`/`--live`, or the fuzz-gated
-live case gets dropped before the marker filter ever sees it).
+default (`--fuzz`, `--live` and `--all` are independent, skip-only gates —
+`--all` does *not* imply `--live`, and `--live` alone does *not* imply
+`--fuzz`). Run the small, stable live set with `make test-live` (or
+`pytest -m live --live`); the noisier 100-case fuzz-gated live test is a
+separate opt-in, `make test-live-fuzz` (`pytest --all -m live --live
+tests/search/test_search_flights_fuzz.py` — it needs `--all`/`--fuzz`
+*together with* `--live`, since it carries both markers).
 
 ### Docker Development
 

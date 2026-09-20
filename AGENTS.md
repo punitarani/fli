@@ -13,7 +13,7 @@ All standard commands are in the `Makefile` and `CLAUDE.md`. Key ones:
 - **Install deps**: `uv sync --all-extras`
 - **Lint**: `make lint` (ruff)
 - **Format**: `make format`
-- **Tests**: `make test` (standard, offline), `make test-all` (including fuzz, still offline), `make test-live` (real network)
+- **Tests**: `make test` (standard, offline), `make test-all` (including fuzz, still offline), `make test-live` (small stable live set, real network), `make test-live-fuzz` (adds the noisier fuzz-gated live test, opt-in only)
 - **CLI**: `uv run fli flights JFK LAX 2026-05-15`
 - **MCP HTTP server**: `uv run fli-mcp-http` (serves at `http://127.0.0.1:8000/mcp/`)
 
@@ -26,12 +26,17 @@ All standard commands are in the `Makefile` and `CLAUDE.md`. Key ones:
   `test_search_flights_fuzz.py`, the four search tests in
   `tests/mcp/test_mcp_server.py::TestMCPServer`, and a handful of previously-unmocked cases in
   `test_search_flights.py` / `test_search_dates.py`. These are skipped unless `--live` is passed
-  (`--all` does **not** enable them), so `make test` / `make test-all` never hit the network. Run
-  them with `make test-live` (`pytest --all -m live --live` — `--all` is still required together
-  with `--live`, or the fuzz-gated live case is dropped before `-m live` sees it) if you have
-  network access; they may be skipped on a transient transport failure and fail on an actual
-  regression. They also run daily
-  in `.github/workflows/live-canary.yml`, which files a GitHub issue on failure.
+  (`--all` does **not** enable them), so `make test` / `make test-all` never hit the network.
+  `--fuzz`, `--live` and `--all` are independent skip-only gates: a test needs *every* gate that
+  applies to it passed together (the fuzz-gated live case needs both `--all`/`--fuzz` *and*
+  `--live` at once — `-m live --live` alone silently drops it from collection).
+  Run `make test-live` (`pytest -m live --live`, no `--all`) for the small, stable live set if you
+  have network access — the same set that runs daily in `.github/workflows/live-canary.yml`,
+  which retries one failed batch after a short pause before filing/updating a GitHub issue.
+  `make test-live-fuzz` additionally runs the 100-case fuzz-gated live test, which is noticeably
+  flakier under its back-to-back burst (~11% per-case failures measured) and is opt-in only —
+  never scheduled. Any of these may skip on a transient transport failure but fail on an actual
+  regression.
 
 ### Releasing
 
