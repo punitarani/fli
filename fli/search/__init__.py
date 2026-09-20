@@ -3,6 +3,7 @@ from .exceptions import (
     SearchClientError,
     SearchConnectionError,
     SearchHTTPError,
+    SearchParseError,
     SearchRejectedError,
     SearchTimeoutError,
     SearchUnsupportedError,
@@ -17,6 +18,7 @@ __all__ = [
     "SearchTimeoutError",
     "SearchConnectionError",
     "SearchHTTPError",
+    "SearchParseError",
     "SearchRejectedError",
     "SearchUnsupportedError",
 ]

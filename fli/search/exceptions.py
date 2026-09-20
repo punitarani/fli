@@ -59,3 +59,17 @@ class SearchUnsupportedError(SearchClientError):
     would answer it in a browser, but the public search page carries no
     inline payload for it, so this client has nothing to read.
     """
+
+
+class SearchParseError(SearchClientError):
+    """A successful HTTP response could not be parsed into flights.
+
+    Distinct from network / HTTP errors: this says "Google responded but
+    the shape changed", not "Google didn't respond". In practice it is
+    either a consent/blocked page (no ``ds:1`` blob at all) or a change in
+    the flight rows themselves.
+
+    It belongs to the :class:`SearchClientError` family so that callers
+    already catching search failures — the CLI's error reporter among them
+    — classify it as one instead of an unexpected crash.
+    """
