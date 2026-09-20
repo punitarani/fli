@@ -6,6 +6,8 @@ them as in-test constants avoids large committed binary blobs while still
 locking down the parser positions we depend on.
 """
 
+import pytest
+
 from fli.models import Airline, Airport
 from fli.search.flights import SearchFlights
 
@@ -32,6 +34,7 @@ def _leg(
     cabin=2,
     overnight=False,
     amenities=None,
+    legroom_rating=None,
 ):
     amenities = amenities or [None] * 12
     leg = [None] * 33
@@ -43,6 +46,7 @@ def _leg(
     leg[10] = list(arr_time)
     leg[11] = duration
     leg[12] = amenities
+    leg[13] = legroom_rating
     leg[14] = legroom_short
     leg[17] = aircraft
     leg[19] = overnight
@@ -112,6 +116,7 @@ class TestParseFlightsDataNonStop:
                     dep_iata="JFK",
                     arr_iata="LAX",
                     amenities=[None, True, None, None, None, True, None, None, None, True, None, 2],
+                    legroom_rating=3,
                 )
             ],
         )
@@ -147,7 +152,7 @@ class TestParseFlightsDataNonStop:
         assert am.wifi is True
         assert am.power is True
         assert am.on_demand_video is True
-        assert am.legroom_rating == 2
+        assert am.legroom_rating == 3
         # USB/in-seat-video slots not yet disambiguated — left as None to
         # avoid lying about what we know.
         assert am.usb_power is None
@@ -168,6 +173,52 @@ class TestParseFlightsDataNonStop:
 
     def test_booking_token(self):
         assert self.flight.booking_token == "CAISA1VTRBoDCNR/sample"
+
+
+class TestLegroomRating:
+    @pytest.mark.parametrize("rating", range(1, 10))
+    @pytest.mark.parametrize("wifi_tier", [2, 3])
+    def test_reads_seat_quality_independently_of_wifi(self, rating, wifi_tier):
+        amenities = [None] * 12
+        amenities[11] = wifi_tier
+        row = _row(
+            legs=[
+                _leg(
+                    dep_iata="JFK",
+                    arr_iata="LAX",
+                    amenities=amenities,
+                    legroom_rating=rating,
+                )
+            ]
+        )
+        flight = SearchFlights._parse_flights_data(row)
+        assert flight.legs[0].amenities.legroom_rating == rating
+
+    @pytest.mark.parametrize("slots", [None, [], "invalid"])
+    def test_preserves_rating_without_amenities_array(self, slots):
+        leg = _leg(dep_iata="JFK", arr_iata="LAX", legroom_rating=3)
+        leg[12] = slots
+        flight = SearchFlights._parse_flights_data(_row(legs=[leg]))
+        assert flight.legs[0].amenities.legroom_rating == 3
+        assert flight.legs[0].amenities.wifi is None
+
+    @pytest.mark.parametrize("rating", [None, -1, True, "3"])
+    def test_missing_or_invalid_rating_does_not_fall_back_to_wifi(self, rating):
+        amenities = [None] * 12
+        amenities[1] = True
+        amenities[11] = 2
+        row = _row(
+            legs=[
+                _leg(
+                    dep_iata="JFK",
+                    arr_iata="LAX",
+                    amenities=amenities,
+                    legroom_rating=rating,
+                )
+            ]
+        )
+        flight = SearchFlights._parse_flights_data(row)
+        assert flight.legs[0].amenities.legroom_rating is None
 
 
 class TestParseFlightsDataLayover:

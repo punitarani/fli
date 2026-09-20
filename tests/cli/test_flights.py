@@ -7,7 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 from fli.cli.main import app
-from fli.models import Airline, Airport, FlightLeg, FlightResult
+from fli.models import Airline, Airport, FlightLeg, FlightResult, SeatType
 from fli.models.google_flights.base import TripType
 
 
@@ -39,6 +39,44 @@ def test_flights_with_time_filter(runner, mock_search_flights, mock_console):
     )
     assert result.exit_code == 0
     mock_search_flights.search.assert_called_once()
+
+
+def test_flights_with_passengers(runner, mock_search_flights, mock_console):
+    """Test flights search passes adult passenger count into filters."""
+    result = runner.invoke(
+        app,
+        [
+            "flights",
+            "JFK",
+            "LAX",
+            datetime.now().strftime("%Y-%m-%d"),
+            "--passengers",
+            "2",
+        ],
+    )
+    assert result.exit_code == 0
+    args, _ = mock_search_flights.search.call_args
+    assert args[0].passenger_info.adults == 2
+
+
+def test_flights_json_query_echoes_passengers(runner, mock_search_flights, mock_console):
+    """JSON query echo includes requested adult passenger count."""
+    result = runner.invoke(
+        app,
+        [
+            "flights",
+            "JFK",
+            "LAX",
+            datetime.now().strftime("%Y-%m-%d"),
+            "--passengers",
+            "3",
+            "--format",
+            "json",
+        ],
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["query"]["passengers"] == 3
 
 
 def test_flights_with_airlines(runner, mock_search_flights, mock_console):
@@ -114,6 +152,11 @@ def test_flights_with_cabin_class(runner, mock_search_flights, mock_console):
     )
     assert result.exit_code == 0
     mock_search_flights.search.assert_called_once()
+    args, _ = mock_search_flights.search.call_args
+    assert args[0].seat_type == SeatType.BUSINESS
+    mock_search_flights.build_flight_booking_url.assert_called()
+    _, kwargs = mock_search_flights.build_flight_booking_url.call_args
+    assert kwargs["seat_type"] == SeatType.BUSINESS
 
 
 def test_flights_with_stops(runner, mock_search_flights, mock_console):
@@ -346,3 +389,50 @@ def test_flights_json_no_results(runner, mock_search_flights, mock_console):
     assert payload["success"] is True
     assert payload["count"] == 0
     assert payload["flights"] == []
+
+
+def test_given_comma_separated_origin_list_then_returns_flights_from_all(
+    runner, mock_search_flights, mock_console
+):
+    """Comma-separated origin passes multiple airports to the search segment."""
+    result = runner.invoke(
+        app,
+        ["flights", "JFK,LGA", "LAX", datetime.now().strftime("%Y-%m-%d")],
+    )
+    assert result.exit_code == 0
+    args, _ = mock_search_flights.search.call_args
+    departure_airports = [apt for apt, _ in args[0].flight_segments[0].departure_airport]
+    assert Airport.JFK in departure_airports
+    assert Airport.LGA in departure_airports
+
+
+def test_given_comma_separated_destination_list_then_returns_flights_to_all(
+    runner, mock_search_flights, mock_console
+):
+    """Comma-separated destination passes multiple airports to the search segment."""
+    result = runner.invoke(
+        app,
+        ["flights", "JFK", "LHR,CDG", datetime.now().strftime("%Y-%m-%d")],
+    )
+    assert result.exit_code == 0
+    args, _ = mock_search_flights.search.call_args
+    arrival_airports = [apt for apt, _ in args[0].flight_segments[0].arrival_airport]
+    assert Airport.LHR in arrival_airports
+    assert Airport.CDG in arrival_airports
+
+
+@pytest.mark.parametrize("bad_origin", [",", ",,", " , "])
+def test_flights_separator_only_origin_is_a_clean_error(
+    runner, mock_search_flights, mock_console, bad_origin
+):
+    """An origin made only of separators gets a clear parse error.
+
+    Previously the empty airport list reached the models and surfaced as a raw
+    pydantic validation dump.
+    """
+    tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    result = runner.invoke(app, ["flights", bad_origin, "LAX", tomorrow])
+    assert result.exit_code != 0
+    assert "No valid airport codes" in result.output
+    assert "pydantic" not in result.output
+    mock_search_flights.search.assert_not_called()

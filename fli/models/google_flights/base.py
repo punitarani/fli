@@ -4,7 +4,7 @@ This module contains all the data models used for flight searches and results.
 Models are designed to match Google Flights' APIs while providing a clean pythonic interface.
 """
 
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 
 from pydantic import (
@@ -19,6 +19,25 @@ from pydantic import (
 
 from fli.models.airline import Airline
 from fli.models.airport import Airport
+
+
+def earliest_searchable_date() -> date:
+    """Return the earliest date that is still "today" somewhere on Earth.
+
+    Travel dates are supplied in the *origin airport's* local timezone, but this
+    library has no per-airport timezone data, so validation can only reference
+    the clock of the machine it happens to be running on. Comparing against a
+    naive local "today" makes results depend on the server's ``TZ`` — a UTC
+    container rejects a same-day San Francisco evening flight for the last seven
+    hours of every Pacific day, even though that flight has not departed.
+
+    Real UTC offsets span UTC-12 to UTC+14, so any traveler's local date is
+    within one day of the UTC date. Anchoring to ``utc_today - 1`` therefore
+    never rejects a date that is still today-or-future for the actual traveler.
+    The cost is that a genuinely past date may reach Google, which simply
+    returns no flights — a better failure than refusing a valid search.
+    """
+    return datetime.now(timezone.utc).date() - timedelta(days=1)
 
 
 class SeatType(Enum):
@@ -216,8 +235,10 @@ class LayoverRestrictions(BaseModel):
 class Amenities(BaseModel):
     """Per-leg amenities reported by Google Flights.
 
-    All fields are tri-state (`True`, `False`, or `None` when Google did not
-    publish that signal for the leg).
+    Boolean fields are tri-state (`True`, `False`, or `None` when Google did
+    not publish that signal). ``legroom_rating`` is Google's seat-quality
+    code from ``leg[13]``, or ``None`` when unavailable; it is not an ordered
+    numeric score or the Wi-Fi tier.
     """
 
     wifi: bool | None = None
@@ -373,7 +394,7 @@ class FlightSegment(BaseModel):
     def validate_travel_date(cls, v: str) -> str:
         """Validate that the travel date is not in the past."""
         travel_date = datetime.strptime(v, "%Y-%m-%d").date()
-        if travel_date < datetime.now().date():
+        if travel_date < earliest_searchable_date():
             raise ValueError("Travel date cannot be in the past")
         return v
 

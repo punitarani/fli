@@ -254,6 +254,15 @@ def dates(
             min=1,
         ),
     ] = None,
+    passengers: Annotated[
+        int,
+        typer.Option(
+            "--passengers",
+            "-p",
+            help="Number of adult passengers",
+            min=1,
+        ),
+    ] = 1,
 ):
     """Find the cheapest dates to fly between two airports.
 
@@ -306,6 +315,7 @@ def dates(
             ),
             "sort_by_price": sort_by_price,
             "days": [day.value for day in selected_days],
+            "passengers": passengers,
         }
 
         # Build time restrictions from tuple
@@ -343,7 +353,7 @@ def dates(
         # Create search filters
         filters = DateSearchFilters(
             trip_type=trip_type,
-            passenger_info=PassengerInfo(adults=1),
+            passenger_info=PassengerInfo(adults=passengers),
             flight_segments=segments,
             stops=stops,
             seat_type=seat_type,
