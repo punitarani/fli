@@ -341,6 +341,66 @@ class TestCertificateErrorIsNotRetried:
 
         assert calls["count"] == 3
 
+    def test_bad_ca_bundle_path_raised_from_session_creation_is_attempted_once_on_get(
+        self, monkeypatch
+    ):
+        """Fix round 1 (M1): the *session-creation* shape, not just the request shape.
+
+        The other tests in this class fake ``_session()`` to return a stub
+        whose ``.get``/``.post`` raises a curl-level error — that covers a
+        certificate rejected *during the request*. A bad ``FLI_CA_BUNDLE``
+        path instead makes ``_ca_bundle_from_env()`` raise
+        ``SearchCertificateError`` directly *inside* ``_session()``, before
+        any request is even attempted (see ``Client._session``). Nothing
+        upstream of ``_wrap_request_error``'s
+        ``isinstance(exc, SearchClientError): return exc`` short-circuit
+        cares which of the two raised it, but a regression that moved
+        ``_ca_bundle_from_env()``'s call site outside ``get``/``post``'s
+        ``try`` block (or outside ``_session()`` entirely) would not be
+        caught by the other tests in this class, since they never make
+        ``_session()`` itself raise.
+        """
+        client = Client()
+        monkeypatch.setattr(client._rate_limiter, "acquire", lambda: None)
+
+        calls = {"count": 0}
+
+        def _raise_bad_bundle():
+            calls["count"] += 1
+            raise SearchCertificateError(
+                "FLI_CA_BUNDLE points to a CA bundle path that does not exist "
+                "or is not readable: '/nonexistent/bad-bundle.pem'"
+            )
+
+        monkeypatch.setattr(client, "_session", _raise_bad_bundle)
+
+        with pytest.raises(SearchCertificateError):
+            client.get("https://www.google.com/travel/flights")
+
+        assert calls["count"] == 1
+
+    def test_bad_ca_bundle_path_raised_from_session_creation_is_attempted_once_on_post(
+        self, monkeypatch
+    ):
+        client = Client()
+        monkeypatch.setattr(client._rate_limiter, "acquire", lambda: None)
+
+        calls = {"count": 0}
+
+        def _raise_bad_bundle():
+            calls["count"] += 1
+            raise SearchCertificateError(
+                "FLI_CA_BUNDLE points to a CA bundle path that does not exist "
+                "or is not readable: '/nonexistent/bad-bundle.pem'"
+            )
+
+        monkeypatch.setattr(client, "_session", _raise_bad_bundle)
+
+        with pytest.raises(SearchCertificateError):
+            client.post("https://www.google.com/travel/flights")
+
+        assert calls["count"] == 1
+
     def test_certificate_error_from_post_is_also_attempted_exactly_once(self, monkeypatch):
         client = Client()
         monkeypatch.setattr(client._rate_limiter, "acquire", lambda: None)
