@@ -12,7 +12,7 @@
  *   - wraps low-level errors into the typed {@link SearchClientError} family
  */
 
-import { TokenBucketRateLimiter } from "./concurrency.ts";
+import { sleep, TokenBucketRateLimiter } from "./concurrency.ts";
 import {
   SearchClientError,
   SearchConnectionError,
@@ -162,8 +162,24 @@ export interface ClientResponse {
   ok: boolean;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((res) => setTimeout(res, ms));
+/**
+ * Is this URL served by Google?
+ *
+ * The `SOCS` consent cookie must not ride along to whatever other host a
+ * caller points the client at — Python keeps it in a cookie jar scoped to
+ * `.google.com`, and a header has no such scope of its own. `.google.com`
+ * covers `www.google.com` and `consent.google.com`, which are the two
+ * hosts a search actually touches, and deliberately not `google.co.uk`
+ * (Python's jar does not match it either).
+ */
+function isGoogleHost(url: string): boolean {
+  let hostname: string;
+  try {
+    hostname = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return hostname === "google.com" || hostname.endsWith(".google.com");
 }
 
 function hostFromUrl(url: string): string {
@@ -252,12 +268,13 @@ export class Client {
         }
       }
       const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+      let shouldRetry = false;
       try {
         const init: RequestInit & { proxy?: string } = {
           method,
           headers: {
             ...(method === "GET" ? DEFAULT_GET_HEADERS : DEFAULT_HEADERS),
-            ...this.cookieHeader,
+            ...(isGoogleHost(url) ? this.cookieHeader : {}),
             ...options.headers,
           },
           signal: controller.signal,
@@ -298,16 +315,25 @@ export class Client {
         // For HTTP errors we still respect the retry budget (matches the
         // Python tenacity retry decorator behavior, which retries on any
         // exception).
-        if (attempt < this.retries - 1) {
-          const wait = this.backoffMs * 2 ** attempt;
-          await sleep(wait);
-          continue;
-        }
-        break;
+        if (attempt >= this.retries - 1) break;
+        shouldRetry = true;
       } finally {
         clearTimeout(timer);
         if (abortListener && externalSignal) {
           externalSignal.removeEventListener("abort", abortListener);
+        }
+      }
+
+      // Outside the try/finally on purpose: the per-attempt timeout timer
+      // is cleared first, so a long backoff never sits under an armed
+      // request timeout. The sleep itself is abortable — waiting out a
+      // 4-second backoff after the caller has cancelled, and leaving the
+      // timer running afterwards, is exactly what a cancellation is for.
+      if (shouldRetry) {
+        try {
+          await sleep(this.backoffMs * 2 ** attempt, externalSignal);
+        } catch (abortErr) {
+          throw externalSignal?.reason ?? abortErr;
         }
       }
     }

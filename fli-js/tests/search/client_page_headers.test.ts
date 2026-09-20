@@ -93,6 +93,43 @@ describe("SOCS consent cookie", () => {
     expect(resolveSocsCookie()).toBe(DEFAULT_SOCS_COOKIE);
   });
 
+  test("is not sent to a non-Google host", async () => {
+    // A header has no scope of its own; Python keeps this cookie in a jar
+    // scoped to `.google.com`. Leaking a consent cookie to whatever host
+    // a caller points the client at is nobody's idea of a good default.
+    let headers: Record<string, string> = {};
+    const client = new Client({
+      retries: 1,
+      fetchImpl: asFetch(async (_u, init) => {
+        headers = (init?.headers ?? {}) as Record<string, string>;
+        return new Response("ok", { status: 200 });
+      }),
+    });
+    await client.get("https://evil.example.com/collect");
+    expect(headers.cookie).toBeUndefined();
+    await client.post("https://google.com.evil.example/collect", { body: "" });
+    expect(headers.cookie).toBeUndefined();
+  });
+
+  test("is sent to google.com and its subdomains", async () => {
+    for (const url of [
+      "https://google.com/travel/flights",
+      "https://www.google.com/travel/flights",
+      "https://consent.google.com/m",
+    ]) {
+      let headers: Record<string, string> = {};
+      const client = new Client({
+        retries: 1,
+        fetchImpl: asFetch(async (_u, init) => {
+          headers = (init?.headers ?? {}) as Record<string, string>;
+          return new Response("ok", { status: 200 });
+        }),
+      });
+      await client.get(url);
+      expect(headers.cookie).toBe(`SOCS=${DEFAULT_SOCS_COOKIE}`);
+    }
+  });
+
   test("a caller-supplied cookie header wins", async () => {
     let headers: Record<string, string> = {};
     const client = new Client({
@@ -102,7 +139,7 @@ describe("SOCS consent cookie", () => {
         return new Response("ok", { status: 200 });
       }),
     });
-    await client.get("https://x", { headers: { cookie: "SOCS=mine" } });
+    await client.get("https://www.google.com/x", { headers: { cookie: "SOCS=mine" } });
     expect(headers.cookie).toBe("SOCS=mine");
   });
 });

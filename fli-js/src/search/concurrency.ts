@@ -5,6 +5,41 @@
  */
 
 /**
+ * Sleep for `ms`, giving up promptly if `signal` aborts.
+ *
+ * Both backoffs in this package — the client's retry backoff and the
+ * page-retry backoff — sit between HTTP requests on a path a caller may
+ * cancel. A plain `setTimeout` promise would make the caller wait out a
+ * delay that no longer has any reason to elapse, and would leave the
+ * timer armed after the call had already settled.
+ *
+ * Rejects with the signal's own `reason`, so the caller gets back the
+ * error it aborted with rather than a synthesised one.
+ */
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal == null) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  return new Promise<void>((resolve, reject) => {
+    const abortReason = (): unknown => signal.reason ?? new DOMException("Aborted", "AbortError");
+    if (signal.aborted) {
+      reject(abortReason());
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onAbort = (): void => {
+      if (timer !== undefined) clearTimeout(timer);
+      reject(abortReason());
+    };
+    timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
  * Async token-bucket rate limiter.
  *
  * The bucket starts full (`capacity` tokens) and refills continuously at
