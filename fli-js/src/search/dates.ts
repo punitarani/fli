@@ -12,7 +12,7 @@
  */
 
 import { formatIsoDate, parseIsoDate } from "../core/dates.ts";
-import type { FlightResult } from "../models/google-flights/base.ts";
+import type { FlightResult, PassengerInfo } from "../models/google-flights/base.ts";
 import { TripType } from "../models/google-flights/base.ts";
 import type { DateSearchFilters } from "../models/google-flights/dates.ts";
 import { type Client, getClient } from "./client.ts";
@@ -43,6 +43,29 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const NO_PAYLOAD =
   "the search page carried no ds:1 payload — Google may have changed the " +
   "page shape, or served a consent/blocked page instead";
+
+/**
+ * Same wording `flights.ts` uses for the same condition — see
+ * {@link SPARSE_PASSENGER_MIX_WARNING} there for the live JFK-LHR / SFO-NRT
+ * row counts behind it. Duplicated rather than imported so this module's
+ * empty-result path stays self-contained.
+ */
+export const SPARSE_PASSENGER_MIX_WARNING =
+  "No itineraries were inlined for this passenger mix. Google's search page " +
+  "prices parties with children or infants client-side, so it often carries " +
+  "few or no rows for them — most of all in premium cabins. This does not " +
+  "mean the route has no flights: an adults-only search shows the schedule.";
+
+/**
+ * Whether the party includes anyone Google prices client-side.
+ *
+ * Extra adults ride the request for free; children and infants (lap or
+ * seat) are the passenger types that make the search-page transport inline
+ * fewer — sometimes zero — rows. See {@link SPARSE_PASSENGER_MIX_WARNING}.
+ */
+function hasChildrenOrInfants(passengerInfo: PassengerInfo): boolean {
+  return passengerInfo.children + passengerInfo.infants_on_lap + passengerInfo.infants_in_seat > 0;
+}
 
 /**
  * Most dates a single {@link SearchDates.search} call will price.
@@ -328,7 +351,37 @@ export class SearchDates {
     // not what happened.
     throwIfAborted(options.signal);
 
-    return SearchDates._collect(outcomes, tasks.length, health.skipped);
+    const result = SearchDates._collect(outcomes, tasks.length, health.skipped);
+    SearchDates._warnIfSparsePassengerMix(outcomes, result, filters.passenger_info);
+    return result;
+  }
+
+  /**
+   * Warn once when an empty sweep may be Google's pricing gap, not a dead range.
+   *
+   * `_collect` already turns "every attempted date failed" or a tripped
+   * breaker into a throw, and a minority of load failures into its own
+   * summary warning (see its docstring) — so this only has something to add
+   * when nothing priced *and* not one attempted date failed to load: every
+   * page that loaded simply had no flights. For a party with children or
+   * infants that is the shape Google's client-side pricing produces, not
+   * evidence the route has no service.
+   *
+   * Internal — underscore-prefixed rather than private, mirroring
+   * {@link SearchDates._collect}, so tests can drive it with a fixed set of
+   * outcomes instead of racing a real sweep's per-date failure logging into
+   * the state they want to assert.
+   */
+  static _warnIfSparsePassengerMix(
+    outcomes: DateOutcome[],
+    result: DatePrice[] | null,
+    passengerInfo: PassengerInfo,
+  ): void {
+    if (result != null) return;
+    if (outcomes.some((o) => o.attempted && o.failure != null)) return;
+    if (hasChildrenOrInfants(passengerInfo)) {
+      getSearchLogger().warn(SPARSE_PASSENGER_MIX_WARNING);
+    }
   }
 
   /** List every date in one chunk's `from_date`..`to_date` range. */

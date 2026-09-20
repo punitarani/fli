@@ -11,7 +11,7 @@
  */
 
 import type { GoogleFlightsUrlOptions } from "../core/links.ts";
-import type { BookingOption, FlightResult } from "../models/google-flights/base.ts";
+import type { BookingOption, FlightResult, PassengerInfo } from "../models/google-flights/base.ts";
 import { SeatType, SortBy, TripType } from "../models/google-flights/base.ts";
 import type { FlightSearchFilters } from "../models/google-flights/flights.ts";
 import { type Client, getClient } from "./client.ts";
@@ -30,6 +30,31 @@ import {
 } from "./tfs.ts";
 import { withLocaleParams } from "./urls.ts";
 import { iterWrbChunks } from "./wire.ts";
+
+/**
+ * Google inlines fewer rows — in premium cabins often none — for parties
+ * with children or infants, because those fares are priced client-side
+ * through the gated RPC this transport cannot reach; extra adults cost
+ * nothing. Measured live 2026-09-20: JFK-LHR economy held 23 rows for one
+ * adult and 16 with a lap infant; SFO-NRT business held 9 for one or two
+ * adults and 0 with a child.
+ */
+export const SPARSE_PASSENGER_MIX_WARNING =
+  "No itineraries were inlined for this passenger mix. Google's search page " +
+  "prices parties with children or infants client-side, so it often carries " +
+  "few or no rows for them — most of all in premium cabins. This does not " +
+  "mean the route has no flights: an adults-only search shows the schedule.";
+
+/**
+ * Whether the party includes anyone Google prices client-side.
+ *
+ * Extra adults ride the request for free; children and infants (lap or
+ * seat) are the passenger types that make the search-page transport inline
+ * fewer — sometimes zero — rows. See {@link SPARSE_PASSENGER_MIX_WARNING}.
+ */
+function hasChildrenOrInfants(passengerInfo: PassengerInfo): boolean {
+  return passengerInfo.children + passengerInfo.infants_on_lap + passengerInfo.infants_in_seat > 0;
+}
 
 /**
  * Result ordering for `sortBy`.
@@ -142,15 +167,35 @@ export class SearchFlights {
       captureSession: true,
       signal: options.signal,
     });
-    if (flights == null) return null;
+    if (flights == null) {
+      this._warnIfSparsePassengerMix(filters);
+      return null;
+    }
     if (filters.trip_type === TripType.ONE_WAY) return flights;
-    return this._expandMultiLeg(flights, filters, {
+    const combos = await this._expandMultiLeg(flights, filters, {
       topN,
       currency: options.currency ?? null,
       language: options.language ?? null,
       country: options.country ?? null,
       signal: options.signal,
     });
+    if (combos.length === 0) this._warnIfSparsePassengerMix(filters);
+    return combos;
+  }
+
+  /**
+   * Warn once when an empty result may be Google's pricing gap, not a dead route.
+   *
+   * Called only from {@link SearchFlights.search}, after the trip's final
+   * result is known to be empty — never from {@link SearchFlights._fetchFlights},
+   * which the round-trip expansion calls once per candidate outbound. That
+   * keeps this to exactly one warning per `search` call, one-way or
+   * round-trip alike.
+   */
+  private _warnIfSparsePassengerMix(filters: FlightSearchFilters): void {
+    if (hasChildrenOrInfants(filters.passenger_info)) {
+      getSearchLogger().warn(SPARSE_PASSENGER_MIX_WARNING);
+    }
   }
 
   private async _fetchFlights(
