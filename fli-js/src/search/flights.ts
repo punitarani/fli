@@ -6,7 +6,7 @@
 
 import type { GoogleFlightsUrlOptions } from "../core/links.ts";
 import type { BookingOption, FlightResult } from "../models/google-flights/base.ts";
-import { TripType } from "../models/google-flights/base.ts";
+import { SeatType, TripType } from "../models/google-flights/base.ts";
 import { FlightSearchFilters } from "../models/google-flights/flights.ts";
 import { type Client, getClient } from "./client.ts";
 import { parallelMap } from "./concurrency.ts";
@@ -31,8 +31,11 @@ export interface BookingOptions {
   sessionId?: string | null;
 }
 
-/** Locale knobs for {@link SearchFlights.buildFlightBookingUrl} (alias of the core options). */
-export type BookingUrlOptions = GoogleFlightsUrlOptions;
+/** Locale knobs plus cabin class for {@link SearchFlights.buildFlightBookingUrl}. */
+export interface BookingUrlOptions extends GoogleFlightsUrlOptions {
+  /** Cabin class encoded into the `tfs` token (field 9). Defaults to economy. */
+  seatType?: SeatType;
+}
 
 export class SearchFlights {
   static readonly BASE_URL =
@@ -251,7 +254,7 @@ export class SearchFlights {
           flightNumber: leg.flight_number,
         })),
       );
-      const tfs = buildTfsToken(segments, { isOneWay });
+      const tfs = buildTfsToken(segments, { isOneWay, seat: options.seatType ?? SeatType.ECONOMY });
       url = `https://www.google.com/travel/flights/booking?tfs=${tfs}`;
     } catch {
       url = "https://www.google.com/travel/flights";
