@@ -47,6 +47,7 @@ from fli.models import (
 )
 from fli.search import SearchDates, SearchFlights
 from fli.search.dates import MAX_DATES_PER_SEARCH
+from fli.search.flights import SPARSE_PASSENGER_MIX_WARNING
 
 
 class FlightSearchConfig(BaseSettings):
@@ -725,13 +726,21 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
         )
 
         if not flights:
-            return {
+            response: dict[str, Any] = {
                 "success": True,
                 "flights": [],
                 "count": 0,
                 "trip_type": trip_type.name,
                 "booking_url": booking_url,
             }
+            # Same condition the library warns on: an empty result for a
+            # party with children or infants often reflects Google's
+            # client-side pricing gap, not a route with no service — see
+            # SPARSE_PASSENGER_MIX_WARNING. Adults-only parties never get
+            # this key.
+            if params.children + params.infants_in_seat + params.infants_on_lap > 0:
+                response["note"] = SPARSE_PASSENGER_MIX_WARNING
+            return response
 
         # Serialize results; attach per-flight deep-link booking URL.
         is_round_trip = trip_type == TripType.ROUND_TRIP

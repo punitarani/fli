@@ -24,6 +24,7 @@ from fli.mcp.server import (
     _serialize_flight_leg,
     _serialize_layover,
 )
+from fli.search.flights import SPARSE_PASSENGER_MIX_WARNING
 
 # The tool calls below pass fixed travel dates; pin the models' clock so they
 # stay in the future no matter when the suite runs.
@@ -533,6 +534,55 @@ class TestSearchReturnsBookingUrl:
         result = _execute_flight_search(params)
         assert result["count"] == 0
         assert "booking_url" in result
+
+
+class TestEmptyResultSparsePassengerMixNote:
+    """An empty result for children/infants isn't necessarily "no flights".
+
+    Google's search page inlines fewer (sometimes zero) rows for those
+    parties — see ``SPARSE_PASSENGER_MIX_WARNING`` in ``fli.search.flights``.
+    The MCP response carries the same explanation as a ``note`` key so an
+    agent relays it instead of "no flights exist".
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_flights(self, monkeypatch):
+        monkeypatch.setattr("fli.mcp.server.SearchFlights.search", lambda self, *a, **k: None)
+
+    def test_empty_with_infant_carries_a_note(self):
+        params = FlightSearchParams(
+            origin="JFK", destination="LHR", departure_date="2026-12-01", infants_on_lap=1
+        )
+        result = _execute_flight_search(params)
+        assert result["count"] == 0
+        assert result["note"] == SPARSE_PASSENGER_MIX_WARNING
+
+    def test_empty_with_child_carries_a_note(self):
+        params = FlightSearchParams(
+            origin="JFK", destination="LHR", departure_date="2026-12-01", passengers=2, children=1
+        )
+        result = _execute_flight_search(params)
+        assert result["count"] == 0
+        assert result["note"] == SPARSE_PASSENGER_MIX_WARNING
+
+    def test_empty_adults_only_has_no_note_key(self):
+        params = FlightSearchParams(origin="JFK", destination="LHR", departure_date="2026-12-01")
+        result = _execute_flight_search(params)
+        assert result["count"] == 0
+        assert "note" not in result
+
+    def test_non_empty_with_infant_has_no_note_key(self, monkeypatch):
+        flight = _make_bookable_flight()
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.search",
+            lambda self, *a, **k: [flight],
+        )
+        params = FlightSearchParams(
+            origin="JFK", destination="LHR", departure_date="2026-12-01", infants_in_seat=1
+        )
+        result = _execute_flight_search(params)
+        assert result["count"] == 1
+        assert "note" not in result
 
 
 class TestExecuteBookingOptions:
