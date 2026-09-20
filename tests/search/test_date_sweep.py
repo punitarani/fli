@@ -721,3 +721,120 @@ class TestSweepCircuitBreaker:
         with pytest.raises(SearchParseError) as excinfo:
             _search_with(client).search(_filters(days=40))
         assert "of 40 dates" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# A sweep that mostly failed to load must not read as "no flights" (T20)
+# ---------------------------------------------------------------------------
+
+
+class TestMostlyFailedSweepIsLoud:
+    """The breaker cannot catch "1 loaded, 29 timeouts" — it disarms for good
+    the moment any page loads, empty or not. If nothing priced and at least
+    half the attempted dates never made it to a page, that is raised too.
+    """  # noqa: D205
+
+    def _timeout(self) -> dates_module._DateOutcome:
+        return dates_module._DateOutcome(
+            failure="SearchConnectionError: connection refused",
+            error=SearchConnectionError("connection refused"),
+        )
+
+    def test_mostly_timeouts_around_one_loaded_empty_date_raises(self):
+        outcomes = [dates_module._DateOutcome(), *[self._timeout() for _ in range(29)]]
+        with pytest.raises(SearchClientError) as excinfo:
+            dates_module.SearchDates._collect(outcomes, 30, skipped=0)
+        assert not isinstance(excinfo.value, SearchParseError)
+        message = str(excinfo.value)
+        assert "Priced 0 of 30" in message, message
+        assert "29 of the 30" in message, message
+        assert "FLI_SOCS_COOKIE" not in message, message
+        assert isinstance(excinfo.value.__cause__, SearchConnectionError)
+
+    def test_mostly_no_payload_failures_raise_search_parse_error(self):
+        outcomes = [
+            dates_module._DateOutcome(),
+            *[dates_module._DateOutcome(failure=dates_module._NO_PAYLOAD) for _ in range(3)],
+        ]
+        with pytest.raises(SearchParseError) as excinfo:
+            dates_module.SearchDates._collect(outcomes, 4, skipped=0)
+        assert "FLI_SOCS_COOKIE" not in str(excinfo.value)
+
+    def test_tie_between_loaded_and_failed_raises(self):
+        outcomes = [dates_module._DateOutcome(), self._timeout()]
+        with pytest.raises(SearchClientError):
+            dates_module.SearchDates._collect(outcomes, 2, skipped=0)
+
+    def test_minority_failures_with_no_results_return_none_and_warn_once(self, caplog):
+        outcomes = [
+            dates_module._DateOutcome(),
+            dates_module._DateOutcome(),
+            dates_module._DateOutcome(),
+            self._timeout(),
+        ]
+        with caplog.at_level(logging.WARNING, logger="fli.search.dates"):
+            results = dates_module.SearchDates._collect(outcomes, 4, skipped=0)
+        assert results is None
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1, f"expected exactly one warning, got {len(warnings)}"
+        message = warnings[0].getMessage()
+        assert "3" in message and "loaded" in message, message
+        assert "1 of 4" in message, message
+
+    def test_partial_results_with_a_minority_failure_warns_once(self, caplog):
+        priced_a = dates_module.DatePrice(date=(FIRST_DAY,), price=100.0, currency="USD")
+        priced_b = dates_module.DatePrice(
+            date=(FIRST_DAY + timedelta(days=1),), price=200.0, currency="USD"
+        )
+        outcomes = [
+            dates_module._DateOutcome(price=priced_a),
+            dates_module._DateOutcome(price=priced_b),
+            self._timeout(),
+        ]
+        with caplog.at_level(logging.WARNING, logger="fli.search.dates"):
+            results = dates_module.SearchDates._collect(outcomes, 3, skipped=0)
+        assert results == [priced_a, priced_b]
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1, f"expected exactly one warning, got {len(warnings)}"
+        assert "2 of 3" in warnings[0].getMessage(), warnings[0].getMessage()
+
+    def test_partial_results_with_a_tripped_breaker_still_warns_once(self, caplog):
+        priced = dates_module.DatePrice(date=(FIRST_DAY,), price=100.0, currency="USD")
+        outcomes = [
+            dates_module._DateOutcome(price=priced),
+            *[dates_module._DateOutcome(failure=dates_module._NO_PAYLOAD) for _ in range(5)],
+            *[dates_module._DateOutcome(attempted=False) for _ in range(24)],
+        ]
+        with caplog.at_level(logging.WARNING, logger="fli.search.dates"):
+            results = dates_module.SearchDates._collect(outcomes, 30, skipped=24)
+        assert results == [priced]
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1, f"expected exactly one warning, got {len(warnings)}"
+
+    def test_all_loaded_empty_returns_none_with_no_warnings(self, caplog):
+        outcomes = [dates_module._DateOutcome() for _ in range(5)]
+        with caplog.at_level(logging.WARNING, logger="fli.search.dates"):
+            results = dates_module.SearchDates._collect(outcomes, 5, skipped=0)
+        assert results is None
+        assert not [r for r in caplog.records if r.levelno == logging.WARNING]
+
+    def test_all_priced_returns_list_with_no_warnings(self, caplog):
+        prices = [
+            dates_module.DatePrice(date=(FIRST_DAY + timedelta(days=i),), price=100.0 + i)
+            for i in range(5)
+        ]
+        outcomes = [dates_module._DateOutcome(price=p) for p in prices]
+        with caplog.at_level(logging.WARNING, logger="fli.search.dates"):
+            results = dates_module.SearchDates._collect(outcomes, 5, skipped=0)
+        assert results == prices
+        assert not [r for r in caplog.records if r.levelno == logging.WARNING]
+
+    def test_not_attempted_dates_do_not_count_towards_the_arithmetic(self):
+        """5 past dates + 1 loaded-empty + 1 failed must behave as the tie case."""
+        outcomes = [
+            *[dates_module._DateOutcome(attempted=False) for _ in range(5)],
+            dates_module._DateOutcome(),
+            self._timeout(),
+        ]
+        with pytest.raises(SearchClientError):
+            dates_module.SearchDates._collect(outcomes, 7, skipped=0)
