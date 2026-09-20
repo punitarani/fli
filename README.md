@@ -206,6 +206,11 @@ What that means in practice:
   interstitial, which serves no `ds:1` blob. The client sends a pre-accepted
   `SOCS` consent cookie by default; set `FLI_SOCS_COOKIE` to change the value,
   or to an empty string to send none.
+* **`FLI_CA_BUNDLE` / `CURL_CA_BUNDLE` / `REQUESTS_CA_BUNDLE`.** Behind a
+  TLS-intercepting corporate proxy, set one of these (checked in that order)
+  to a PEM CA bundle path. A bad or missing path, or a certificate the bundle
+  doesn't cover, raises `SearchCertificateError` naming the variable — the
+  client does not retry it, since a fixed bundle either verifies or it doesn't.
 
 ## CLI Usage
 
