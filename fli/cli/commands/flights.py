@@ -316,8 +316,9 @@ def _search_flights_core(
         # or a genuine AttributeError from an unrelated bug elsewhere in the
         # call stack -> classify_error's unexpected_error bucket, since it
         # isn't a recognized search-client or input-validation failure.
-        # T10 fix round 2, maintainer ruling U1: previously hardcoded
-        # "search_error" for both — see the report's "Behaviour changes".
+        # Previously hardcoded "search_error" for both; now routed through
+        # classify_error (#248) so the JSON error_type matches what MCP
+        # reports for the same input.
         if output_format == OutputFormat.JSON:
             emit_json(
                 build_json_error_response(

@@ -106,8 +106,8 @@ def report_cli_error(
 class JsonErrorPayload:
     """Everything a CLI ``--format json`` error path needs, from one classification.
 
-    A named structure (rather than a positional tuple) on purpose: T10 fix
-    round 2 added ``retryable``/``http_status`` alongside the original
+    A named structure (rather than a positional tuple) on purpose:
+    ``retryable``/``http_status`` were added alongside the original
     ``message``/``error_type``/``log_path`` triple, and a wider tuple would
     have made every call site's unpacking order a silent trap. Use
     attribute access (``payload.error_type``, ...) at call sites.
@@ -123,8 +123,8 @@ class JsonErrorPayload:
 def json_error_payload(exc: BaseException, *, command: str | None = None) -> JsonErrorPayload:
     """Return the classified JSON-mode error payload for ``exc``.
 
-    ``error_type`` (and, since T10 fix round 2, ``retryable``/``http_status``)
-    come from the shared :func:`fli.core.errors.classify_error` classifier —
+    ``error_type`` (and ``retryable``/``http_status``) come from the
+    shared :func:`fli.core.errors.classify_error` classifier —
     the same one ``fli.mcp.server`` uses for MCP tool error responses — so a
     CLI ``--format json`` error and an MCP error for the same exception
     always agree. See that module's docstring for the full vocabulary table

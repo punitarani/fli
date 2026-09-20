@@ -64,29 +64,29 @@ def test_write_log_creates_file_with_traceback(tmp_path):
     "exc, expected_type, expected_retryable",
     [
         # Released values (shipped before the shared classifier existed) —
-        # must stay exactly as they are; see fli/core/errors.py and the
-        # T10 fix round 2 report's "Behaviour changes" section.
+        # must stay exactly as they are; see fli/core/errors.py's
+        # vocabulary table.
         (SearchTimeoutError("timed out"), "timeout", True),
         (SearchConnectionError("dns"), "connection_error", True),
-        # Carried forward from PR #164 (T23): a SearchConnectionError
+        # Carried forward from PR #164: a SearchConnectionError
         # subclass, but deterministic — not retryable, unlike its parent.
         (SearchCertificateError("bad cert"), "certificate_error", False),
         (SearchHTTPError("403", status_code=403), "http_error", False),
         (SearchClientError("generic"), "search_error", False),
         (RuntimeError("boom"), "unexpected_error", False),
-        # Gained from the shared fli.core.errors.classify_error classifier
-        # (T10 fix round 1, maintainer ruling V1) — the CLI didn't
-        # distinguish these from "search_error"/"unexpected_error" before.
+        # Gained from the shared fli.core.errors.classify_error classifier —
+        # the CLI didn't distinguish these from
+        # "search_error"/"unexpected_error" before.
         (SearchRejectedError(13), "rejected_error", False),
         (SearchUnsupportedError("multi-city"), "unsupported_error", False),
         (SearchParseError("no ds:1 payload"), "parse_error", False),
         (ParseError("unknown airport code 'ZZZ'"), "validation_error", False),
-        # T10 fix round 2, maintainer ruling U1: these two used to hit the
-        # CLI commands' hand-rolled `except (AttributeError, ValueError)`
-        # block and get hardcoded "search_error". Routed through the shared
-        # classifier here now covers json_error_payload itself; the command
-        # files' own except blocks are covered in tests/cli/test_flights.py
-        # and tests/cli/test_dates.py.
+        # These two used to hit the CLI commands' hand-rolled
+        # `except (AttributeError, ValueError)` block and get hardcoded
+        # "search_error". Routed through the shared classifier here now
+        # covers json_error_payload itself; the command files' own except
+        # blocks are covered in tests/cli/test_flights.py and
+        # tests/cli/test_dates.py.
         (ValueError("bad date range"), "validation_error", False),
         (AttributeError("'NoneType' object has no attribute 'name'"), "unexpected_error", False),
     ],

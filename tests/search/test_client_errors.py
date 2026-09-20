@@ -25,7 +25,7 @@ def _clean_ca_bundle_env(monkeypatch):
     variable(s) they care about — this fixture only guarantees no ambient
     value (e.g. a developer's own ``REQUESTS_CA_BUNDLE``) leaks in.
 
-    Fix round 1 (C1) added an equivalent autouse fixture to
+    An equivalent autouse fixture was later added to
     ``tests/conftest.py`` that clears the same three variables for the
     *whole* suite, which makes the delenv calls here mechanically
     redundant. Kept anyway, deliberately: this file's entire subject is
@@ -344,7 +344,7 @@ class TestCertificateErrorIsNotRetried:
     def test_bad_ca_bundle_path_raised_from_session_creation_is_attempted_once_on_get(
         self, monkeypatch
     ):
-        """Fix round 1 (M1): the *session-creation* shape, not just the request shape.
+        """The *session-creation* shape, not just the request shape.
 
         The other tests in this class fake ``_session()`` to return a stub
         whose ``.get``/``.post`` raises a curl-level error — that covers a

@@ -1,6 +1,5 @@
 """CLI `--format json` and MCP tools must agree on `error_type` for every exception.
 
-T10 fix round 1, maintainer ruling V1: a review found
 ``fli.cli.errors.json_error_payload`` already emitted an ``error_type``
 field for the same exceptions with a *different* vocabulary than the
 MCP tools' first cut. Both now build on the single shared
@@ -19,17 +18,17 @@ The ``SearchClientError`` subclass coverage reuses the same
 — a new subclass shows up in the parametrize list automatically and fails
 here until ``_INSTANCES`` is updated for it, same as it does there.
 
-T10 fix round 2, maintainer ruling U3: ``TestCliCommandAndMcpToolAgreeOnErrorType``
-below extends this to the COMMAND level — a real ``CliRunner`` invocation
-of ``fli flights`` / ``fli dates --format json`` compared against the
-matching MCP tool executor for the same input. This is the layer where
-round 1's parity test could not have caught U1 (the CLI commands'
+``TestCliCommandAndMcpToolAgreeOnErrorType`` below extends this to the
+COMMAND level — a real ``CliRunner`` invocation of ``fli flights`` /
+``fli dates --format json`` compared against the matching MCP tool
+executor for the same input. This is the layer where the classifier-level
+parity test above could not have caught the CLI commands'
 ``except (AttributeError, ValueError)`` blocks hardcoding
 ``error_type="search_error"`` independently of ``json_error_payload``,
-which they never called for that branch).
+which they never called for that branch.
 
-T10 fix round 3: every date below is computed relative to
-``datetime.now()`` at test-run time — no fixed pinned clock, no hardcoded
+Every date below is computed relative to ``datetime.now()`` at test-run
+time — no fixed pinned clock, no hardcoded
 absolute dates. The original version of this file paired a hardcoded
 ``PINNED_TODAY = "2026-01-01"`` clock with a hardcoded
 ``"2026-02-01"``/``"2026-12-01"`` date-range in
@@ -117,7 +116,7 @@ _INSTANCES: dict[type, BaseException] = {
     ValueError: ValueError("bad date range"),
     ValidationError: _pydantic_validation_error(),
     Exception: Exception("totally unclassified"),
-    # Carried forward from PR #164 (T23): a SearchConnectionError subclass,
+    # Carried forward from PR #164: a SearchConnectionError subclass,
     # but deterministic for a fixed CA bundle — checked separately so CLI
     # and MCP agree it is certificate_error/not-retryable, not the parent's
     # connection_error/retryable.
@@ -161,7 +160,7 @@ def test_cli_and_mcp_agree_on_error_type(exc, monkeypatch):
 
 
 class TestCliCommandAndMcpToolAgreeOnErrorType:
-    """Command-level parity (U3): a real CliRunner invocation vs. the MCP executor.
+    """Command-level parity: a real CliRunner invocation vs. the MCP executor.
 
     ``fli.mcp.server.SearchFlights`` / ``SearchDates`` and
     ``fli.cli.commands.flights`` / ``dates``' ``SearchFlights`` / ``SearchDates``
@@ -194,10 +193,11 @@ class TestCliCommandAndMcpToolAgreeOnErrorType:
     def test_date_range_over_93_day_cap(self, runner):
         """A >93-date range: bare ValueError -> validation_error on both surfaces.
 
-        This is exactly the U1 regression: the CLI's dates command used to
-        hardcode "search_error" for this bare ValueError while the MCP tool
-        already said "validation_error" — the drift this whole task exists
-        to prevent, and the one round 1's parity test (which only compared
+        This is exactly the regression the file-level docstring describes:
+        the CLI's dates command used to hardcode "search_error" for this
+        bare ValueError while the MCP tool already said "validation_error"
+        — the drift this whole file exists to prevent, and the
+        classifier-level parity test above (which only compared
         json_error_payload against the MCP executor, not the full CLI
         command) could not catch.
 
@@ -205,12 +205,12 @@ class TestCliCommandAndMcpToolAgreeOnErrorType:
         150 days wide — comfortably over the 93-date cap regardless of what
         day this runs. The message assertions are the important part: they
         prove this hit SearchDates.search()'s cap ValueError specifically
-        (the except (AttributeError, ValueError) block — the actual U1 fix
+        (the except (AttributeError, ValueError) block — the actual fix
         site), not some other validation_error path (e.g. a pydantic "date
         in the past" check, which is a *different* except block that was
         never broken and would give the same top-level error_type while
-        testing nothing about U1). A round 3 fix: the original version of
-        this test used hardcoded "2026-02-01"/"2026-12-01" dates that only
+        testing nothing about the regression this guards against). The
+        original version of this test used hardcoded "2026-02-01"/"2026-12-01" dates that only
         stayed in that intended future window because of a matching
         hardcoded pinned clock — a pairing that, if either side ever drifts
         independently, silently starts hitting the "in the past" branch
@@ -258,7 +258,7 @@ class TestCliCommandAndMcpToolAgreeOnErrorType:
         assert "in the past" not in mcp_result["error"]
 
     def test_top_n_out_of_range(self, runner):
-        """T12 (issue #142): top_n outside 1-10 -> bare ValueError -> validation_error.
+        """Issue #142: top_n outside 1-10 -> bare ValueError -> validation_error.
 
         ``SearchFlights.search``'s own bound check (``fli/search/flights.py``)
         raises before any network call, so both the real CLI command and the
@@ -299,7 +299,7 @@ class TestCliCommandAndMcpToolAgreeOnErrorType:
         assert mcp_result["success"] is False
         assert cli_payload["error"]["type"] == mcp_result["error_type"] == "validation_error"
         assert cli_payload["error"]["retryable"] == mcp_result["retryable"] is False
-        # Specific bound wording, not a bare "top_n" substring (fix round 1, I1 audit).
+        # Specific bound wording, not a bare "top_n" substring.
         assert "between 1 and 10" in cli_payload["error"]["message"]
         assert "between 1 and 10" in mcp_result["error"]
 

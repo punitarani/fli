@@ -349,8 +349,8 @@ def test_flights_json_stubbed_blocked_page(runner, mock_search_flights, mock_con
         # Released v0.9.0 CLI --format json values — must not move.
         pytest.param(SearchTimeoutError("slow"), "timeout", True, id="timeout"),
         pytest.param(SearchConnectionError("no route"), "connection_error", True, id="connection"),
-        # Fix round 1 (I3): certificate_error is a SearchConnectionError
-        # subclass but, unlike its parent, deterministic — not retryable.
+        # certificate_error is a SearchConnectionError subclass but, unlike
+        # its parent, deterministic — not retryable.
         pytest.param(
             SearchCertificateError("bad cert"), "certificate_error", False, id="certificate"
         ),
@@ -359,9 +359,8 @@ def test_flights_json_stubbed_blocked_page(runner, mock_search_flights, mock_con
             SearchClientError("generic"), "search_error", False, id="generic-search-error"
         ),
         pytest.param(RuntimeError("bug"), "unexpected_error", False, id="unexpected"),
-        # Gained in T10 fix round 2 (U1): a bare ValueError used to be
-        # hardcoded to "search_error" by the CLI's
-        # except (AttributeError, ValueError) block — now validation_error.
+        # A bare ValueError used to be hardcoded to "search_error" by the
+        # CLI's except (AttributeError, ValueError) block — now validation_error.
         pytest.param(ValueError("simulated bug"), "validation_error", False, id="bare-value-error"),
         # A bare AttributeError isn't a SearchClientError or an
         # input-validation failure, so the shared classifier calls it

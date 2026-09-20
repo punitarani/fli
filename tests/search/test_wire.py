@@ -250,7 +250,7 @@ def _sparse_boundary_chunks(count: int, spacing: int | None = None) -> str:
     The same hazard with several regions instead of one. ``spacing``
     defaults to a third of the body so the *regions* grow with it: at a
     fixed spacing the per-chunk copy is only a constant factor (the
-    re-reviewer measured 1.2x at 1000 chunks per region, 2.2x at 5000),
+    measured 1.2x at 1000 chunks per region, 2.2x at 5000),
     which no ratio test can see. Only a region that grows with the body
     turns it back into a curve.
     """
@@ -486,7 +486,7 @@ class TestScalesLinearlyOnEveryBodyShape:
         # A failed decode must cost O(chunk), not O(offset-into-the-body):
         # ``JSONDecodeError.__init__`` counts the newlines before the error
         # position, so handing it the whole document once per bad chunk is
-        # quadratic too. Measured at ~4x per doubling before round 1.
+        # quadratic too. Measured at ~4x per doubling before this fix.
         _assert_scales_linearly(_malformed_chunks, (4_000, 8_000, 16_000), "header-framed garbage")
 
     def test_crlf_framed_valid_chunks(self):
