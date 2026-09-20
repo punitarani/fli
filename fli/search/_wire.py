@@ -49,19 +49,28 @@ _PREFIX = ")]}'"
 # around it. Skipped wholesale — the header's value is never trusted.
 _FRAMING_CHARS = "0123456789 \t\r\n"
 
-# A chunk boundary in the raw stream: newline, decimal length header,
-# newline, then the "[" that opens the next chunk.
+# A chunk boundary in the raw stream: line break, decimal length header,
+# line break, then the "[" that opens the next chunk. CRLF is accepted so
+# a CRLF-framed body gets the same bounded decode as an LF-framed one —
+# but only as the trailing ``\r?``. A CRLF ends in "\n", so anchoring the
+# pattern on a literal "\n" still matches "\r\n<digits>\r\n[" (one
+# character later, which only leaves the "\r" in the window as trailing
+# whitespace the decoder ignores) while keeping the engine's literal-prefix
+# scan. Spelling the first break "\r?\n" instead costs it: a 20 MB body
+# went from 61 ms to 172 ms purely on that.
 #
 # This pattern cannot occur inside a well-formed JSON document, so the
-# next match is always at or after the current chunk's end. A raw newline
-# is illegal inside a JSON string (it has to be escaped), so the digits
-# would have to be a number token sitting between two newlines — and a
-# number immediately followed by "[" with only whitespace between them is
-# not valid JSON in any container. That makes the match position a safe
+# next match is always at or after the current chunk's end. CR and LF are
+# both illegal unescaped inside a JSON string, so the digits would have to
+# be a number token surrounded by whitespace — and a number followed by
+# "[" with only whitespace between them is not valid JSON in any container
+# (an array needs a comma, an object a comma or colon, and a top-level
+# document ends after its one value). That makes the match position a safe
 # upper bound for where the current chunk ends, which is what lets the
 # decode below work on a bounded window. Only the header's *position* is
 # used; its value is still never trusted.
-_CHUNK_BOUNDARY = re.compile(r"\n\d+\n(?=\[)")
+# ``TestChunkBoundaryCannotSplitAValue`` enumerates the claim.
+_CHUNK_BOUNDARY = re.compile(r"\n\d+\r?\n(?=\[)")
 
 # Error details are echoed into the exception message, so cap them.
 _MAX_DETAIL_CHARS = 200
@@ -123,6 +132,9 @@ def iter_wrb_chunks(body: str | bytes) -> Iterator[Any]:
     yielded = 0
     cursor = 0
     size = len(text)
+    # Lookahead state, carried across chunks on purpose — see below.
+    boundary: re.Match[str] | None = None
+    no_more_boundaries = False
     while cursor < size:
         while cursor < size and text[cursor] in _FRAMING_CHARS:
             cursor += 1
@@ -134,7 +146,19 @@ def iter_wrb_chunks(body: str | bytes) -> Iterator[Any]:
         # counts the newlines before the error position — O(offset) over
         # whatever string it was handed. Passing the full body made a stream
         # of bad chunks quadratic; a window keeps every failure O(chunk).
-        boundary = _CHUNK_BOUNDARY.search(text, cursor)
+        #
+        # The lookahead is cached because boundaries only move forward. A
+        # match found for an earlier cursor is still the next one until the
+        # cursor passes it (there can be nothing between them, or the search
+        # would have returned that instead), and once a search comes back
+        # empty there is nothing ahead to find again. Without both, a body
+        # that has no boundary at all — CRLF framing, or chunks written back
+        # to back with no headers — pays a scan to the end of the document
+        # once per chunk, which is the same O(n^2) in a different place.
+        if not no_more_boundaries and (boundary is None or boundary.start() < cursor):
+            boundary = _CHUNK_BOUNDARY.search(text, cursor)
+            no_more_boundaries = boundary is None
+
         if boundary is None:
             window, start, offset = text, cursor, 0
         else:

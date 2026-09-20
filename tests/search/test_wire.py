@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from fli.search._wire import iter_wrb_chunks, parse_first_wrb_payload
+from fli.search._wire import _CHUNK_BOUNDARY, iter_wrb_chunks, parse_first_wrb_payload
 from fli.search.exceptions import SearchRejectedError
 
 
@@ -205,6 +205,37 @@ def _malformed_chunks(count: int) -> str:
     return "".join(parts)
 
 
+def _crlf_framed_chunks(count: int) -> str:
+    """Build valid chunks framed with CRLF headers.
+
+    The boundary pattern is newline-based, so a CRLF body carries no
+    boundary the reader can find — which is exactly the shape that must
+    not degrade into a per-chunk scan to the end of the document.
+    """
+    parts = [")]}'\r\n\r\n"]
+    for index in range(count):
+        chunk = json.dumps([_payload_row([index])], separators=(",", ":"))
+        parts.append(f"{len(chunk) + 2}\r\n{chunk}\r\n")
+    return "".join(parts)
+
+
+def _back_to_back_chunks(count: int) -> str:
+    """Build valid chunks with no length headers and nothing between them."""
+    parts = [")]}'\n\n"]
+    parts.extend(
+        json.dumps([_payload_row([index])], separators=(",", ":")) for index in range(count)
+    )
+    return "".join(parts)
+
+
+def _newline_separated_chunks(count: int) -> str:
+    """Build valid chunks with no length headers, one newline between them."""
+    body = "\n".join(
+        json.dumps([_payload_row([index])], separators=(",", ":")) for index in range(count)
+    )
+    return ")]}'\n\n" + body
+
+
 def _sized_body(megabytes: float) -> str:
     """Build a valid two-chunk body of roughly ``megabytes`` characters."""
     # ~37 characters per element, so the row count sets the size directly.
@@ -222,17 +253,33 @@ def _elapsed_over_body(body: str, repeats: int = 3) -> float:
     return best
 
 
-def _elapsed_over_malformed_chunks(count: int) -> float:
-    """Time a full read of a body made of ``count`` undecodable chunks."""
-    # Logging is the other per-bad-chunk cost; silence it so the timing
-    # measures the reader rather than the handler attached to the root.
+def _elapsed_quietly(body: str) -> float:
+    """Time a full read of ``body`` with this module's logger silenced.
+
+    Logging is a per-bad-chunk cost of its own; silencing it keeps a
+    timing measurement about the reader rather than about whatever
+    handler happens to be attached to the root logger.
+    """
     logger = logging.getLogger("fli.search._wire")
     previous = logger.level
     logger.setLevel(logging.CRITICAL)
     try:
-        return _elapsed_over_body(_malformed_chunks(count))
+        return _elapsed_over_body(body)
     finally:
         logger.setLevel(previous)
+
+
+def _assert_scales_linearly(shape, sizes: tuple[int, int, int], label: str) -> str:
+    """Assert 4x the work costs well under 4x^2 the time, and describe the run.
+
+    Linear is ~4x for 4x the work and quadratic is ~16x, so the bound sits
+    between them and nowhere near either — a noisy box cannot cross it.
+    """
+    small, medium, large = (_elapsed_quietly(shape(size)) for size in sizes)
+    ratio = large / max(small, 1e-6)
+    timings = f"{small * 1000:.1f} / {medium * 1000:.1f} / {large * 1000:.1f} ms"
+    assert ratio < 8, f"{label}: 4x the work took {ratio:.1f}x the time ({timings}) — not linear"
+    return f"{label}: {timings} ({ratio:.2f}x)"
 
 
 class TestNonAsciiFraming:
@@ -367,35 +414,163 @@ class TestGrammarDelimitingRobustness:
         assert len(warnings) <= 6, f"{len(warnings)} warning lines for 500 bad chunks"
         assert "500" in warnings[-1].getMessage()
 
-    def test_malformed_chunk_resync_scales_linearly(self):
-        # A failed decode must cost O(chunk), not O(offset-into-the-body).
-        # ``JSONDecodeError.__init__`` counts the newlines before the error
-        # position, so handing it the whole document once per bad chunk is
-        # quadratic: measured at 4x per doubling before the fix.
-        base = _elapsed_over_malformed_chunks(4_000)
-        doubled = _elapsed_over_malformed_chunks(8_000)
-        quadrupled = _elapsed_over_malformed_chunks(16_000)
-        ratio = quadrupled / max(base, 1e-6)
-        # Linear is ~4x for 4x the work; quadratic measured ~15x. The bound
-        # is deliberately loose so a noisy CI box cannot fail it.
-        assert ratio < 8, (
-            f"4x the bad chunks took {ratio:.1f}x the time "
-            f"({base * 1000:.1f} / {doubled * 1000:.1f} / {quadrupled * 1000:.1f} ms) "
-            "— resync is not linear"
-        )
-
     def test_valid_path_scales_linearly_with_body_size(self):
         # The happy path must stay linear too. Kept to ~2 MB: a ratio over
         # three sizes proves the shape without a multi-hundred-MB peak.
-        base = _elapsed_over_body(_sized_body(0.5))
-        doubled = _elapsed_over_body(_sized_body(1.0))
-        quadrupled = _elapsed_over_body(_sized_body(2.0))
-        ratio = quadrupled / max(base, 1e-6)
-        assert ratio < 8, (
-            f"4x the body took {ratio:.1f}x the time "
-            f"({base * 1000:.1f} / {doubled * 1000:.1f} / {quadrupled * 1000:.1f} ms) "
-            "— the reader is not linear"
+        _assert_scales_linearly(_sized_body, (0.5, 1.0, 2.0), "header-framed valid, MB")
+
+
+class TestScalesLinearlyOnEveryBodyShape:
+    r"""Every framing shape must be O(n) — including the ones with no boundary.
+
+    The reader looks ahead for the next ``\n<digits>\n[`` to bound each
+    decode. A body that has no such boundary — CRLF framing, or chunks
+    written back to back with no length headers — must not pay for that
+    lookahead once per chunk: an unmatched ``re.search`` scans to the end
+    of the document, which is O(n) per chunk and O(n^2) overall. Measured
+    before the fix at ~4x per doubling on all three no-boundary shapes,
+    where a 2 MB CRLF body took ~57 s against 69 ms for the reader that
+    never looked ahead at all.
+    """
+
+    def test_header_framed_garbage(self):
+        # A failed decode must cost O(chunk), not O(offset-into-the-body):
+        # ``JSONDecodeError.__init__`` counts the newlines before the error
+        # position, so handing it the whole document once per bad chunk is
+        # quadratic too. Measured at ~4x per doubling before round 1.
+        _assert_scales_linearly(_malformed_chunks, (4_000, 8_000, 16_000), "header-framed garbage")
+
+    def test_crlf_framed_valid_chunks(self):
+        _assert_scales_linearly(_crlf_framed_chunks, (2_000, 4_000, 8_000), "CRLF-framed valid")
+
+    def test_back_to_back_header_less_valid_chunks(self):
+        _assert_scales_linearly(_back_to_back_chunks, (2_000, 4_000, 8_000), "back-to-back valid")
+
+    def test_newline_separated_header_less_valid_chunks(self):
+        _assert_scales_linearly(
+            _newline_separated_chunks, (2_000, 4_000, 8_000), "newline-separated valid"
         )
+
+    def test_every_shape_still_decodes_every_chunk(self):
+        # Speed is worthless if the shapes stopped parsing. Pin the output
+        # of each one alongside its timing.
+        want = [[index] for index in range(50)]
+        assert list(iter_wrb_chunks(_crlf_framed_chunks(50))) == want
+        assert list(iter_wrb_chunks(_back_to_back_chunks(50))) == want
+        assert list(iter_wrb_chunks(_newline_separated_chunks(50))) == want
+        assert list(iter_wrb_chunks(_malformed_chunks(50))) == []
+
+
+# JSON fragments that could sit on either side of a boundary-shaped run of
+# characters if one could occur inside a chunk. Deliberately includes the
+# cases where "]" / "[" / quotes / escapes are content rather than syntax.
+_FRAGMENTS_BEFORE = (
+    "",
+    "[",
+    "[1",
+    "[1,",
+    "[[",
+    "[[1",
+    '["a"',
+    '["a",',
+    '["a\\"b"',
+    '["\\\\"',
+    '["]"',
+    '["["',
+    '["\\n"',
+    "{",
+    '{"k"',
+    '{"k":',
+    '{"k":1',
+    '{"k":1,',
+    '{"k":[',
+    "[true",
+    "[true,",
+    "[null,",
+    "[-1",
+    "[1.5",
+    "[1e5",
+    "[ ",
+    "[\t",
+    "[[],",
+    "[{},",
+    "[1,2",
+    "[1,2,",
+    '[{"a":1}',
+    '[{"a":1},',
+    "1",
+    "12",
+    "[0",
+    "[0,",
+)
+
+_FRAGMENTS_AFTER = (
+    "",
+    "]",
+    "]]",
+    "]]]",
+    "1]",
+    "1,2]",
+    '"a"]',
+    "]}",
+    "1]}",
+    ",2]",
+    "],",
+    "true]",
+    "null]",
+    "[]]",
+    "{}]",
+    '"]',
+    '\\"]',
+    '{"b":2}]',
+    "  ]",
+    "\n]",
+)
+
+_BOUNDARY_SEPARATORS = (("\n", "\n"), ("\r\n", "\n"), ("\n", "\r\n"), ("\r\n", "\r\n"))
+
+_FRAGMENT_WRAPPERS = ("", "[", "[[", '{"k":[')
+
+
+class TestChunkBoundaryCannotSplitAValue:
+    """The load-bearing claim behind bounding each decode to a window.
+
+    ``_CHUNK_BOUNDARY`` is used to decide where the current chunk ends, so
+    the window is only safe if that pattern can never occur strictly inside
+    a value the decoder would accept. It cannot, by the JSON grammar: a raw
+    newline or carriage return is illegal unescaped inside a string, so the
+    digits would have to be a number token surrounded by whitespace — and a
+    number followed by ``[`` with only whitespace between them is not valid
+    JSON in any container (an array needs a comma, an object a comma or a
+    colon, and a top-level document ends after its one value).
+
+    Rather than leave that as prose, this enumerates boundary-shaped
+    strings wedged between JSON fragments and checks the decoder never
+    accepts a value reaching past the boundary.
+    """
+
+    def test_boundary_never_lands_inside_an_accepted_value(self):
+        decoder = json.JSONDecoder()
+        checked = 0
+        for wrapper in _FRAGMENT_WRAPPERS:
+            for before in _FRAGMENTS_BEFORE:
+                for first, second in _BOUNDARY_SEPARATORS:
+                    head = wrapper + before + first + "1" + second + "["
+                    for after in _FRAGMENTS_AFTER:
+                        candidate = head + after
+                        checked += 1
+                        match = _CHUNK_BOUNDARY.search(candidate)
+                        if match is None:
+                            continue
+                        try:
+                            _, end = decoder.raw_decode(candidate, 0)
+                        except (ValueError, RecursionError):
+                            continue
+                        assert end <= match.start(), (
+                            f"a boundary at {match.start()} sits inside a value the "
+                            f"decoder accepts out to {end}: {candidate!r}"
+                        )
+        assert checked > 10_000
 
 
 class TestErrorEnvelope:
