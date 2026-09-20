@@ -132,6 +132,11 @@ class FlightSearchParams(BaseModel):
         ge=1,
         description="Number of adult passengers",
     )
+    children: int = Field(0, ge=0, description="Number of children (ages 2-11)")
+    infants_in_seat: int = Field(
+        0, ge=0, description="Number of infants (under 2) occupying their own seat"
+    )
+    infants_on_lap: int = Field(0, ge=0, description="Number of lap infants (under 2, no seat)")
     exclude_basic_economy: bool = Field(
         False, description="Exclude basic economy fares from results"
     )
@@ -218,6 +223,11 @@ class DateSearchParams(BaseModel):
         ge=1,
         description="Number of adult passengers",
     )
+    children: int = Field(0, ge=0, description="Number of children (ages 2-11)")
+    infants_in_seat: int = Field(
+        0, ge=0, description="Number of infants (under 2) occupying their own seat"
+    )
+    infants_on_lap: int = Field(0, ge=0, description="Number of lap infants (under 2, no seat)")
     currency: str | None = Field(
         None,
         description=(
@@ -595,7 +605,12 @@ def _build_flight_filters(
 
     filters = FlightSearchFilters(
         trip_type=trip_type,
-        passenger_info=PassengerInfo(adults=params.passengers),
+        passenger_info=PassengerInfo(
+            adults=params.passengers,
+            children=params.children,
+            infants_in_seat=params.infants_in_seat,
+            infants_on_lap=params.infants_on_lap,
+        ),
         flight_segments=segments,
         stops=max_stops,
         seat_type=cabin_class,
@@ -815,7 +830,12 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
         # Create search filters
         filters = DateSearchFilters(
             trip_type=trip_type,
-            passenger_info=PassengerInfo(adults=params.passengers),
+            passenger_info=PassengerInfo(
+                adults=params.passengers,
+                children=params.children,
+                infants_in_seat=params.infants_in_seat,
+                infants_on_lap=params.infants_on_lap,
+            ),
             flight_segments=segments,
             stops=max_stops,
             seat_type=cabin_class,
@@ -934,6 +954,18 @@ def search_flights(
         int | None,
         Field(description="Number of adult passengers", ge=1),
     ] = None,
+    children: Annotated[
+        int,
+        Field(description="Number of children (ages 2-11)", ge=0),
+    ] = 0,
+    infants_in_seat: Annotated[
+        int,
+        Field(description="Number of infants (under 2) occupying their own seat", ge=0),
+    ] = 0,
+    infants_on_lap: Annotated[
+        int,
+        Field(description="Number of lap infants (under 2, no seat)", ge=0),
+    ] = 0,
     exclude_basic_economy: Annotated[
         bool,
         Field(description="Exclude basic economy fares from results"),
@@ -1009,6 +1041,9 @@ def search_flights(
         max_stops=max_stops,
         sort_by=sort_by,
         passengers=passengers or CONFIG.default_passengers,
+        children=children,
+        infants_in_seat=infants_in_seat,
+        infants_on_lap=infants_on_lap,
         exclude_basic_economy=exclude_basic_economy,
         emissions=emissions,
         checked_bags=checked_bags,
@@ -1087,6 +1122,18 @@ def search_dates(
         int | None,
         Field(description="Number of adult passengers", ge=1),
     ] = None,
+    children: Annotated[
+        int,
+        Field(description="Number of children (ages 2-11)", ge=0),
+    ] = 0,
+    infants_in_seat: Annotated[
+        int,
+        Field(description="Number of infants (under 2) occupying their own seat", ge=0),
+    ] = 0,
+    infants_on_lap: Annotated[
+        int,
+        Field(description="Number of lap infants (under 2, no seat)", ge=0),
+    ] = 0,
     currency: Annotated[
         str | None,
         Field(description="ISO 4217 currency code (USD, EUR, GBP, JPY...) for prices."),
@@ -1139,6 +1186,9 @@ def search_dates(
         departure_window=effective_departure_window,
         sort_by_price=sort_by_price,
         passengers=passengers or CONFIG.default_passengers,
+        children=children,
+        infants_in_seat=infants_in_seat,
+        infants_on_lap=infants_on_lap,
         currency=currency,
         language=language,
         country=country,
@@ -1200,6 +1250,18 @@ def get_booking_options(
         int | None,
         Field(description="Number of adult passengers", ge=1),
     ] = None,
+    children: Annotated[
+        int,
+        Field(description="Number of children (ages 2-11)", ge=0),
+    ] = 0,
+    infants_in_seat: Annotated[
+        int,
+        Field(description="Number of infants (under 2) occupying their own seat", ge=0),
+    ] = 0,
+    infants_on_lap: Annotated[
+        int,
+        Field(description="Number of lap infants (under 2, no seat)", ge=0),
+    ] = 0,
     airlines: Annotated[
         list[str] | None,
         Field(description="Filter by airline IATA codes (e.g., ['BA', 'AA'])"),
@@ -1290,6 +1352,9 @@ def get_booking_options(
         max_stops=max_stops,
         sort_by=sort_by,
         passengers=passengers or CONFIG.default_passengers,
+        children=children,
+        infants_in_seat=infants_in_seat,
+        infants_on_lap=infants_on_lap,
         airlines=airlines,
         exclude_basic_economy=exclude_basic_economy,
         emissions=emissions,
