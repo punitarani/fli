@@ -13,7 +13,7 @@ from .builders import (
     normalize_date,
 )
 from .currency import extract_currency_from_price_token, format_price, format_price_axis_label
-from .errors import format_validation_error
+from .errors import ErrorClassification, classify_error, format_validation_error
 from .links import google_flights_url, with_locale_params
 from .parsers import (
     parse_airlines,
@@ -54,6 +54,8 @@ __all__ = [
     "format_price",
     "format_price_axis_label",
     # Errors
+    "ErrorClassification",
+    "classify_error",
     "format_validation_error",
     # Links
     "google_flights_url",

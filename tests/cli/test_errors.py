@@ -9,11 +9,15 @@ from typer.testing import CliRunner
 
 from fli.cli.errors import _write_log, json_error_payload, report_cli_error
 from fli.cli.main import app
+from fli.core.parsers import ParseError
 from fli.search.exceptions import (
     SearchClientError,
     SearchConnectionError,
     SearchHTTPError,
+    SearchParseError,
+    SearchRejectedError,
     SearchTimeoutError,
+    SearchUnsupportedError,
 )
 
 
@@ -56,22 +60,56 @@ def test_write_log_creates_file_with_traceback(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "exc, expected_type",
+    "exc, expected_type, expected_retryable",
     [
-        (SearchTimeoutError("timed out"), "timeout"),
-        (SearchConnectionError("dns"), "connection_error"),
-        (SearchHTTPError("403", status_code=403), "http_error"),
-        (SearchClientError("generic"), "search_error"),
-        (RuntimeError("boom"), "unexpected_error"),
+        # Released values (shipped before the shared classifier existed) —
+        # must stay exactly as they are; see fli/core/errors.py and the
+        # T10 fix round 2 report's "Behaviour changes" section.
+        (SearchTimeoutError("timed out"), "timeout", True),
+        (SearchConnectionError("dns"), "connection_error", True),
+        (SearchHTTPError("403", status_code=403), "http_error", False),
+        (SearchClientError("generic"), "search_error", False),
+        (RuntimeError("boom"), "unexpected_error", False),
+        # Gained from the shared fli.core.errors.classify_error classifier
+        # (T10 fix round 1, maintainer ruling V1) — the CLI didn't
+        # distinguish these from "search_error"/"unexpected_error" before.
+        (SearchRejectedError(13), "rejected_error", False),
+        (SearchUnsupportedError("multi-city"), "unsupported_error", False),
+        (SearchParseError("no ds:1 payload"), "parse_error", False),
+        (ParseError("unknown airport code 'ZZZ'"), "validation_error", False),
+        # T10 fix round 2, maintainer ruling U1: these two used to hit the
+        # CLI commands' hand-rolled `except (AttributeError, ValueError)`
+        # block and get hardcoded "search_error". Routed through the shared
+        # classifier here now covers json_error_payload itself; the command
+        # files' own except blocks are covered in tests/cli/test_flights.py
+        # and tests/cli/test_dates.py.
+        (ValueError("bad date range"), "validation_error", False),
+        (AttributeError("'NoneType' object has no attribute 'name'"), "unexpected_error", False),
     ],
 )
-def test_json_error_payload_maps_error_types(exc, expected_type):
-    """Each SearchClientError subclass should map to a distinct error_type string."""
-    message, error_type, log_path = json_error_payload(exc)
-    assert error_type == expected_type
-    assert isinstance(log_path, Path)
-    assert log_path.exists()
-    assert message  # non-empty
+def test_json_error_payload_maps_error_types(exc, expected_type, expected_retryable):
+    """Each exception class should map to the shared classifier's error_type string."""
+    payload = json_error_payload(exc)
+    assert payload.error_type == expected_type
+    assert payload.retryable is expected_retryable
+    assert isinstance(payload.log_path, Path)
+    assert payload.log_path.exists()
+    assert payload.message  # non-empty
+
+
+def test_json_error_payload_pydantic_validation_error_maps_to_validation_error():
+    """Pydantic's own ValidationError should classify as validation_error too."""
+    from pydantic import BaseModel, ValidationError
+
+    class _Model(BaseModel):
+        passengers: int
+
+    try:
+        _Model(passengers="not-a-number")
+    except ValidationError as exc:
+        payload = json_error_payload(exc)
+        assert payload.error_type == "validation_error"
+        assert payload.retryable is False
 
 
 def test_report_cli_error_returns_typer_exit_and_writes_log(tmp_path, capsys):
@@ -189,20 +227,32 @@ class TestWriteLogDetails:
 class TestJsonErrorPayloadMessages:
     def test_message_is_str_of_exception(self):
         exc = SearchTimeoutError("timed out waiting for response")
-        message, _, _ = json_error_payload(exc)
-        assert message == str(exc) == "timed out waiting for response"
+        payload = json_error_payload(exc)
+        assert payload.message == str(exc) == "timed out waiting for response"
 
     def test_unexpected_error_message_format(self):
         exc = RuntimeError("bad input")
-        message, error_type, _ = json_error_payload(exc)
-        assert message == "RuntimeError: bad input"
-        assert error_type == "unexpected_error"
+        payload = json_error_payload(exc)
+        assert payload.message == "RuntimeError: bad input"
+        assert payload.error_type == "unexpected_error"
 
     def test_log_path_is_a_real_file(self):
         exc = SearchConnectionError("dns failure")
-        _, _, log_path = json_error_payload(exc)
-        assert log_path.exists()
-        assert log_path.is_file()
+        payload = json_error_payload(exc)
+        assert payload.log_path.exists()
+        assert payload.log_path.is_file()
+
+    def test_http_status_present_when_known(self):
+        exc = SearchHTTPError("rate limited", status_code=429)
+        payload = json_error_payload(exc)
+        assert payload.error_type == "http_error"
+        assert payload.retryable is True
+        assert payload.http_status == 429
+
+    def test_http_status_none_when_unknown(self):
+        exc = SearchHTTPError("mystery failure", status_code=None)
+        payload = json_error_payload(exc)
+        assert payload.http_status is None
 
 
 class TestReportCliErrorOptions:
@@ -236,6 +286,7 @@ def test_flights_command_json_error_includes_log_path(runner, monkeypatch, tmp_p
     payload = json.loads(result.output)
     assert payload["success"] is False
     assert payload["error"]["type"] == "connection_error"
+    assert payload["error"]["retryable"] is True
     assert "log_path" in payload["error"]
     assert Path(payload["error"]["log_path"]).exists()
 
@@ -277,11 +328,14 @@ class TestTransportErrorClassification:
         ("exc_factory", "expected_type"),
         [
             (lambda: __import__("fli.search", fromlist=["x"]).SearchParseError("x"), "parse_error"),
-            (lambda: __import__("fli.search", fromlist=["x"]).SearchRejectedError(13), "rejected"),
+            (
+                lambda: __import__("fli.search", fromlist=["x"]).SearchRejectedError(13),
+                "rejected_error",
+            ),
         ],
     )
     def test_json_error_types(self, exc_factory, expected_type):
         from fli.cli.errors import json_error_payload
 
-        _, error_type, _ = json_error_payload(exc_factory(), command="flights")
-        assert error_type == expected_type
+        payload = json_error_payload(exc_factory(), command="flights")
+        assert payload.error_type == expected_type
