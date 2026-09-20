@@ -12,7 +12,14 @@ export {
   parallelMap,
   TokenBucketRateLimiter,
 } from "./concurrency.ts";
-export { type DatePrice, type DateSearchOptions, SearchDates } from "./dates.ts";
+export {
+  type DateOutcome,
+  type DatePrice,
+  type DateSearchOptions,
+  MAX_DATES_PER_SEARCH,
+  SearchDates,
+  SWEEP_FAILURE_THRESHOLD,
+} from "./dates.ts";
 export {
   parseBookingChunk,
   parseFlightRow,
