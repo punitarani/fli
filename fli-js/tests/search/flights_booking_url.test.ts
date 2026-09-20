@@ -9,7 +9,11 @@ import { describe, expect, test } from "bun:test";
 import { Buffer } from "node:buffer";
 import { Airline } from "../../src/models/airline.ts";
 import { Airport } from "../../src/models/airport.ts";
-import { type FlightLeg, type FlightResult, SeatType } from "../../src/models/google-flights/base.ts";
+import {
+  type FlightLeg,
+  type FlightResult,
+  SeatType,
+} from "../../src/models/google-flights/base.ts";
 import { SearchFlights } from "../../src/search/flights.ts";
 
 /** Build a leg with a LOCAL departure datetime (matches the decoder). */
