@@ -177,7 +177,12 @@ def complex_round_trip_params():
 # no rows — which reads as inventory rather than encoding. Non-strict so a
 # change on Google's side surfaces as an unexpected pass.
 INFANT_RESULTS_MISSING = pytest.mark.xfail(
-    reason="Google inlines no results for an infant on this route/cabin pair",
+    reason=(
+        "Google inlines no results for JFK-LAX / LAX-ORD with a lap infant in "
+        "FIRST or BUSINESS (0 rows); the same query without the infant returns "
+        "22, and JFK-LHR economy with the same lap infant returns 15 — so the "
+        "tfs passenger codes are correct and this is Google-side"
+    ),
     strict=False,
 )
 

@@ -118,8 +118,13 @@ Consequences to keep in mind when changing search code:
   filtering is not back-filled.
 - Date searches have no calendar grid: one page fetch per date, capped at
   `fli.search.dates.MAX_DATES_PER_SEARCH` (93) per `SearchDates.search`. At the
-  cap that is several hundred MB of pages and parsed JSON at peak, and up to
-  ~3 requests per date against a blocked client.
+  cap that is several hundred MB of pages and parsed JSON at peak.
+- `_SweepHealth` (`SWEEP_FAILURE_THRESHOLD`, 5) is the sweep's circuit breaker:
+  armed only while no date has loaded a page, disarmed permanently by the first
+  success. It turns a fully blocked 93-date sweep from 279 page fetches (up to
+  837 HTTP requests once the client's own retries multiply) into 15, bounded at
+  (threshold + pool workers) x `PAGE_FETCH_ATTEMPTS` = 45 regardless of range.
+  A sweep that is working keeps the full retry budget for transient misses.
 - ~1 page in 60 arrives HTTP 200 with no `ds:1` blob. `fetch_payload` in
   `fli/search/_tfs.py` is the single fetch path for both flights and dates and
   retries exactly that case (`PAGE_FETCH_ATTEMPTS`, `PAGE_RETRY_BACKOFF`);

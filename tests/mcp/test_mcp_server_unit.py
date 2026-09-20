@@ -765,3 +765,52 @@ class TestLiveSearchAssertionHelper:
                 results_key="flights",
                 trip_type="ONE_WAY",
             )
+
+
+class TestSearchErrorMessage:
+    """MCP callers have no log file, so the hint has to be in the response."""
+
+    def test_parse_error_carries_the_consent_hint(self):
+        from fli.mcp.server import _search_error_message
+        from fli.search import SearchParseError
+
+        message = _search_error_message(SearchParseError("Search page carried no ds:1 payload."))
+        assert message.startswith("Search failed: ")
+        assert "ds:1" in message
+        assert "FLI_SOCS_COOKIE" in message
+
+    def test_rejected_error_is_passed_through(self):
+        from fli.mcp.server import _search_error_message
+        from fli.search import SearchRejectedError
+
+        message = _search_error_message(SearchRejectedError(13))
+        assert "declined the request" in message
+        assert "FLI_SOCS_COOKIE" not in message
+
+    def test_other_errors_keep_the_plain_shape(self):
+        from fli.mcp.server import _search_error_message
+
+        assert _search_error_message(ValueError("boom")) == "Search failed: boom"
+
+    def test_prefix_is_configurable(self):
+        from fli.mcp.server import _search_error_message
+
+        assert _search_error_message(ValueError("boom"), "Booking lookup failed") == (
+            "Booking lookup failed: boom"
+        )
+
+    def test_the_hint_survives_assert_live_search(self):
+        """The hint must not turn a transport skip into a failure."""
+        import _pytest.outcomes
+
+        from fli.mcp.server import _search_error_message
+        from fli.search import SearchParseError
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        error = _search_error_message(SearchParseError("Search page carried no ds:1 payload."))
+        with pytest.raises(_pytest.outcomes.Skipped):
+            assert_live_search(
+                {"success": False, "error": error, "flights": []},
+                results_key="flights",
+                trip_type="ONE_WAY",
+            )

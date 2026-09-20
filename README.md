@@ -187,10 +187,12 @@ What that means in practice:
 * **Date searches cost one page fetch per date.** The page has no calendar
   grid, so a range is priced date by date; one `SearchDates.search` covers at
   most 93 dates and a wider range raises `ValueError`. Budget for it: 93 dates
-  across 10 workers is several hundred MB of pages and parsed JSON at peak, and
-  a client that Google is blocking can issue up to ~3 requests per date (the
-  client's own retries, plus one retry of a page that arrives without a `ds:1`
-  blob) before giving up.
+  across 10 workers is several hundred MB of pages and parsed JSON at peak.
+  A sweep that never manages to load a single page — the shape a blocked or
+  consent-gated client produces — gives up after a handful of dates rather than
+  paying the retry budget on all of them: measured at 15 page fetches (bounded
+  at 45, so at most ~135 HTTP requests once the client's own retries multiply
+  in), the same whether the range is 30 days or 93.
 * **A page occasionally arrives without results.** Roughly one request in sixty
   returns HTTP 200 with no `ds:1` blob; the client retries that case up to twice
   (0.5s then 1.5s) before raising `SearchParseError`. A healthy search never
