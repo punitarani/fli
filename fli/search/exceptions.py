@@ -30,6 +30,29 @@ class SearchHTTPError(SearchClientError):
         self.status_code = status_code
 
 
+# Google reports a rejected request with gRPC's canonical status codes, so
+# the bare number can be named instead of left for the reader to look up.
+_GRPC_STATUS_NAMES = {
+    0: "OK",
+    1: "CANCELLED",
+    2: "UNKNOWN",
+    3: "INVALID_ARGUMENT",
+    4: "DEADLINE_EXCEEDED",
+    5: "NOT_FOUND",
+    6: "ALREADY_EXISTS",
+    7: "PERMISSION_DENIED",
+    8: "RESOURCE_EXHAUSTED",
+    9: "FAILED_PRECONDITION",
+    10: "ABORTED",
+    11: "OUT_OF_RANGE",
+    12: "UNIMPLEMENTED",
+    13: "INTERNAL",
+    14: "UNAVAILABLE",
+    15: "DATA_LOSS",
+    16: "UNAUTHENTICATED",
+}
+
+
 class SearchRejectedError(SearchClientError):
     """Google answered HTTP 200 but declined to serve results.
 
@@ -39,17 +62,32 @@ class SearchRejectedError(SearchClientError):
     over the exact request bytes, so a plain HTTP client always lands here.
     Without this error the caller saw an empty list and reported "no
     flights found", which is indistinguishable from a route with no service.
+
+    A richer rejection carries a status message and/or a ``google.rpc``-style
+    detail block after the code, kept verbatim (truncated) in ``detail`` —
+    the code alone is often too coarse to debug with. An ``INTERNAL`` (13),
+    for instance, can mean either "Google declined to serve this" or "a
+    required request header was missing", and only the detail tells the two
+    apart.
     """
 
-    def __init__(self, code: int | None = None):
-        """Record the numeric error code alongside the user-facing message."""
+    def __init__(self, code: int | None = None, *, detail: str | None = None):
+        """Record the status code, its gRPC name and any detail block."""
         self.code = code
-        suffix = f" (error {code})" if code is not None else ""
-        super().__init__(
+        self.detail = detail
+        self.status_name = _GRPC_STATUS_NAMES.get(code) if code is not None else None
+        named = f"{code} ({self.status_name})" if self.status_name else code
+        # ``0`` is gRPC's OK, so there is no error number to name — it reads
+        # the same as no code at all rather than claiming "error 0".
+        suffix = f" with error {named}" if code else ""
+        message = (
             f"Google Flights declined the request{suffix} and returned no data. "
             "Its API now requires a browser-signed x-goog-batchexecute-bgr header, "
             "which this client cannot produce. See github.com/punitarani/fli#223."
         )
+        if detail:
+            message = f"{message} Details: {detail}"
+        super().__init__(message)
 
 
 class SearchUnsupportedError(SearchClientError):

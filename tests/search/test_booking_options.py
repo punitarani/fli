@@ -253,6 +253,99 @@ class TestGetBookingOptionsErrorPaths:
         assert opts == []
 
 
+class TestGetBookingOptionsRejectionEnvelope:
+    """A declined booking call must not read as "no bookable fares".
+
+    Google answers a request it refuses with ``HTTP 200`` and a payload-less
+    ``wrb.fr`` row carrying a gRPC status. That used to yield zero chunks,
+    which is indistinguishable from an itinerary nobody sells — so the wire
+    reader raises :class:`SearchRejectedError` instead, and it has to reach
+    the caller through ``get_booking_options`` unchanged.
+    """
+
+    @staticmethod
+    def _canned(body: str):
+        """Return a client plus a patch making its booking POST answer ``body``.
+
+        ``sf.client`` is a process-wide singleton, so the patch is handed
+        back as a context manager rather than started here — a leaked patch
+        feeds this canned body to every later test.
+        """
+        from unittest.mock import patch
+
+        def _fake_post(url, data, **kwargs):  # noqa: ANN001
+            return type(
+                "R",
+                (),
+                {
+                    "content": body.encode("utf-8"),
+                    "text": body,
+                    "raise_for_status": lambda self: None,
+                },
+            )()
+
+        sf = SearchFlights()
+        sf._last_session_id = "S"
+        return sf, patch.object(sf.client, "post", side_effect=_fake_post)
+
+    def test_error_envelope_raises_instead_of_returning_no_options(self):
+        """HTTP 200 + error envelope surfaces the status code, not an empty list."""
+        from fli.search import SearchRejectedError
+
+        body = ")]}'\n\n" + json.dumps(
+            [
+                ["wrb.fr", None, None, None, None, [13]],
+                ["di", 39],
+                ["af.httprm", 38, "-1963517503", 5],
+            ]
+        )
+        filters = _round_trip_filters()
+        flight = filters.flight_segments[1].selected_flight
+        sf, patcher = self._canned(body)
+        with patcher, pytest.raises(SearchRejectedError, match=r"13 \(INTERNAL\)") as excinfo:
+            sf.get_booking_options(flight, filters, currency="USD")
+        assert excinfo.value.code == 13
+
+    def test_rejection_reaches_the_cli_and_mcp_friendly_messages(self, monkeypatch, tmp_path):
+        """The typed error stays classified, not an "unexpected error"."""
+        from fli.cli.errors import _friendly_message, json_error_payload
+        from fli.core.errors import classify_error
+        from fli.mcp.server import _search_error_message
+        from fli.search import SearchRejectedError
+
+        # ``json_error_payload`` writes a real traceback file. Send it to
+        # tmp_path instead of the user's ~/.fli/logs, the way the autouse
+        # fixture in tests/cli/test_errors.py does for the same helper.
+        log_dir = tmp_path / "fli-logs"
+        monkeypatch.setattr("fli.cli.errors._LOG_DIR", log_dir)
+
+        exc = SearchRejectedError(13, detail="req-abc123")
+        assert "declined the request" in _friendly_message(exc)
+        assert "Unexpected error" not in _friendly_message(exc)
+        assert "declined the request" in _search_error_message(exc)
+
+        # Both surfaces classify it through the shared classifier, so they
+        # have to agree — a rejection is deterministic and never retryable.
+        payload = json_error_payload(exc, command="flights")
+        assert payload.error_type == "rejected_error"
+        assert payload.retryable is False
+        mcp_fields = classify_error(exc).as_fields()
+        assert mcp_fields["error_type"] == "rejected_error"
+        assert mcp_fields["retryable"] is False
+
+        assert list(log_dir.iterdir()), "the log file should have landed under tmp_path"
+
+    def test_genuinely_empty_response_still_returns_no_options(self):
+        """A well-formed response with no vendor rows keeps returning []."""
+        inner = json.dumps([[], None], separators=(",", ":"))
+        body = ")]}'\n\n" + json.dumps([["wrb.fr", None, inner]])
+        filters = _round_trip_filters()
+        flight = filters.flight_segments[1].selected_flight
+        sf, patcher = self._canned(body)
+        with patcher:
+            assert sf.get_booking_options(flight, filters, currency="USD") == []
+
+
 class TestEncodeBookingPayloadValidation:
     """``_encode_booking_payload`` rejects filters that can't produce a main struct."""
 
