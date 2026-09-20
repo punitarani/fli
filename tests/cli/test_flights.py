@@ -79,6 +79,109 @@ def test_flights_json_query_echoes_passengers(runner, mock_search_flights, mock_
     assert payload["query"]["passengers"] == 3
 
 
+def test_flights_with_family_passenger_mix(runner, mock_search_flights, mock_console):
+    """Test flights search passes the full passenger mix into filters."""
+    result = runner.invoke(
+        app,
+        [
+            "flights",
+            "JFK",
+            "LAX",
+            datetime.now().strftime("%Y-%m-%d"),
+            "--passengers",
+            "2",
+            "--children",
+            "1",
+            "--infants-in-seat",
+            "1",
+            "--infants-on-lap",
+            "1",
+        ],
+    )
+    assert result.exit_code == 0
+    args, _ = mock_search_flights.search.call_args
+    assert args[0].passenger_info.adults == 2
+    assert args[0].passenger_info.children == 1
+    assert args[0].passenger_info.infants_in_seat == 1
+    assert args[0].passenger_info.infants_on_lap == 1
+
+
+def test_flights_json_query_echoes_full_passenger_mix(runner, mock_search_flights, mock_console):
+    """JSON query echo includes children/infants alongside adult passengers."""
+    result = runner.invoke(
+        app,
+        [
+            "flights",
+            "JFK",
+            "LAX",
+            datetime.now().strftime("%Y-%m-%d"),
+            "--passengers",
+            "2",
+            "--children",
+            "1",
+            "--infants-in-seat",
+            "1",
+            "--infants-on-lap",
+            "1",
+            "--format",
+            "json",
+        ],
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["query"]["passengers"] == 2
+    assert payload["query"]["children"] == 1
+    assert payload["query"]["infants_in_seat"] == 1
+    assert payload["query"]["infants_on_lap"] == 1
+
+
+def test_flights_invalid_passenger_mix_exits_nonzero_with_clean_message(
+    runner, mock_search_flights, mock_console
+):
+    """A passenger mix Google Flights would reject fails cleanly, not with a pydantic dump."""
+    result = runner.invoke(
+        app,
+        [
+            "flights",
+            "JFK",
+            "LAX",
+            datetime.now().strftime("%Y-%m-%d"),
+            "--passengers",
+            "1",
+            "--infants-on-lap",
+            "3",
+        ],
+    )
+    assert result.exit_code == 1
+    # One readable line, not pydantic's multi-line "1 validation error for..." dump.
+    assert "validation error for" not in result.stdout.lower()
+    assert "infants_on_lap" in result.stdout
+    mock_search_flights.search.assert_not_called()
+
+
+def test_flights_invalid_passenger_mix_json_error(runner, mock_search_flights, mock_console):
+    """JSON mode surfaces the same passenger-mix error as a clean payload."""
+    result = runner.invoke(
+        app,
+        [
+            "flights",
+            "JFK",
+            "LAX",
+            datetime.now().strftime("%Y-%m-%d"),
+            "--passengers",
+            "9",
+            "--children",
+            "1",
+            "--format",
+            "json",
+        ],
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert "Total passengers must be between 1 and 9" in payload["error"]["message"]
+
+
 def test_flights_with_airlines(runner, mock_search_flights, mock_console):
     """Repeated -a flags resolve to the matching Airline enums on the filter."""
     result = runner.invoke(

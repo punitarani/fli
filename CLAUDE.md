@@ -120,6 +120,9 @@ Search for flights on a specific date.
 - `min_layover` / `max_layover` - Layover duration bounds in minutes
 - `currency` / `language` / `country` - Google `curr=` / `hl=` / `gl=` URL params
 - `sort_by` - CHEAPEST, DURATION, DEPARTURE_TIME, ARRIVAL_TIME
+- `passengers` - Number of adult passengers (default 1)
+- `children` / `infants_in_seat` / `infants_on_lap` - Passenger mix additions;
+  see "Note on passenger limits" below
 
 **Response:** Each flight in `flights[]` carries its own `booking_url` — a
 `tfs` protobuf deep link that opens the specific itinerary's booking page
@@ -141,6 +144,7 @@ Find cheapest travel dates within a range.
 - `exclude_airlines`, `alliance`, `exclude_alliance`, `min_layover`, `max_layover` - Same as `search_flights`
 - `currency`, `language`, `country` - Same locale knobs as `search_flights`
 - `sort_by_price` - Boolean to sort by price
+- `passengers`, `children`, `infants_in_seat`, `infants_on_lap` - Same as `search_flights`
 
 **Response:** Each date result carries a `booking_url` deep-linking to Google
 Flights for that specific date (and return date for round trips).
@@ -158,7 +162,8 @@ options — each with a clickable `booking_url` and `google_click_url`.
   from a prior `search_flights` result (e.g. `['BA178']` one-way,
   `['AA100', 'AA200']` round-trip). Accepts bare (`'178'`) or airline-prefixed
   (`'BA178'`) forms. Omit to price the top result.
-- `cabin_class`, `max_stops`, `passengers`, `airlines`, `exclude_basic_economy` - Same as `search_flights`
+- `cabin_class`, `max_stops`, `passengers`, `children`, `infants_in_seat`,
+  `infants_on_lap`, `airlines`, `exclude_basic_economy` - Same as `search_flights`
 - `departure_window`, `sort_by`, `exclude_airlines`, `alliance`, `exclude_alliance`,
   `min_layover`, `max_layover`, `emissions`, `checked_bags`, `carry_on` - Same as
   `search_flights`. Pass the **same filters used for `search_flights`** so the
@@ -166,6 +171,18 @@ options — each with a clickable `booking_url` and `google_click_url`.
   `flight_numbers` is omitted) the priced "top result" may differ from what the
   user saw.
 - `currency`, `language`, `country` - Same locale knobs as `search_flights`
+
+### Note on passenger limits
+`PassengerInfo` (`fli/models/google_flights/base.py`) validates every
+passenger mix against Google Flights' own booking limits: total travelers
+(`adults + children + infants_in_seat + infants_on_lap`) must be between 1
+and 9, and `infants_on_lap` cannot exceed `adults` (each lap infant needs an
+adult to sit with). A violation raises a pydantic `ValidationError` with the
+specific offending values named in the message. Both interfaces flatten it
+with the shared `fli.core.format_validation_error` helper: the CLI surfaces a
+one-line `Error: ...` and a non-zero exit code; the MCP tools surface
+`{"success": false, "error": "..."}` (same pattern PR #215 introduced for
+other validators).
 
 ### Note on emissions
 Both tools accept the `emissions` filter (forwarded to Google's

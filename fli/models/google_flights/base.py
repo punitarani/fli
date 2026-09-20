@@ -189,12 +189,38 @@ class TimeRestrictions(BaseModel):
 
 
 class PassengerInfo(BaseModel):
-    """Passenger configuration for flight search."""
+    """Passenger configuration for flight search.
+
+    Validation Rules:
+        - Total passengers (adults + children + infants) must be between 1 and 9 —
+          Google Flights refuses to price a booking outside that range.
+        - ``infants_on_lap`` cannot exceed ``adults`` — every lap infant needs an
+          adult to sit with.
+    """
 
     adults: NonNegativeInt = 1
     children: NonNegativeInt = 0
     infants_in_seat: NonNegativeInt = 0
     infants_on_lap: NonNegativeInt = 0
+
+    @model_validator(mode="after")
+    def validate_passenger_counts(self) -> "PassengerInfo":
+        """Enforce Google Flights' booking-wide passenger limits."""
+        total = self.adults + self.children + self.infants_in_seat + self.infants_on_lap
+        if not 1 <= total <= 9:
+            raise ValueError(
+                "Total passengers must be between 1 and 9 "
+                f"(got {total}: {self.adults} adults, {self.children} children, "
+                f"{self.infants_in_seat} infants in seat, {self.infants_on_lap} infants on lap)"
+            )
+
+        if self.infants_on_lap > self.adults:
+            raise ValueError(
+                f"infants_on_lap ({self.infants_on_lap}) cannot exceed adults ({self.adults}); "
+                "each lap infant must be paired with an adult"
+            )
+
+        return self
 
 
 class PriceLimit(BaseModel):
