@@ -1,10 +1,12 @@
 from .dates import DatePrice, SearchDates
 from .exceptions import (
-    SearchBackendError,
     SearchClientError,
     SearchConnectionError,
     SearchHTTPError,
+    SearchParseError,
+    SearchRejectedError,
     SearchTimeoutError,
+    SearchUnsupportedError,
 )
 from .flights import SearchFlights
 
@@ -16,5 +18,7 @@ __all__ = [
     "SearchTimeoutError",
     "SearchConnectionError",
     "SearchHTTPError",
-    "SearchBackendError",
+    "SearchParseError",
+    "SearchRejectedError",
+    "SearchUnsupportedError",
 ]

@@ -55,8 +55,16 @@ def generate_random_test_cases(num_tests: int) -> list[tuple]:
         dep_date = today + timedelta(days=random.randint(1, 365))
         adults = random.randint(1, 4)
         children = random.randint(0, 2)
-        infants_on_lap = random.randint(0, adults)
-        infants_in_seat = random.randint(0, max(0, adults - infants_on_lap))
+        # PassengerInfo caps the booking-wide total at 9 (Google Flights' own
+        # limit) and requires infants_on_lap <= adults; bound each draw by the
+        # remaining headroom so the generator never produces a mix the model
+        # would reject outright.
+        remaining_after_children = max(0, 9 - adults - children)
+        infants_on_lap = random.randint(0, min(adults, remaining_after_children))
+        remaining_after_lap = max(0, remaining_after_children - infants_on_lap)
+        infants_in_seat = random.randint(
+            0, min(max(0, adults - infants_on_lap), remaining_after_lap)
+        )
         seat_type = random.choice(seat_types)
         stops = random.choice(max_stops)
         sort_by = random.choice(sort_bys)

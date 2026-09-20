@@ -72,6 +72,16 @@ if _env_timeout is not None:
 else:
     REQUEST_TIMEOUT = DEFAULT_TIMEOUT
 
+# EU/EEA IPs are redirected to Google's consent interstitial, which serves a
+# page with no ds:1 payload — every search then fails to parse. A pre-accepted
+# SOCS cookie skips the interstitial (the legacy CONSENT cookie no longer
+# works, and a truncated SOCS value is ignored). Override with FLI_SOCS_COOKIE
+# if Google rotates the value; set it empty to send no cookie at all.
+DEFAULT_SOCS_COOKIE = (
+    "CAISNQgQEitib3FfaWRlbnRpdHlmcm9udGVuZHVpc2VydmVyXzIwMjQwMzE3LjA5X3AwGgJlbiADGgYIgLC_rwY"
+)
+SOCS_COOKIE = os.environ.get("FLI_SOCS_COOKIE", DEFAULT_SOCS_COOKIE)
+
 
 class Client:
     """HTTP client with built-in rate limiting, retry and user agent impersonation functionality.
@@ -106,6 +116,8 @@ class Client:
 
             session = _requests.Session()
             session.headers.update(self.DEFAULT_HEADERS)
+            if SOCS_COOKIE:
+                session.cookies.set("SOCS", SOCS_COOKIE, domain=".google.com")
             self._sessions.session = session
         return session
 

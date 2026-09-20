@@ -3,6 +3,7 @@
 from typing import Annotated, Any
 
 import typer
+from pydantic import ValidationError
 
 from fli.cli.enums import OutputFormat
 from fli.cli.errors import json_error_payload, report_cli_error
@@ -18,6 +19,7 @@ from fli.cli.utils import (
 )
 from fli.core import (
     build_flight_segments,
+    format_validation_error,
     google_flights_url,
     parse_airlines,
     parse_alliances,
@@ -26,6 +28,7 @@ from fli.core import (
     parse_max_stops,
     parse_sort_by,
     resolve_airport,
+    resolve_airports,
 )
 from fli.core.parsers import ParseError
 from fli.models import (
@@ -62,6 +65,10 @@ def _search_flights_core(
     exclude_alliance: list[str] | None = None,
     min_layover: int | None = None,
     max_layover: int | None = None,
+    passengers: int = 1,
+    children: int = 0,
+    infants_in_seat: int = 0,
+    infants_on_lap: int = 0,
 ) -> None:
     """Core flight search functionality."""
     query: dict[str, Any] = {
@@ -74,6 +81,10 @@ def _search_flights_core(
         "cabin_class": cabin_class.upper(),
         "max_stops": max_stops.upper(),
         "sort_by": sort_by.upper(),
+        "passengers": passengers,
+        "children": children,
+        "infants_in_seat": infants_in_seat,
+        "infants_on_lap": infants_on_lap,
     }
 
     try:
@@ -86,9 +97,8 @@ def _search_flights_core(
             f"{departure_window[0]}-{departure_window[1]}" if departure_window else None
         )
 
-        # Parse parameters using shared utilities
-        origin_airport = resolve_airport(origin)
-        destination_airport = resolve_airport(destination)
+        origin_airports = resolve_airports(origin)
+        destination_airports = resolve_airports(destination)
         seat_type = parse_cabin_class(cabin_class)
         stops = parse_max_stops(max_stops)
         parsed_airlines = parse_airlines(airlines)
@@ -122,8 +132,8 @@ def _search_flights_core(
 
         # Create flight segments using shared builder
         segments, trip_type = build_flight_segments(
-            origin=origin_airport,
-            destination=destination_airport,
+            origin=origin_airports,
+            destination=destination_airports,
             departure_date=departure_date,
             return_date=return_date,
             time_restrictions=time_restrictions,
@@ -131,8 +141,8 @@ def _search_flights_core(
 
         # Shareable Google Flights deep link for this search.
         booking_url = google_flights_url(
-            origin_airport.name.lstrip("_"),
-            destination_airport.name.lstrip("_"),
+            origin_airports[0].name.lstrip("_"),
+            destination_airports[0].name.lstrip("_"),
             departure_date,
             return_date,
             currency=currency,
@@ -158,7 +168,12 @@ def _search_flights_core(
         # Create search filters
         filters = FlightSearchFilters(
             trip_type=trip_type,
-            passenger_info=PassengerInfo(adults=1),
+            passenger_info=PassengerInfo(
+                adults=passengers,
+                children=children,
+                infants_in_seat=infants_in_seat,
+                infants_on_lap=infants_on_lap,
+            ),
             flight_segments=segments,
             stops=stops,
             seat_type=seat_type,
@@ -204,7 +219,11 @@ def _search_flights_core(
         # Build per-flight booking deep-links (tfs; never raises).
         booking_urls = [
             search_client.build_flight_booking_url(
-                result, currency=currency, language=language, country=country
+                result,
+                currency=currency,
+                language=language,
+                country=country,
+                seat_type=seat_type,
             )
             for result in results
         ]
@@ -245,6 +264,20 @@ def _search_flights_core(
             raise typer.Exit(1) from e
 
         typer.echo(f"Error: {str(e)}")
+        raise typer.Exit(1) from e
+    except ValidationError as e:
+        message = format_validation_error(e)
+        if output_format == OutputFormat.JSON:
+            emit_json(
+                build_json_error_response(
+                    search_type="flights",
+                    message=message,
+                    query=query,
+                )
+            )
+            raise typer.Exit(1) from e
+
+        typer.echo(f"Error: {message}")
         raise typer.Exit(1) from e
     except (AttributeError, ValueError) as e:
         if output_format == OutputFormat.JSON:
@@ -289,8 +322,14 @@ def _search_flights_core(
 
 
 def flights(
-    origin: Annotated[str, typer.Argument(help="Departure airport IATA code (e.g., JFK)")],
-    destination: Annotated[str, typer.Argument(help="Arrival airport IATA code (e.g., LHR)")],
+    origin: Annotated[
+        str,
+        typer.Argument(help="Departure airport code, or a comma-separated list (e.g., JFK,LGA)"),
+    ],
+    destination: Annotated[
+        str,
+        typer.Argument(help="Arrival airport code, or a comma-separated list (e.g., LHR,LGW)"),
+    ],
     departure_date: Annotated[str, typer.Argument(help="Travel date (YYYY-MM-DD)")],
     return_date: Annotated[
         str | None,
@@ -346,7 +385,7 @@ def flights(
         typer.Option(
             "--exclude-basic",
             "-e",
-            help="Exclude basic economy fares",
+            help="Exclude basic economy fares. [currently ignored by the search transport]",
         ),
     ] = False,
     layover: Annotated[
@@ -361,7 +400,9 @@ def flights(
         str,
         typer.Option(
             "--emissions",
-            help="Filter by emissions level (ALL, LESS)",
+            help=(
+                "Filter by emissions level (ALL, LESS). [currently ignored by the search transport]"
+            ),
         ),
     ] = "ALL",
     checked_bags: Annotated[
@@ -369,7 +410,10 @@ def flights(
         typer.Option(
             "--bags",
             "-b",
-            help="Number of checked bags to include in price (0, 1, or 2)",
+            help=(
+                "Checked bags included in price (0, 1, or 2). "
+                "[currently ignored by the search transport]"
+            ),
             min=0,
             max=2,
         ),
@@ -378,7 +422,7 @@ def flights(
         bool,
         typer.Option(
             "--carry-on",
-            help="Include carry-on bag fee in price",
+            help="Include carry-on bag fee in price. [currently ignored by the search transport]",
         ),
     ] = False,
     all_results: Annotated[
@@ -462,12 +506,46 @@ def flights(
             min=1,
         ),
     ] = None,
+    passengers: Annotated[
+        int,
+        typer.Option(
+            "--passengers",
+            "-p",
+            help="Number of adult passengers",
+            min=1,
+        ),
+    ] = 1,
+    children: Annotated[
+        int,
+        typer.Option(
+            "--children",
+            help="Number of children",
+            min=0,
+        ),
+    ] = 0,
+    infants_in_seat: Annotated[
+        int,
+        typer.Option(
+            "--infants-in-seat",
+            help="Number of infants in seat",
+            min=0,
+        ),
+    ] = 0,
+    infants_on_lap: Annotated[
+        int,
+        typer.Option(
+            "--infants-on-lap",
+            help="Number of infants on lap",
+            min=0,
+        ),
+    ] = 0,
 ):
     """Search for flights on a specific date.
 
     Example:
         fli flights JFK LHR 2026-10-25 --time 6-20 --airlines BA,KL --stops NON_STOP
         fli flights JFK LHR 2026-10-25 --format json
+        fli flights JFK,LGA LHR,LGW 2026-10-25
         fli flights JFK LHR 2026-10-25 --exclude-basic
         fli flights JFK LAX 2026-10-25 --bags 1 --carry-on
         fli flights JFK LAX 2026-10-25 --emissions LESS
@@ -475,6 +553,8 @@ def flights(
         fli flights JFK FRA 2026-10-25 --alliance ONEWORLD
         fli flights JFK LAX 2026-10-25 --exclude-airlines DL
         fli flights BUF ATH 2026-10-25 --min-layover 120
+        fli flights JFK LHR 2026-10-25 --passengers 2
+        fli flights JFK LHR 2026-10-25 --passengers 2 --children 1 --infants-on-lap 1
 
     """
     _search_flights_core(
@@ -502,4 +582,8 @@ def flights(
         exclude_alliance=exclude_alliance,
         min_layover=min_layover,
         max_layover=max_layover,
+        passengers=passengers,
+        children=children,
+        infants_in_seat=infants_in_seat,
+        infants_on_lap=infants_on_lap,
     )

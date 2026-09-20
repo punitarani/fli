@@ -12,6 +12,9 @@ The Service returns JSONP-flavoured responses of the form::
 `GetShoppingResults` and `GetCalendarGraph` happen to emit a single chunk so
 the legacy parsers in this package could get away with `lstrip(")]}'")`.
 `GetBookingResults` emits two chunks, so we need a proper multi-chunk reader.
+Since the flight/date searches moved to the public page transport
+(:mod:`fli.search._tfs`), `SearchFlights.get_booking_options` is the only
+live consumer of this module.
 
 Important quirk: the length headers are **not** a dependable frame
 delimiter. They count the chunk plus its two surrounding newlines, but in
@@ -34,7 +37,7 @@ import re
 from collections.abc import Iterator
 from typing import Any, NamedTuple
 
-from fli.search.exceptions import SearchBackendError
+from fli.search.exceptions import SearchRejectedError
 
 logger = logging.getLogger(__name__)
 
@@ -49,31 +52,11 @@ _FRAMING_CHARS = "0123456789 \t\r\n"
 # escaped inside JSON strings, so this can never match within a payload.
 _CHUNK_BOUNDARY = re.compile(r"\n\d+\n(?=\[)")
 
-# Google reports rejected requests with gRPC's canonical status codes.
-_STATUS_NAMES = {
-    1: "CANCELLED",
-    2: "UNKNOWN",
-    3: "INVALID_ARGUMENT",
-    4: "DEADLINE_EXCEEDED",
-    5: "NOT_FOUND",
-    6: "ALREADY_EXISTS",
-    7: "PERMISSION_DENIED",
-    8: "RESOURCE_EXHAUSTED",
-    9: "FAILED_PRECONDITION",
-    10: "ABORTED",
-    11: "OUT_OF_RANGE",
-    12: "UNIMPLEMENTED",
-    13: "INTERNAL",
-    14: "UNAVAILABLE",
-    15: "DATA_LOSS",
-    16: "UNAUTHENTICATED",
-}
-
 # Error details are echoed into the exception message, so cap them.
 _MAX_DETAIL_CHARS = 200
 
 
-class _BackendStatus(NamedTuple):
+class _RejectionStatus(NamedTuple):
     """A rejection reported by an error-envelope ``wrb.fr`` row."""
 
     code: int
@@ -96,8 +79,8 @@ def iter_wrb_chunks(body: str | bytes) -> Iterator[Any]:
     single chunk — whatever Google did send is always delivered.
 
     Raises:
-        SearchBackendError: If Google answered with an error envelope and no
-            usable chunk at all. See :func:`_error_status`.
+        SearchRejectedError: If Google answered with an error envelope and
+            no usable chunk at all. See :func:`_error_status`.
 
     """
     # ``errors="replace"`` keeps a corrupted transfer from raising here;
@@ -110,7 +93,7 @@ def iter_wrb_chunks(body: str | bytes) -> Iterator[Any]:
     text = text.lstrip()
 
     decoder = json.JSONDecoder()
-    errors: list[_BackendStatus] = []
+    errors: list[_RejectionStatus] = []
     yielded = 0
     cursor = 0
     while cursor < len(text):
@@ -120,8 +103,9 @@ def iter_wrb_chunks(body: str | bytes) -> Iterator[Any]:
             break
         try:
             outer, cursor = decoder.raw_decode(text, cursor)
-        except ValueError:
-            logger.warning("Discarding malformed wrb.fr chunk", exc_info=True)
+        except ValueError as exc:
+            logger.warning("Discarding malformed wrb.fr chunk: %s", exc)
+            logger.debug("malformed wrb.fr chunk", exc_info=True)
             boundary = _CHUNK_BOUNDARY.search(text, cursor)
             if boundary is None:
                 break
@@ -133,18 +117,19 @@ def iter_wrb_chunks(body: str | bytes) -> Iterator[Any]:
 
     if not errors:
         return
+    rejection = SearchRejectedError(errors[0].code, detail=errors[0].detail)
     if not yielded:
-        raise _backend_error(errors[0])
+        raise rejection
     logger.warning(
         "Google Flights reported error %d (%s) alongside %d usable chunk(s); "
         "keeping the partial payload",
         errors[0].code,
-        errors[0].detail or _STATUS_NAMES.get(errors[0].code, "unknown"),
+        errors[0].detail or rejection.status_name or "unknown",
         yielded,
     )
 
 
-def _error_status(row: list[Any]) -> _BackendStatus | None:
+def _error_status(row: list[Any]) -> _RejectionStatus | None:
     """Return the status of an error-envelope ``wrb.fr`` row, if any.
 
     Google reports a rejected request with ``HTTP 200`` and a payload-less
@@ -167,7 +152,7 @@ def _error_status(row: list[Any]) -> _BackendStatus | None:
     code = status[0]
     if isinstance(code, bool) or not isinstance(code, int) or code <= 0:
         return None
-    return _BackendStatus(code, _error_detail(status))
+    return _RejectionStatus(code, _error_detail(status))
 
 
 def _error_detail(status: list[Any]) -> str | None:
@@ -193,17 +178,7 @@ def _compact(value: Any) -> str:
     return text
 
 
-def _backend_error(status: _BackendStatus) -> SearchBackendError:
-    """Build the exception describing a backend rejection."""
-    name = _STATUS_NAMES.get(status.code)
-    code_text = f"{status.code} ({name})" if name else str(status.code)
-    message = f"Google Flights returned error {code_text} instead of results"
-    if status.detail:
-        message = f"{message}: {status.detail}"
-    return SearchBackendError(message, error_code=status.code, error_detail=status.detail)
-
-
-def _chunks_from_outer(outer: Any, errors: list[_BackendStatus]) -> Iterator[Any]:
+def _chunks_from_outer(outer: Any, errors: list[_RejectionStatus]) -> Iterator[Any]:
     """Yield a top-level chunk list's payloads, recording rejections into ``errors``."""
     if not isinstance(outer, list):
         return
@@ -220,8 +195,9 @@ def _chunks_from_outer(outer: Any, errors: list[_BackendStatus]) -> Iterator[Any
             continue
         try:
             yield json.loads(inner)
-        except (ValueError, json.JSONDecodeError):
-            logger.warning("Failed to decode wrb.fr inner JSON payload", exc_info=True)
+        except (ValueError, json.JSONDecodeError) as exc:
+            logger.warning("Failed to decode wrb.fr inner JSON payload: %s", exc)
+            logger.debug("wrb.fr inner JSON decode failed", exc_info=True)
             continue
 
 
@@ -232,8 +208,8 @@ def parse_first_wrb_payload(body: str | bytes) -> Any:
     returned and the generator is abandoned. See :func:`iter_wrb_chunks`.
 
     Raises:
-        SearchBackendError: If Google answered with an error envelope and no
-            usable chunk at all.
+        SearchRejectedError: If Google answered with an error envelope and
+            no usable chunk at all.
 
     """
     for chunk in iter_wrb_chunks(body):

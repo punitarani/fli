@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Annotated
 
 import typer
+from pydantic import ValidationError
 
 from fli.cli.enums import DayOfWeek, OutputFormat
 from fli.cli.errors import json_error_payload, report_cli_error
@@ -20,6 +21,7 @@ from fli.cli.utils import (
 )
 from fli.core import (
     build_date_search_segments,
+    format_validation_error,
     parse_airlines,
     parse_alliances,
     parse_cabin_class,
@@ -34,6 +36,7 @@ from fli.models import (
     TripType,
 )
 from fli.search import SearchClientError, SearchDates
+from fli.search.dates import MAX_DATES_PER_SEARCH
 
 
 def _build_selected_days(
@@ -72,9 +75,13 @@ def dates(
         str,
         typer.Option("--from", help="Start date (YYYY-MM-DD)"),
     ] = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d"),
-    end_date: Annotated[str, typer.Option("--to", help="End date (YYYY-MM-DD)")] = (
-        datetime.now() + timedelta(days=60)
-    ).strftime("%Y-%m-%d"),
+    end_date: Annotated[
+        str,
+        typer.Option(
+            "--to",
+            help=(f"End date (YYYY-MM-DD); at most {MAX_DATES_PER_SEARCH} dates per search"),
+        ),
+    ] = (datetime.now() + timedelta(days=60)).strftime("%Y-%m-%d"),
     trip_duration: Annotated[
         int,
         typer.Option(
@@ -254,6 +261,39 @@ def dates(
             min=1,
         ),
     ] = None,
+    passengers: Annotated[
+        int,
+        typer.Option(
+            "--passengers",
+            "-p",
+            help="Number of adult passengers",
+            min=1,
+        ),
+    ] = 1,
+    children: Annotated[
+        int,
+        typer.Option(
+            "--children",
+            help="Number of children",
+            min=0,
+        ),
+    ] = 0,
+    infants_in_seat: Annotated[
+        int,
+        typer.Option(
+            "--infants-in-seat",
+            help="Number of infants in seat",
+            min=0,
+        ),
+    ] = 0,
+    infants_on_lap: Annotated[
+        int,
+        typer.Option(
+            "--infants-on-lap",
+            help="Number of infants on lap",
+            min=0,
+        ),
+    ] = 0,
 ):
     """Find the cheapest dates to fly between two airports.
 
@@ -261,6 +301,7 @@ def dates(
         fli dates LAX MIA --class BUSINESS --stops NON_STOP --friday
         fli dates LAX MIA --alliance ONEWORLD --currency EUR
         fli dates LAX MIA --exclude-airlines DL --max-layover 240
+        fli dates LAX MIA --passengers 2 --children 1 --infants-on-lap 1
 
     """
     try:
@@ -306,6 +347,10 @@ def dates(
             ),
             "sort_by_price": sort_by_price,
             "days": [day.value for day in selected_days],
+            "passengers": passengers,
+            "children": children,
+            "infants_in_seat": infants_in_seat,
+            "infants_on_lap": infants_on_lap,
         }
 
         # Build time restrictions from tuple
@@ -343,7 +388,12 @@ def dates(
         # Create search filters
         filters = DateSearchFilters(
             trip_type=trip_type,
-            passenger_info=PassengerInfo(adults=1),
+            passenger_info=PassengerInfo(
+                adults=passengers,
+                children=children,
+                infants_in_seat=infants_in_seat,
+                infants_on_lap=infants_on_lap,
+            ),
             flight_segments=segments,
             stops=stops,
             seat_type=seat_type,
@@ -475,6 +525,20 @@ def dates(
             emit_json(payload)
             raise typer.Exit(1) from e
         raise report_cli_error(e, command="dates") from e
+    except ValidationError as e:
+        message = format_validation_error(e)
+        if output_format == OutputFormat.JSON:
+            emit_json(
+                build_json_error_response(
+                    search_type="dates",
+                    message=message,
+                    query=query,
+                )
+            )
+            raise typer.Exit(1) from e
+
+        typer.echo(f"Error: {message}")
+        raise typer.Exit(1) from e
     except (AttributeError, ValueError) as e:
         if "module 'fli.search' has no attribute 'SearchDates'" in str(e):
             raise

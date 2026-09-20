@@ -25,6 +25,16 @@ from fli.mcp.server import (
     _serialize_layover,
 )
 
+# The tool calls below pass fixed travel dates; pin the models' clock so they
+# stay in the future no matter when the suite runs.
+PINNED_TODAY = "2026-01-01"
+
+
+@pytest.fixture(autouse=True)
+def _pinned_clock(pin_today):
+    """Freeze "today" well before every date literal in this module."""
+    pin_today(PINNED_TODAY)
+
 
 def _make_raiser(exc: BaseException):
     """Return a callable that unconditionally raises ``exc``."""
@@ -68,6 +78,7 @@ class TestSerializeFlightLeg:
         leg.legroom = None
         leg.overnight = False
         leg.amenities = None
+        leg.cabin = None
         for k, v in overrides.items():
             setattr(leg, k, v)
         return leg
@@ -95,6 +106,13 @@ class TestSerializeFlightLeg:
         assert "operating_airline" not in result
         assert "aircraft" not in result
         assert "legroom" not in result
+        assert "cabin" not in result
+
+    def test_cabin_serialized_as_seat_type_name(self):
+        from fli.models import SeatType
+
+        leg = self._make_leg(cabin=SeatType.BUSINESS)
+        assert _serialize_flight_leg(leg)["cabin"] == "BUSINESS"
 
     def test_overnight_true_included(self):
         leg = self._make_leg(overnight=True)
@@ -595,3 +613,224 @@ class TestExecuteBookingOptions:
         assert "booking_url" in result
         assert "note" in result
         assert "booking_url" in result["note"]
+
+
+class TestDateSearchCapSurfacing:
+    """The per-search date cap reaches the MCP caller as a plain error string."""
+
+    def test_over_the_cap_returns_a_readable_error(self):
+        from fli.mcp.server import DateSearchParams, _execute_date_search
+
+        params = DateSearchParams(
+            origin="JFK",
+            destination="LHR",
+            start_date="2026-02-01",
+            end_date="2026-12-01",
+        )
+        result = _execute_date_search(params)
+
+        assert result["success"] is False
+        assert "93-date limit" in result["error"]
+        assert result["dates"] == []
+
+    def test_budget_window_prompt_default_range_fits_under_the_cap(self):
+        """The prompt's default window must not suggest an over-cap search."""
+        from datetime import datetime
+
+        from fli.mcp.server import find_budget_window_prompt
+        from fli.search.dates import MAX_DATES_PER_SEARCH
+
+        text = find_budget_window_prompt(origin="JFK", destination="LHR")
+        start_s, end_s = text.split("for trips between ")[1].split(". ")[0].split(" and ")
+        start = datetime.strptime(start_s.strip(), "%Y-%m-%d")
+        end = datetime.strptime(end_s.strip(), "%Y-%m-%d")
+        assert (end - start).days + 1 <= MAX_DATES_PER_SEARCH
+
+
+class TestLiveSearchAssertionHelper:
+    """`assert_live_search` must skip transport failures and fail real ones."""
+
+    @staticmethod
+    def _failure(message: str) -> dict:
+        return {"success": False, "error": f"Search failed: {message}", "flights": []}
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            # Every string below is produced verbatim by the library today.
+            "Search page carried no ds:1 payload — Google may have changed the "
+            "page shape, or served a consent/blocked page instead.",
+            "Google Flights declined the request (error 13) and returned no data.",
+            "Timed out talking to Google Flights (www.google.com).",
+            "Could not reach Google Flights (www.google.com).",
+            "Google Flights returned an error response (HTTP 429).",
+            "Priced 0 of 8 dates — every date in the range failed. Reasons: …",
+        ],
+        ids=["no-payload", "rejected", "timeout", "connection", "http-429", "sweep-total"],
+    )
+    def test_real_transport_messages_skip(self, message):
+        import _pytest.outcomes
+
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        with pytest.raises(_pytest.outcomes.Skipped):
+            assert_live_search(self._failure(message), results_key="flights", trip_type="ONE_WAY")
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            # A pydantic ValidationError always ends with this URL. The old
+            # rule matched the bare substring "http" inside it and skipped.
+            "1 validation error for FlightLeg\narrival_datetime\n  Input should be a "
+            "valid datetime [type=datetime_type]\n  For further information visit "
+            "https://errors.pydantic.dev/2.11/v/datetime_type",
+            "Parsed 0/20 flight rows — Google response shape may have changed "
+            "(sample reasons: ValueError: price field is not numeric)",
+            "Shopping response shape changed — no flights array at inner[2]/[3]: "
+            "list index out of range",
+            "TypeError: 'NoneType' object is not subscriptable",
+        ],
+        ids=["pydantic-url", "zero-rows-parsed", "shape-changed", "type-error"],
+    )
+    def test_parse_and_code_failures_still_fail(self, message):
+        """A decoder regression must never hide behind the transport skip."""
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        with pytest.raises(AssertionError, match="non-transport reason"):
+            assert_live_search(self._failure(message), results_key="flights", trip_type="ONE_WAY")
+
+    def test_parse_wording_wins_over_transport_wording(self):
+        """Mentioning both must fail, not skip — the parse half is the real news."""
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        message = (
+            "Search page carried no ds:1 payload; also 1 validation error for "
+            "FlightLeg, see https://errors.pydantic.dev/2.11/v/datetime_type"
+        )
+        with pytest.raises(AssertionError, match="non-transport reason"):
+            assert_live_search(self._failure(message), results_key="flights", trip_type="ONE_WAY")
+
+    def test_wrong_success_shape_fails(self):
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        with pytest.raises(AssertionError):
+            assert_live_search(
+                {"success": True, "flights": [], "count": 0},  # no trip_type at all
+                results_key="flights",
+                trip_type="ONE_WAY",
+            )
+
+    def test_success_path_is_strict(self):
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        assert_live_search(
+            {"success": True, "flights": [], "trip_type": "ONE_WAY", "count": 0},
+            results_key="flights",
+            trip_type="ONE_WAY",
+        )
+        with pytest.raises(AssertionError):
+            assert_live_search(
+                {"success": True, "flights": [], "trip_type": "ROUND_TRIP", "count": 0},
+                results_key="flights",
+                trip_type="ONE_WAY",
+            )
+
+    def test_transport_failure_is_a_skip(self):
+        import _pytest.outcomes
+
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        with pytest.raises(_pytest.outcomes.Skipped):
+            assert_live_search(
+                {
+                    "success": False,
+                    "error": "Search failed: Search page carried no ds:1 payload",
+                    "flights": [],
+                },
+                results_key="flights",
+                trip_type="ONE_WAY",
+            )
+
+    def test_other_failures_still_fail(self):
+        """A genuine bug must not hide behind the skip."""
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        with pytest.raises(AssertionError, match="non-transport reason"):
+            assert_live_search(
+                {
+                    "success": False,
+                    "error": "Search failed: TypeError: 'NoneType' is not subscriptable",
+                    "flights": [],
+                },
+                results_key="flights",
+                trip_type="ONE_WAY",
+            )
+
+
+class TestSearchErrorMessage:
+    """MCP callers have no log file, so the hint has to be in the response."""
+
+    def test_parse_error_carries_the_consent_hint(self):
+        from fli.mcp.server import _search_error_message
+        from fli.search import SearchParseError
+
+        message = _search_error_message(SearchParseError("Search page carried no ds:1 payload."))
+        assert message.startswith("Search failed: ")
+        assert "ds:1" in message
+        assert "FLI_SOCS_COOKIE" in message
+
+    def test_rejected_error_is_passed_through(self):
+        from fli.mcp.server import _search_error_message
+        from fli.search import SearchRejectedError
+
+        message = _search_error_message(SearchRejectedError(13))
+        assert "declined the request" in message
+        assert "FLI_SOCS_COOKIE" not in message
+
+    def test_other_errors_keep_the_plain_shape(self):
+        from fli.mcp.server import _search_error_message
+
+        assert _search_error_message(ValueError("boom")) == "Search failed: boom"
+
+    def test_prefix_is_configurable(self):
+        from fli.mcp.server import _search_error_message
+
+        assert _search_error_message(ValueError("boom"), "Booking lookup failed") == (
+            "Booking lookup failed: boom"
+        )
+
+    def test_the_hint_survives_assert_live_search(self):
+        """The hint must not turn a transport skip into a failure."""
+        import _pytest.outcomes
+
+        from fli.mcp.server import _search_error_message
+        from fli.search import SearchParseError
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        error = _search_error_message(SearchParseError("Search page carried no ds:1 payload."))
+        with pytest.raises(_pytest.outcomes.Skipped):
+            assert_live_search(
+                {"success": False, "error": error, "flights": []},
+                results_key="flights",
+                trip_type="ONE_WAY",
+            )
+
+
+class TestTrippedSweepErrorIsRecognised:
+    """The breaker's error text must reach the live tests as a transport failure."""
+
+    def test_both_sweep_failure_wordings_skip(self):
+        import _pytest.outcomes
+
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        for message in (
+            "Priced 0 of 30 dates — every date in the range failed. Reasons: …",
+            "Priced 0 of 30 dates — no date in the range could be priced. Reasons: …",
+        ):
+            with pytest.raises(_pytest.outcomes.Skipped):
+                assert_live_search(
+                    {"success": False, "error": f"Search failed: {message}", "dates": []},
+                    results_key="dates",
+                    trip_type="ONE_WAY",
+                )

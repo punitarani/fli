@@ -33,6 +33,87 @@ def test_basic_dates_search(runner, mock_search_dates, mock_console):
     assert args[0].trip_type == TripType.ONE_WAY
 
 
+def test_dates_with_passengers(runner, mock_search_dates, mock_console):
+    """Test dates search passes adult passenger count into filters."""
+    mock_search_dates.search.return_value = []
+    result = runner.invoke(app, ["dates", "JFK", "LAX", "--passengers", "2", "--format", "json"])
+    assert result.exit_code == 0
+    args, _ = mock_search_dates.search.call_args
+    assert args[0].passenger_info.adults == 2
+    payload = json.loads(result.stdout)
+    assert payload["query"]["passengers"] == 2
+
+
+def test_dates_with_family_passenger_mix(runner, mock_search_dates, mock_console):
+    """Test dates search passes the full passenger mix into filters and JSON query echo."""
+    mock_search_dates.search.return_value = []
+    result = runner.invoke(
+        app,
+        [
+            "dates",
+            "JFK",
+            "LAX",
+            "--passengers",
+            "2",
+            "--children",
+            "1",
+            "--infants-in-seat",
+            "1",
+            "--infants-on-lap",
+            "1",
+            "--format",
+            "json",
+        ],
+    )
+    assert result.exit_code == 0
+    args, _ = mock_search_dates.search.call_args
+    assert args[0].passenger_info.adults == 2
+    assert args[0].passenger_info.children == 1
+    assert args[0].passenger_info.infants_in_seat == 1
+    assert args[0].passenger_info.infants_on_lap == 1
+    payload = json.loads(result.stdout)
+    assert payload["query"]["passengers"] == 2
+    assert payload["query"]["children"] == 1
+    assert payload["query"]["infants_in_seat"] == 1
+    assert payload["query"]["infants_on_lap"] == 1
+
+
+def test_dates_invalid_passenger_mix_exits_nonzero_with_clean_message(
+    runner, mock_search_dates, mock_console
+):
+    """A passenger mix Google Flights would reject fails cleanly, not with a pydantic dump."""
+    result = runner.invoke(
+        app,
+        ["dates", "JFK", "LAX", "--passengers", "1", "--infants-on-lap", "3"],
+    )
+    assert result.exit_code == 1
+    assert "validation error for" not in result.stdout.lower()
+    assert "infants_on_lap" in result.stdout
+    mock_search_dates.search.assert_not_called()
+
+
+def test_dates_invalid_passenger_mix_json_error(runner, mock_search_dates, mock_console):
+    """JSON mode surfaces the same passenger-mix error as a clean payload."""
+    result = runner.invoke(
+        app,
+        [
+            "dates",
+            "JFK",
+            "LAX",
+            "--passengers",
+            "9",
+            "--children",
+            "1",
+            "--format",
+            "json",
+        ],
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert "Total passengers must be between 1 and 9" in payload["error"]["message"]
+
+
 def test_dates_with_date_range(runner, mock_search_dates, mock_console):
     """Test dates search with custom date range."""
     from_date = datetime.now().strftime("%Y-%m-%d")
@@ -297,3 +378,36 @@ def test_dates_json_empty_results(runner, mock_search_dates, mock_console):
     assert payload["success"] is True
     assert payload["count"] == 0
     assert payload["dates"] == []
+
+
+def test_dates_over_the_cap_reports_cleanly(runner, mock_console):
+    """A range wider than the per-search date cap fails with a readable message.
+
+    Deliberately not mocking ``SearchDates``: the cap is enforced before any
+    request, and the point is that the CLI surfaces it rather than dumping a
+    traceback.
+    """
+    from_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    to_date = (datetime.now() + timedelta(days=200)).strftime("%Y-%m-%d")
+
+    result = runner.invoke(app, ["dates", "JFK", "LAX", "--from", from_date, "--to", to_date])
+
+    assert result.exit_code == 1
+    assert "93-date limit" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_dates_over_the_cap_json(runner, mock_console):
+    """The same cap error is a structured JSON error, not a crash."""
+    from_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    to_date = (datetime.now() + timedelta(days=200)).strftime("%Y-%m-%d")
+
+    result = runner.invoke(
+        app,
+        ["dates", "JFK", "LAX", "--from", from_date, "--to", to_date, "--format", "json"],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert "93-date limit" in payload["error"]["message"]

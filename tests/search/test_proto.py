@@ -303,6 +303,23 @@ class TestBuildTfsToken:
         raw = _b64url_to_bytes(built)
         assert b"F9" in raw
 
+    def test_seat_defaults_to_economy(self):
+        """Field 9 is economy (1) when seat is omitted; matches captured tokens."""
+        built = build_tfs_token([[LegSpec("SFO", "2026-09-01", "PHX", "AA", "100")]])
+        raw = _b64url_to_bytes(built)
+        # f8=1 (0x40 0x01), f9=1 (0x48 0x01), f14=1 (0x70 0x01)
+        assert b"\x40\x01\x48\x01\x70\x01" in raw
+
+    def test_seat_business_encodes_field_9(self):
+        """Field 9 is business (3) when seat=3; golden tokens stay economy-only."""
+        segs = [[LegSpec("SFO", "2026-09-01", "PHX", "AA", "100")]]
+        economy = _b64url_to_bytes(build_tfs_token(segs))
+        business = _b64url_to_bytes(build_tfs_token(segs, seat=3))
+        assert b"\x48\x01" in economy
+        assert b"\x48\x03" in business
+        assert b"\x48\x03" not in economy
+        assert economy != business
+
 
 class TestToUrlsafeB64:
     def test_converts_standard_to_urlsafe(self):

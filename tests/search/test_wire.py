@@ -5,7 +5,7 @@ import json
 import pytest
 
 from fli.search._wire import iter_wrb_chunks, parse_first_wrb_payload
-from fli.search.exceptions import SearchBackendError
+from fli.search.exceptions import SearchRejectedError
 
 
 def _single_chunk(payload):
@@ -222,22 +222,22 @@ class TestErrorEnvelope:
     """Payload-less wrb.fr rows carry a status code and must not read as 'no results'."""
 
     def test_internal_error_raises(self):
-        with pytest.raises(SearchBackendError) as excinfo:
+        with pytest.raises(SearchRejectedError) as excinfo:
             parse_first_wrb_payload(_error_envelope(13))
-        assert excinfo.value.error_code == 13
+        assert excinfo.value.code == 13
         assert "13" in str(excinfo.value)
         assert "INTERNAL" in str(excinfo.value)
 
     def test_invalid_argument_raises(self):
-        with pytest.raises(SearchBackendError) as excinfo:
+        with pytest.raises(SearchRejectedError) as excinfo:
             list(iter_wrb_chunks(_error_envelope(3)))
-        assert excinfo.value.error_code == 3
+        assert excinfo.value.code == 3
         assert "INVALID_ARGUMENT" in str(excinfo.value)
 
     def test_unknown_code_still_raises_with_the_number(self):
-        with pytest.raises(SearchBackendError) as excinfo:
+        with pytest.raises(SearchRejectedError) as excinfo:
             parse_first_wrb_payload(_error_envelope(9999))
-        assert excinfo.value.error_code == 9999
+        assert excinfo.value.code == 9999
         assert "9999" in str(excinfo.value)
 
     def test_payload_less_row_without_status_is_still_skipped(self):
@@ -273,31 +273,31 @@ class TestErrorEnvelopeDetail:
                 ]
             ],
         ]
-        with pytest.raises(SearchBackendError) as excinfo:
+        with pytest.raises(SearchRejectedError) as excinfo:
             list(iter_wrb_chunks(_rows_body(_error_status_row(status))))
-        assert excinfo.value.error_code == 13
-        assert "req-abc123" in excinfo.value.error_detail
-        assert "ErrorResponse" in excinfo.value.error_detail
+        assert excinfo.value.code == 13
+        assert "req-abc123" in excinfo.value.detail
+        assert "ErrorResponse" in excinfo.value.detail
         assert "req-abc123" in str(excinfo.value)
 
     def test_status_message_is_surfaced(self):
         status = [7, "missing x-same-domain header"]
-        with pytest.raises(SearchBackendError) as excinfo:
+        with pytest.raises(SearchRejectedError) as excinfo:
             list(iter_wrb_chunks(_rows_body(_error_status_row(status))))
-        assert excinfo.value.error_detail == "missing x-same-domain header"
+        assert excinfo.value.detail == "missing x-same-domain header"
         assert "missing x-same-domain header" in str(excinfo.value)
 
     def test_bare_code_has_no_detail(self):
-        with pytest.raises(SearchBackendError) as excinfo:
+        with pytest.raises(SearchRejectedError) as excinfo:
             list(iter_wrb_chunks(_error_envelope(13)))
-        assert excinfo.value.error_detail is None
+        assert excinfo.value.detail is None
 
     def test_oversized_detail_is_truncated(self):
         status = [13, None, [["type.googleapis.com/x", ["y" * 5000]]]]
-        with pytest.raises(SearchBackendError) as excinfo:
+        with pytest.raises(SearchRejectedError) as excinfo:
             list(iter_wrb_chunks(_rows_body(_error_status_row(status))))
-        assert len(excinfo.value.error_detail) == 200
-        assert excinfo.value.error_detail.endswith("…")
+        assert len(excinfo.value.detail) == 200
+        assert excinfo.value.detail.endswith("…")
 
 
 class TestErrorEnvelopeWithPartialResults:
@@ -324,14 +324,53 @@ class TestErrorEnvelopeWithPartialResults:
 
     def test_error_only_body_still_raises_for_both_consumers(self):
         body = _rows_body(_error_status_row([13]))
-        with pytest.raises(SearchBackendError):
+        with pytest.raises(SearchRejectedError):
             list(iter_wrb_chunks(body))
-        with pytest.raises(SearchBackendError):
+        with pytest.raises(SearchRejectedError):
             parse_first_wrb_payload(body)
 
     def test_undecodable_inner_json_does_not_count_as_a_chunk(self):
         # The only payload row is unusable, so the error must still surface.
         body = _rows_body(["wrb.fr", None, "{not valid"], _error_status_row([13]))
-        with pytest.raises(SearchBackendError) as excinfo:
+        with pytest.raises(SearchRejectedError) as excinfo:
             list(iter_wrb_chunks(body))
-        assert excinfo.value.error_code == 13
+        assert excinfo.value.code == 13
+
+
+class TestPayloadLessRowIsRejection:
+    """Google's gated RPC answers HTTP 200 with a payload-less row + error 13.
+
+    Yielding nothing there made a hard block indistinguishable from a route
+    with no service, which is what left every search reporting "no flights".
+    """
+
+    @staticmethod
+    def _rejection(code):
+        outer = [["wrb.fr", None, None, None, None, [code, "generic::internal: ..."], "generic"]]
+        return ")]}'\n\n" + json.dumps(outer)
+
+    def test_error_13_raises_search_rejected(self):
+        with pytest.raises(SearchRejectedError) as excinfo:
+            list(iter_wrb_chunks(self._rejection(13)))
+        assert excinfo.value.code == 13
+        assert "error 13" in str(excinfo.value)
+
+    def test_rejection_is_exported_from_fli_search(self):
+        from fli.search import SearchRejectedError as exported
+
+        assert exported is SearchRejectedError
+
+    def test_parse_first_payload_also_raises(self):
+        with pytest.raises(SearchRejectedError):
+            parse_first_wrb_payload(self._rejection(13))
+
+    def test_any_numeric_code_is_reported(self):
+        with pytest.raises(SearchRejectedError) as excinfo:
+            list(iter_wrb_chunks(self._rejection(7)))
+        assert excinfo.value.code == 7
+
+    def test_non_numeric_code_is_skipped_not_raised(self):
+        """Without a numeric code there is nothing to report — stay silent."""
+        outer = [["wrb.fr", None, None, None, None, ["not-a-code"]]]
+        body = ")]}'\n\n" + json.dumps(outer)
+        assert list(iter_wrb_chunks(body)) == []

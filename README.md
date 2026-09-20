@@ -75,6 +75,12 @@ The MCP server provides two main tools:
 | `country`           | string | ISO 3166-1 alpha-2 country code (e.g. 'GB') for `gl=` param |
 | `sort_by`           | string | CHEAPEST, DURATION, DEPARTURE_TIME, or ARRIVAL_TIME         |
 | `passengers`        | int    | Number of adult passengers                                  |
+| `children`          | int    | Number of children (ages 2-11)                               |
+| `infants_in_seat`   | int    | Number of infants (under 2) occupying their own seat        |
+| `infants_on_lap`    | int    | Number of lap infants (under 2, no seat)                    |
+
+> Total travelers (`passengers + children + infants_in_seat + infants_on_lap`) must be
+> between 1 and 9, and `infants_on_lap` cannot exceed `passengers`.
 
 #### `search_dates` Parameters
 
@@ -100,6 +106,11 @@ The MCP server provides two main tools:
 | `country`           | string | ISO 3166-1 alpha-2 country code (e.g. 'GB')                 |
 | `sort_by_price`     | bool   | Sort results by price (lowest first)                        |
 | `passengers`        | int    | Number of adult passengers                                  |
+| `children`          | int    | Number of children (ages 2-11)                               |
+| `infants_in_seat`   | int    | Number of infants (under 2) occupying their own seat        |
+| `infants_on_lap`    | int    | Number of lap infants (under 2, no seat)                    |
+
+> Same passenger limits as `search_flights`: total 1-9, `infants_on_lap` ≤ `passengers`.
 
 ## Quick Start
 
@@ -146,6 +157,56 @@ fli --help
     * Comprehensive error handling
     * Input validation
 
+## Search transport
+
+Searches are served by Google's public search page rather than the
+`FlightsFrontendService` RPC. Since 2026-08 `GetShoppingResults` and
+`GetCalendarGraph` require an `x-goog-batchexecute-bgr` header that only the
+page's own JavaScript can produce, so a plain HTTP client gets HTTP 200 with no
+payload. Fli issues `GET https://www.google.com/travel/flights?tfs=<protobuf>`
+instead and reads the results out of the page's inline `AF_initDataCallback`
+blob keyed `ds:1`.
+
+What that means in practice:
+
+* **Three filters are not supported.** `emissions`, `bags` and
+  `exclude_basic_economy` have no `tfs` field and cannot be reconstructed from
+  the decoded rows, so they are dropped with a warning. Stops, cabin,
+  passengers, alliances and layover bounds ride in the request; airline
+  include/exclude, price cap, max duration and departure windows are applied to
+  the results after fetching.
+* **Multi-city raises `SearchUnsupportedError`.** Google loads those results
+  client-side through the gated RPC, so the page carries no rows to read.
+  Search each leg separately.
+* **`get_booking_options` is unavailable.** It calls `GetBookingResults`, which
+  is gated the same way, and currently raises `SearchRejectedError`. The
+  per-flight `tfs` booking deep links are built offline and still work.
+* **Fewer rows per search.** Expect roughly 20-45 itineraries, fewer than the
+  old RPC returned — and a client-side filter cannot back-fill the list the way
+  Google's server-side one did.
+* **Date searches cost one page fetch per date.** The page has no calendar
+  grid, so a range is priced date by date; one `SearchDates.search` covers at
+  most 93 dates and a wider range raises `ValueError`. Budget for it: 93 dates
+  across 10 workers is several hundred MB of pages and parsed JSON at peak.
+  A sweep that never manages to load a single page — the shape a blocked or
+  consent-gated client produces — gives up after a handful of dates rather than
+  paying the retry budget on all of them. Only pages served without results
+  count towards that: a timeout or a dropped connection says nothing about the
+  dates not yet tried, so those never abandon a sweep. Measured with the real backoff: **42
+  page fetches** (bounded at 45, so up to ~135 HTTP requests once the client's
+  own retries multiply in) and about 4 seconds, the same whether the range is 30
+  days or 93. Unbroken, a 93-date range would have cost 279 fetches and up to
+  837 requests. The bound is `(5 + worker count) x 3`, so raising
+  `configure_concurrency` raises it proportionally.
+* **A page occasionally arrives without results.** Roughly one request in sixty
+  returns HTTP 200 with no `ds:1` blob; the client retries that case up to twice
+  (0.5s then 1.5s) before raising `SearchParseError`. A healthy search never
+  pays for it.
+* **`FLI_SOCS_COOKIE`.** EU/EEA IPs are redirected to Google's consent
+  interstitial, which serves no `ds:1` blob. The client sends a pre-accepted
+  `SOCS` consent cookie by default; set `FLI_SOCS_COOKIE` to change the value,
+  or to an empty string to send none.
+
 ## CLI Usage
 
 ### Search for Flights
@@ -169,6 +230,9 @@ fli flights JFK LHR 2026-10-25 \
     --min-layover 90 \
     --max-layover 360 \
     --currency EUR --language en-GB --country GB
+
+# Family mix: 2 adults, 1 child, 1 lap infant (total must be 1-9)
+fli flights JFK LHR 2026-10-25 --passengers 2 --children 1 --infants-on-lap 1
 ```
 
 > ⚠️ **Experimental**
@@ -235,7 +299,13 @@ fli multi \
 | `--class, -c`           | Cabin class                                | `ECONOMY`, `BUSINESS`            |
 | `--stops, -s`           | Maximum stops                              | `NON_STOP`, `ONE_STOP`           |
 | `--sort, -o`            | Sort results by                            | `CHEAPEST`, `DURATION`           |
+| `--passengers, -p`      | Number of adult passengers                 | `2`                               |
+| `--children`            | Number of children (ages 2-11)             | `1`                               |
+| `--infants-in-seat`     | Number of infants occupying their own seat | `1`                               |
+| `--infants-on-lap`      | Number of lap infants (must be ≤ adults)   | `1`                               |
 | `--format`              | Output format                              | `text`, `json`                   |
+
+> Total passengers (adults + children + infants) must be between 1 and 9.
 
 #### Dates Command (`fli dates`)
 
@@ -259,6 +329,10 @@ fli multi \
 | `--time`                | Departure time window                      | `6-20`                   |
 | `--sort`                | Sort by price                              | (flag)                   |
 | `--[day]`               | Day filters                                | `--monday`, `--friday`   |
+| `--passengers, -p`      | Number of adult passengers                 | `2`                       |
+| `--children`            | Number of children (ages 2-11)             | `1`                       |
+| `--infants-in-seat`     | Number of infants occupying their own seat | `1`                       |
+| `--infants-on-lap`      | Number of lap infants (must be ≤ adults)   | `1`                       |
 | `--format`              | Output format                              | `text`, `json`           |
 
 #### Multi Command (`fli multi`)
@@ -271,6 +345,10 @@ fli multi \
 | `--class, -c`    | Cabin class                          | `ECONOMY`, `BUSINESS`          |
 | `--stops, -s`    | Maximum stops                        | `NON_STOP`, `ONE_STOP`         |
 | `--sort, -o`     | Sort results by                      | `CHEAPEST`, `DURATION`         |
+| `--passengers, -p` | Number of adult passengers         | `2`                             |
+| `--children`     | Number of children (ages 2-11)       | `1`                             |
+| `--infants-in-seat` | Number of infants occupying their own seat | `1`                     |
+| `--infants-on-lap` | Number of lap infants (must be ≤ adults) | `1`                       |
 
 ## MCP Server Integration
 

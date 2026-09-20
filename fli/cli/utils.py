@@ -6,7 +6,6 @@ from typing import Any
 
 import plotext as plt
 import typer
-from click import Context, Parameter
 from rich import box
 from rich.console import Group
 from rich.panel import Panel
@@ -20,10 +19,12 @@ from fli.core.builders import normalize_date
 from fli.core.parsers import ParseError
 from fli.core.parsers import parse_airlines as core_parse_airlines
 from fli.core.parsers import parse_max_stops as core_parse_max_stops
-from fli.models import Airline, Airport, MaxStops, TripType
+from fli.models import Airline, Airport, MaxStops, TripType, display_name
 
 
-def validate_currency(ctx: Context, param: Parameter, value: str | None) -> str | None:
+def validate_currency(
+    ctx: typer.Context, param: typer.CallbackParam, value: str | None
+) -> str | None:
     """Validate currency code format for typer callbacks."""
     if value is None:
         return None
@@ -33,7 +34,7 @@ def validate_currency(ctx: Context, param: Parameter, value: str | None) -> str 
     return normalized
 
 
-def validate_date(ctx: Context, param: Parameter, value: str) -> str | None:
+def validate_date(ctx: typer.Context, param: typer.CallbackParam, value: str) -> str | None:
     """Validate date format for typer callbacks."""
     if value is None:
         return None
@@ -45,7 +46,7 @@ def validate_date(ctx: Context, param: Parameter, value: str) -> str | None:
 
 
 def validate_time_range(
-    ctx: Context, param: Parameter, value: str | None
+    ctx: typer.Context, param: typer.CallbackParam, value: str | None
 ) -> tuple[int, int] | None:
     """Validate and parse time range in format 'start-end' (24h format) for typer callbacks."""
     if not value:
@@ -160,8 +161,8 @@ def filter_dates_by_days(dates: list, days: list[DayOfWeek], trip_type: TripType
 
 
 def format_airport(airport: Airport) -> str:
-    """Format airport code and name (first two words)."""
-    name_parts = airport.value.split()[:3]  # Get first three words
+    """Format airport code and name (first three words)."""
+    name_parts = display_name(airport).split()[:3]  # Get first three words
     name = " ".join(name_parts)
     return f"{airport.name} ({name})"
 
@@ -175,12 +176,12 @@ def format_duration(minutes: int) -> str:
 
 def serialize_airport(airport: Airport) -> dict[str, str]:
     """Serialize an airport for machine-readable output."""
-    return {"code": airport.name, "name": airport.value}
+    return {"code": airport.name, "name": display_name(airport)}
 
 
 def serialize_airline(airline: Airline) -> dict[str, str]:
     """Serialize an airline for machine-readable output."""
-    return {"code": airline.name.removeprefix("_"), "name": airline.value}
+    return {"code": airline.name.removeprefix("_"), "name": display_name(airline)}
 
 
 def serialize_flight_leg(leg: Any) -> dict[str, Any]:
@@ -198,6 +199,9 @@ def serialize_flight_leg(leg: Any) -> dict[str, Any]:
         payload["aircraft"] = leg.aircraft
     if getattr(leg, "legroom", None):
         payload["legroom"] = leg.legroom
+    cabin_name = getattr(getattr(leg, "cabin", None), "name", None)
+    if isinstance(cabin_name, str):
+        payload["cabin"] = cabin_name
     if getattr(leg, "overnight", False):
         payload["overnight"] = True
     if getattr(leg, "operating_airline", None) is not None:

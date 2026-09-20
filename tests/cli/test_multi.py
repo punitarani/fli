@@ -128,6 +128,57 @@ class TestMultiCityCommand:
         assert args[0].trip_type == TripType.MULTI_CITY
         assert len(args[0].flight_segments) == 3
 
+    def test_with_passengers(self, runner, mock_search_flights, mock_console):
+        """Test multi-city search passes adult passenger count into filters."""
+        date1 = _future_date(30)
+        date2 = _future_date(37)
+
+        result = runner.invoke(
+            app,
+            [
+                "multi",
+                "--leg",
+                f"SEA,HKG,{date1}",
+                "--leg",
+                f"HKG,SEA,{date2}",
+                "--passengers",
+                "2",
+            ],
+        )
+        assert result.exit_code == 0
+        args, _ = mock_search_flights.search.call_args
+        assert args[0].passenger_info.adults == 2
+
+    def test_with_family_passenger_mix(self, runner, mock_search_flights, mock_console):
+        """Test multi-city search passes the full passenger mix into filters."""
+        date1 = _future_date(30)
+        date2 = _future_date(37)
+
+        result = runner.invoke(
+            app,
+            [
+                "multi",
+                "--leg",
+                f"SEA,HKG,{date1}",
+                "--leg",
+                f"HKG,SEA,{date2}",
+                "--passengers",
+                "2",
+                "--children",
+                "1",
+                "--infants-in-seat",
+                "1",
+                "--infants-on-lap",
+                "1",
+            ],
+        )
+        assert result.exit_code == 0
+        args, _ = mock_search_flights.search.call_args
+        assert args[0].passenger_info.adults == 2
+        assert args[0].passenger_info.children == 1
+        assert args[0].passenger_info.infants_in_seat == 1
+        assert args[0].passenger_info.infants_on_lap == 1
+
     def test_with_cabin_class(self, runner, mock_search_flights, mock_console):
         """Test multi-city search with cabin class filter."""
         date1 = _future_date(30)
@@ -273,3 +324,29 @@ class TestMultiCityValidation:
         )
         assert result.exit_code == 1
         assert "No flights found" in result.stdout
+
+    def test_invalid_passenger_mix_exits_nonzero_with_clean_message(
+        self, runner, mock_search_flights, mock_console
+    ):
+        """A passenger mix Google Flights would reject fails cleanly, not with a pydantic dump."""
+        date1 = _future_date(30)
+        date2 = _future_date(37)
+
+        result = runner.invoke(
+            app,
+            [
+                "multi",
+                "--leg",
+                f"SEA,HKG,{date1}",
+                "--leg",
+                f"HKG,SEA,{date2}",
+                "--passengers",
+                "1",
+                "--infants-on-lap",
+                "3",
+            ],
+        )
+        assert result.exit_code == 1
+        assert "validation error for" not in result.stdout.lower()
+        assert "infants_on_lap" in result.stdout
+        mock_search_flights.search.assert_not_called()

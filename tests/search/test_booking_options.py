@@ -2,7 +2,7 @@
 
 import json
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, time, timedelta
 
 import pytest
 
@@ -18,6 +18,12 @@ from fli.models import (
     TripType,
 )
 from fli.search.flights import SearchFlights, _try_parse_booking_row
+from tests.search._pages import as_search_page
+
+# Segment travel dates are validated against today, so keep the fixtures
+# relative — hardcoded dates rot the suite the moment they go past.
+OUT_DATE = (datetime.now() + timedelta(days=30)).date()
+RET_DATE = OUT_DATE + timedelta(days=4)
 
 
 def _round_trip_filters():
@@ -27,8 +33,8 @@ def _round_trip_filters():
         flight_number="171",
         departure_airport=Airport.JFK,
         arrival_airport=Airport.LAX,
-        departure_datetime=datetime(2026, 7, 15, 6, 0),
-        arrival_datetime=datetime(2026, 7, 15, 9, 1),
+        departure_datetime=datetime.combine(OUT_DATE, time(6, 0)),
+        arrival_datetime=datetime.combine(OUT_DATE, time(9, 1)),
         duration=361,
     )
     leg_in = FlightLeg(
@@ -36,8 +42,8 @@ def _round_trip_filters():
         flight_number="28",
         departure_airport=Airport.LAX,
         arrival_airport=Airport.JFK,
-        departure_datetime=datetime(2026, 7, 19, 15, 15),
-        arrival_datetime=datetime(2026, 7, 19, 23, 54),
+        departure_datetime=datetime.combine(RET_DATE, time(15, 15)),
+        arrival_datetime=datetime.combine(RET_DATE, time(23, 54)),
         duration=339,
     )
     sel_out = FlightResult(
@@ -57,13 +63,13 @@ def _round_trip_filters():
     seg_out = FlightSegment(
         departure_airport=[[Airport.JFK, 0]],
         arrival_airport=[[Airport.LAX, 0]],
-        travel_date="2026-07-15",
+        travel_date=OUT_DATE.isoformat(),
         selected_flight=sel_out,
     )
     seg_in = FlightSegment(
         departure_airport=[[Airport.LAX, 0]],
         arrival_airport=[[Airport.JFK, 0]],
-        travel_date="2026-07-19",
+        travel_date=RET_DATE.isoformat(),
         selected_flight=sel_in,
     )
     return FlightSearchFilters(
@@ -102,9 +108,9 @@ class TestEncodeBookingPayload:
         assert len(segments) == 2
         # selected_flight legs sit at segment[8]; verify each leg's basic fields.
         out_sel = segments[0][8]
-        assert out_sel == [["JFK", "2026-07-15", "LAX", None, "AA", "171"]]
+        assert out_sel == [["JFK", OUT_DATE.isoformat(), "LAX", None, "AA", "171"]]
         in_sel = segments[1][8]
-        assert in_sel == [["LAX", "2026-07-19", "JFK", None, "AA", "28"]]
+        assert in_sel == [["LAX", RET_DATE.isoformat(), "JFK", None, "AA", "28"]]
 
 
 class TestGetBookingOptionsTokenGuard:
@@ -247,6 +253,82 @@ class TestGetBookingOptionsErrorPaths:
         assert opts == []
 
 
+class TestGetBookingOptionsRejectionEnvelope:
+    """A declined booking call must not read as "no bookable fares".
+
+    Google answers a request it refuses with ``HTTP 200`` and a payload-less
+    ``wrb.fr`` row carrying a gRPC status. That used to yield zero chunks,
+    which is indistinguishable from an itinerary nobody sells — so the wire
+    reader raises :class:`SearchRejectedError` instead, and it has to reach
+    the caller through ``get_booking_options`` unchanged.
+    """
+
+    @staticmethod
+    def _canned(body: str):
+        """Return a client plus a patch making its booking POST answer ``body``.
+
+        ``sf.client`` is a process-wide singleton, so the patch is handed
+        back as a context manager rather than started here — a leaked patch
+        feeds this canned body to every later test.
+        """
+        from unittest.mock import patch
+
+        def _fake_post(url, data, **kwargs):  # noqa: ANN001
+            return type(
+                "R",
+                (),
+                {
+                    "content": body.encode("utf-8"),
+                    "text": body,
+                    "raise_for_status": lambda self: None,
+                },
+            )()
+
+        sf = SearchFlights()
+        sf._last_session_id = "S"
+        return sf, patch.object(sf.client, "post", side_effect=_fake_post)
+
+    def test_error_envelope_raises_instead_of_returning_no_options(self):
+        """HTTP 200 + error envelope surfaces the status code, not an empty list."""
+        from fli.search import SearchRejectedError
+
+        body = ")]}'\n\n" + json.dumps(
+            [
+                ["wrb.fr", None, None, None, None, [13]],
+                ["di", 39],
+                ["af.httprm", 38, "-1963517503", 5],
+            ]
+        )
+        filters = _round_trip_filters()
+        flight = filters.flight_segments[1].selected_flight
+        sf, patcher = self._canned(body)
+        with patcher, pytest.raises(SearchRejectedError, match=r"13 \(INTERNAL\)") as excinfo:
+            sf.get_booking_options(flight, filters, currency="USD")
+        assert excinfo.value.code == 13
+
+    def test_rejection_reaches_the_cli_and_mcp_friendly_messages(self):
+        """The typed error stays classified, not an "unexpected error"."""
+        from fli.cli.errors import _friendly_message, json_error_payload
+        from fli.mcp.server import _search_error_message
+        from fli.search import SearchRejectedError
+
+        exc = SearchRejectedError(13, detail="req-abc123")
+        assert "declined the request" in _friendly_message(exc)
+        assert "Unexpected error" not in _friendly_message(exc)
+        assert json_error_payload(exc, command="flights")[1] == "rejected"
+        assert "declined the request" in _search_error_message(exc)
+
+    def test_genuinely_empty_response_still_returns_no_options(self):
+        """A well-formed response with no vendor rows keeps returning []."""
+        inner = json.dumps([[], None], separators=(",", ":"))
+        body = ")]}'\n\n" + json.dumps([["wrb.fr", None, inner]])
+        filters = _round_trip_filters()
+        flight = filters.flight_segments[1].selected_flight
+        sf, patcher = self._canned(body)
+        with patcher:
+            assert sf.get_booking_options(flight, filters, currency="USD") == []
+
+
 class TestEncodeBookingPayloadValidation:
     """``_encode_booking_payload`` rejects filters that can't produce a main struct."""
 
@@ -294,14 +376,12 @@ class TestGetBookingOptionsSessionCaching:
                 None,
             ],
         ]
-        # Wrap as the chunked outer the client expects.
-        outer_inner_json = json.dumps(fake_inner, separators=(",", ":"))
-        outer = [["wrb.fr", None, outer_inner_json]]
-        body = ")]}'\n\n" + json.dumps(outer)
+        # Serve it the way the page transport reads it: a ds:1 blob.
+        body = as_search_page(fake_inner)
 
-        with patch.object(sf.client, "post") as mock_post:
+        with patch.object(sf.client, "get") as mock_get:
             mock_response = type("R", (), {"text": body, "raise_for_status": lambda s: None})()
-            mock_post.return_value = mock_response
+            mock_get.return_value = mock_response
             try:
                 sf.search(_round_trip_filters())
             except Exception:

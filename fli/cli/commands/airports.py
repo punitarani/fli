@@ -14,12 +14,12 @@ console = Console()
 def airports(
     query: Annotated[
         str,
-        typer.Argument(help="City name, airport name, or IATA code to search for"),
+        typer.Argument(help="City name, airport name, IATA code, or ICAO code to search for"),
     ],
     limit: Annotated[int, typer.Option("--limit", "-n", help="Maximum results")] = 10,
     json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
 ):
-    """Search for airports by city name, airport name, or IATA code.
+    """Search for airports by city name, airport name, IATA code, or ICAO code.
 
     Example:
         fli airports "new york"

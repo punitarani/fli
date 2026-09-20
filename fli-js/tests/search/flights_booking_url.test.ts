@@ -9,7 +9,11 @@ import { describe, expect, test } from "bun:test";
 import { Buffer } from "node:buffer";
 import { Airline } from "../../src/models/airline.ts";
 import { Airport } from "../../src/models/airport.ts";
-import type { FlightLeg, FlightResult } from "../../src/models/google-flights/base.ts";
+import {
+  type FlightLeg,
+  type FlightResult,
+  SeatType,
+} from "../../src/models/google-flights/base.ts";
 import { SearchFlights } from "../../src/search/flights.ts";
 
 /** Build a leg with a LOCAL departure datetime (matches the decoder). */
@@ -194,5 +198,19 @@ describe("buildFlightBookingUrl", () => {
 
   test("returns a string", () => {
     expect(typeof search.buildFlightBookingUrl(oneWay())).toBe("string");
+  });
+
+  test("seatType defaults to economy (field 9 = 1)", () => {
+    const raw = tfsBytes(search.buildFlightBookingUrl(oneWay()));
+    expect(Buffer.from(raw).includes(Buffer.from([0x48, 0x01]))).toBe(true);
+    expect(Buffer.from(raw).includes(Buffer.from([0x48, 0x03]))).toBe(false);
+  });
+
+  test("seatType BUSINESS encodes field 9 as 3", () => {
+    const economy = search.buildFlightBookingUrl(oneWay());
+    const business = search.buildFlightBookingUrl(oneWay(), { seatType: SeatType.BUSINESS });
+    expect(economy).not.toBe(business);
+    const raw = tfsBytes(business);
+    expect(Buffer.from(raw).includes(Buffer.from([0x48, 0x03]))).toBe(true);
   });
 });

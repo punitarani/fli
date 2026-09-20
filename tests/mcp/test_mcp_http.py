@@ -106,3 +106,32 @@ class TestMCPHTTP:
         for tool in tools:
             assert tool.description, f"{tool.name} is missing a description"
             assert tool.inputSchema, f"{tool.name} is missing inputSchema"
+
+
+# ---------------------------------------------------------------------------
+# Test C: /health liveness endpoint (used by the docker-compose healthcheck)
+# ---------------------------------------------------------------------------
+
+
+class TestHealthEndpoint:
+    """The HTTP server must answer ``GET /health`` for container healthchecks."""
+
+    def test_health_matches_the_compose_probe(self, http_mcp_url):
+        """``urllib.request.urlopen(.../health)`` succeeds, exactly as docker-compose runs it."""
+        import json
+        import urllib.request
+
+        base_url = http_mcp_url.removesuffix("/mcp/")
+        with urllib.request.urlopen(f"{base_url}/health", timeout=5) as response:
+            assert response.status == 200
+            assert json.loads(response.read()) == {"status": "ok"}
+
+    def test_health_does_not_shadow_the_mcp_endpoint(self, http_mcp_url):
+        """Adding the route must leave the MCP transport itself working."""
+        import asyncio
+
+        async def list_tool_names() -> set[str]:
+            async with Client(http_mcp_url) as client:
+                return {tool.name for tool in await client.list_tools()}
+
+        assert EXPECTED_TOOLS <= asyncio.run(list_tool_names())
