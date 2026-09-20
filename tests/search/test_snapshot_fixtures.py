@@ -184,6 +184,19 @@ class TestSnapshotFlightShape:
         with_ac = [leg for f in jfk_lax_oneway for leg in f.legs if leg.aircraft]
         assert with_ac, "Expected aircraft set on at least one leg"
 
+    def test_seat_ratings_differ_on_flights_with_the_same_wifi_tier(self, jfk_lax_oneway):
+        # Captured B6 123 and AA 300 both have Wi-Fi tier 2 at leg[12][11],
+        # but their seat-quality codes at leg[13] are 3 and 1 respectively.
+        legs = [leg for flight in jfk_lax_oneway for leg in flight.legs]
+        jetblue = next(
+            leg for leg in legs if leg.airline.name == "B6" and leg.flight_number == "123"
+        )
+        american = next(
+            leg for leg in legs if leg.airline.name == "AA" and leg.flight_number == "300"
+        )
+        assert jetblue.amenities.legroom_rating == 3
+        assert american.amenities.legroom_rating == 1
+
 
 class TestSnapshotFilterEnforcement:
     """The captured filter responses should reflect the filter applied."""

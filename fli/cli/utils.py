@@ -6,7 +6,6 @@ from typing import Any
 
 import plotext as plt
 import typer
-from click import Context, Parameter
 from rich import box
 from rich.console import Group
 from rich.panel import Panel
@@ -23,7 +22,9 @@ from fli.core.parsers import parse_max_stops as core_parse_max_stops
 from fli.models import Airline, Airport, MaxStops, TripType
 
 
-def validate_currency(ctx: Context, param: Parameter, value: str | None) -> str | None:
+def validate_currency(
+    ctx: typer.Context, param: typer.CallbackParam, value: str | None
+) -> str | None:
     """Validate currency code format for typer callbacks."""
     if value is None:
         return None
@@ -33,7 +34,7 @@ def validate_currency(ctx: Context, param: Parameter, value: str | None) -> str 
     return normalized
 
 
-def validate_date(ctx: Context, param: Parameter, value: str) -> str | None:
+def validate_date(ctx: typer.Context, param: typer.CallbackParam, value: str) -> str | None:
     """Validate date format for typer callbacks."""
     if value is None:
         return None
@@ -45,7 +46,7 @@ def validate_date(ctx: Context, param: Parameter, value: str) -> str | None:
 
 
 def validate_time_range(
-    ctx: Context, param: Parameter, value: str | None
+    ctx: typer.Context, param: typer.CallbackParam, value: str | None
 ) -> tuple[int, int] | None:
     """Validate and parse time range in format 'start-end' (24h format) for typer callbacks."""
     if not value:

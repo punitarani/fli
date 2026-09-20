@@ -370,6 +370,7 @@ def build_tfs_token(
     segments: list[list[LegSpec]],
     *,
     is_one_way: bool = True,
+    seat: int = 1,
 ) -> str:
     """Build the ``tfs`` query parameter for a Google Flights deep-link URL.
 
@@ -388,6 +389,9 @@ def build_tfs_token(
             direction (one leg for nonstop, two or more for connections).
         is_one_way: ``True`` for one-way; ``False`` for round-trip.
             Controls the ``f19`` constant.
+        seat: Cabin class encoded in field 9.  ``1`` = economy, ``2`` =
+            premium economy, ``3`` = business, ``4`` = first.  Defaults to
+            economy so existing callers keep producing the captured tokens.
 
     Returns:
         URL-safe base64 string (no ``=`` padding) suitable for use as the
@@ -407,4 +411,4 @@ def build_tfs_token(
         encode_tfs_segment(seg[0].origin, seg[-1].dest, seg[0].dep_date, legs=seg)
         for seg in segments
     )
-    return encode_tfs_payload(encoded, is_one_way=is_one_way, pin_max_u64=True)
+    return encode_tfs_payload(encoded, is_one_way=is_one_way, seat=seat, pin_max_u64=True)
