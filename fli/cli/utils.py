@@ -19,7 +19,7 @@ from fli.core.builders import normalize_date
 from fli.core.parsers import ParseError
 from fli.core.parsers import parse_airlines as core_parse_airlines
 from fli.core.parsers import parse_max_stops as core_parse_max_stops
-from fli.models import Airline, Airport, MaxStops, TripType
+from fli.models import Airline, Airport, MaxStops, TripType, display_name
 
 
 def validate_currency(
@@ -162,10 +162,7 @@ def filter_dates_by_days(dates: list, days: list[DayOfWeek], trip_type: TripType
 
 def format_airport(airport: Airport) -> str:
     """Format airport code and name (first three words)."""
-    # Names shared by several airports carry a " (CODE)" suffix to keep the
-    # Enum values unique; the code is already shown, so don't repeat it.
-    full_name = airport.value.removesuffix(f" ({airport.name})")
-    name_parts = full_name.split()[:3]  # Get first three words
+    name_parts = display_name(airport).split()[:3]  # Get first three words
     name = " ".join(name_parts)
     return f"{airport.name} ({name})"
 
@@ -179,12 +176,12 @@ def format_duration(minutes: int) -> str:
 
 def serialize_airport(airport: Airport) -> dict[str, str]:
     """Serialize an airport for machine-readable output."""
-    return {"code": airport.name, "name": airport.value}
+    return {"code": airport.name, "name": display_name(airport)}
 
 
 def serialize_airline(airline: Airline) -> dict[str, str]:
     """Serialize an airline for machine-readable output."""
-    return {"code": airline.name.removeprefix("_"), "name": airline.value}
+    return {"code": airline.name.removeprefix("_"), "name": display_name(airline)}
 
 
 def serialize_flight_leg(leg: Any) -> dict[str, Any]:

@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from fli.models import Airport
+from fli.models import Airport, display_name
 from fli.models.airport import AIRPORT_NAMES
 
 # Curated mapping of city names and common abbreviations to IATA codes.
@@ -119,7 +119,9 @@ def search_airports(query: str, limit: int = 10) -> list[AirportMatch]:
     if query_upper in Airport.__members__:
         airport = Airport[query_upper]
         results.append(
-            AirportMatch(code=airport, name=airport.value, match_type="iata_exact", score=100.0)
+            AirportMatch(
+                code=airport, name=display_name(airport), match_type="iata_exact", score=100.0
+            )
         )
         seen_codes.add(query_upper)
 
@@ -129,7 +131,9 @@ def search_airports(query: str, limit: int = 10) -> list[AirportMatch]:
             if code not in seen_codes:
                 airport = Airport[code]
                 results.append(
-                    AirportMatch(code=airport, name=airport.value, match_type="city", score=90.0)
+                    AirportMatch(
+                        code=airport, name=display_name(airport), match_type="city", score=90.0
+                    )
                 )
                 seen_codes.add(code)
 
@@ -142,7 +146,10 @@ def search_airports(query: str, limit: int = 10) -> list[AirportMatch]:
                         airport = Airport[code]
                         results.append(
                             AirportMatch(
-                                code=airport, name=airport.value, match_type="city", score=80.0
+                                code=airport,
+                                name=display_name(airport),
+                                match_type="city",
+                                score=80.0,
                             )
                         )
                         seen_codes.add(code)
@@ -154,27 +161,33 @@ def search_airports(query: str, limit: int = 10) -> list[AirportMatch]:
     for code, airport_name in AIRPORT_NAMES.items():
         if code in seen_codes:
             continue
-        airport_name_lower = airport_name.lower()
+        # Match on the name users see, not the internal " (CODE)" uniqueness suffix.
+        airport_name_lower = airport_name.removesuffix(f" ({code})").lower()
         if query_lower in airport_name_lower:
             # 0.1-per-position weight keeps name matches (max ~70) below
             # city matches (80) regardless of where the substring lands.
             pos = airport_name_lower.find(query_lower)
             score = 70.0 - (pos * 0.1)
             results.append(
-                AirportMatch(code=Airport[code], name=airport_name, match_type="name", score=score)
+                AirportMatch(
+                    code=Airport[code],
+                    name=display_name(Airport[code]),
+                    match_type="name",
+                    score=score,
+                )
             )
             seen_codes.add(code)
 
     # Priority 5: IATA code prefix match (handles "SF" matching "SFO").
     if len(query_upper) <= 3:
-        for code, airport_name in AIRPORT_NAMES.items():
+        for code in AIRPORT_NAMES:
             if code in seen_codes:
                 continue
             if code.startswith(query_upper):
                 results.append(
                     AirportMatch(
                         code=Airport[code],
-                        name=airport_name,
+                        name=display_name(Airport[code]),
                         match_type="iata_prefix",
                         score=60.0,
                     )

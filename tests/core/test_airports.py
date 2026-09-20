@@ -139,3 +139,33 @@ class TestAirportMatch:
         except Exception:
             return
         raise AssertionError("AirportMatch should reject score > 100")
+
+
+class TestDisambiguatedNamesStayInternal:
+    """The " (CODE)" suffix that keeps Enum values unique must never reach users."""
+
+    def test_search_results_show_the_plain_name(self):
+        """Both airports called "Naha Airport" are returned under their own code."""
+        from fli.core.airports import search_airports
+
+        by_code = {m.code.name: m.name for m in search_airports("Naha Airport", limit=10)}
+        assert by_code["OKA"] == "Naha Airport"
+        assert by_code["NAH"] == "Naha Airport"
+
+    def test_suffix_does_not_create_name_matches(self):
+        """A code fragment must not match through the hidden suffix text."""
+        from fli.core.airports import search_airports
+
+        matches = [m for m in search_airports("(NC", limit=10) if m.match_type == "name"]
+        assert matches == []
+
+    def test_display_name_strips_only_its_own_code(self):
+        """``display_name`` is a no-op for ordinary names."""
+        from fli.models import Airline, Airport, display_name
+
+        assert display_name(Airport.OKA) == "Naha Airport"
+        assert display_name(Airport.JFK) == Airport.JFK.value
+        assert Airline._1S.value.endswith(
+            " (1S)"
+        )  # digit-leading code: suffix shows "1S", not "_1S"
+        assert display_name(Airline._1S) == Airline._1S.value.removesuffix(" (1S)")

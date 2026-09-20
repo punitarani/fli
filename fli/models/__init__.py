@@ -22,8 +22,10 @@ from .google_flights import (
     TimeRestrictions,
     TripType,
 )
+from .names import display_name
 
 __all__ = [
+    "display_name",
     "Airline",
     "Airport",
     "Alliance",
