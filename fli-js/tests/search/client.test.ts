@@ -165,9 +165,11 @@ describe("Client", () => {
     expect(calls).toBe(1);
   });
 
-  test("pre-aborted external signal short-circuits before any fetch retry", async () => {
+  test("pre-aborted external signal short-circuits before any fetch at all", async () => {
     let calls = 0;
-    // Real `fetch` rejects synchronously on a pre-aborted signal — model that.
+    // Real `fetch` rejects synchronously on a pre-aborted signal, but a
+    // custom `fetchImpl` need not — so the client checks first and never
+    // calls it, nor takes a rate-limiter token for a dead request.
     const fake = async (_u: unknown, init?: RequestInit): Promise<Response> => {
       calls++;
       if (init?.signal?.aborted) {
@@ -186,7 +188,7 @@ describe("Client", () => {
       expect(e).toBe(reason);
       expect(e).not.toBeInstanceOf(SearchTimeoutError);
     }
-    expect(calls).toBe(1);
+    expect(calls).toBe(0);
   });
 
   test("retries on transient network failure then succeeds", async () => {

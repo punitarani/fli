@@ -1,26 +1,80 @@
 /**
- * Flight search orchestrator — `GetShoppingResults` + `GetBookingResults`.
+ * Flight search orchestrator.
+ *
+ * Results come from Google's public `/travel/flights` page — see
+ * `tfs.ts` for why, and for the token that addresses it. Booking options
+ * still go through the `GetBookingResults` RPC, which is gated: that call
+ * now fails with {@link SearchRejectedError} rather than returning
+ * anything.
  *
  * 1:1 port of fli/search/flights.py.
  */
 
 import type { GoogleFlightsUrlOptions } from "../core/links.ts";
 import type { BookingOption, FlightResult } from "../models/google-flights/base.ts";
-import { SeatType, TripType } from "../models/google-flights/base.ts";
-import { FlightSearchFilters } from "../models/google-flights/flights.ts";
+import { SeatType, SortBy, TripType } from "../models/google-flights/base.ts";
+import type { FlightSearchFilters } from "../models/google-flights/flights.ts";
 import { type Client, getClient } from "./client.ts";
-import { parallelMap } from "./concurrency.ts";
+import { cloneFilters } from "./clone.ts";
+import { parallelMap, throwIfAborted } from "./concurrency.ts";
 import { parseBookingChunk, parseFlightRow } from "./decoders.ts";
 import { SearchParseError } from "./exceptions.ts";
+import { getSearchLogger } from "./logging.ts";
 import { buildBookingToken, buildTfsToken, type LegSpec } from "./proto.ts";
+import {
+  applyClientSideFilters,
+  buildTfs,
+  fetchPayload,
+  pageUrl,
+  unsupportedFilters,
+} from "./tfs.ts";
 import { withLocaleParams } from "./urls.ts";
-import { iterWrbChunks, parseFirstWrbPayload } from "./wire.ts";
+import { iterWrbChunks } from "./wire.ts";
+
+/**
+ * Result ordering for `sortBy`.
+ *
+ * The search page serves Google's own default order, so the sort the
+ * caller asked for is applied here instead of in the request.
+ * `TOP_FLIGHTS` / `BEST` are Google's own blended rankings, which we
+ * can't reproduce — those keep the page's order.
+ */
+function sortFlights(flights: FlightResult[], sortBy: SortBy): void {
+  const rank = (f: FlightResult): [number, number] => {
+    switch (sortBy) {
+      case SortBy.CHEAPEST:
+        return [f.price == null ? 1 : 0, f.price ?? 0];
+      case SortBy.DURATION:
+        return [f.duration == null ? 1 : 0, f.duration ?? 0];
+      case SortBy.DEPARTURE_TIME:
+        return [0, f.legs[0]?.departure_datetime.getTime() ?? 0];
+      case SortBy.ARRIVAL_TIME:
+        return [0, f.legs[f.legs.length - 1]?.arrival_datetime.getTime() ?? 0];
+      default:
+        return [0, 0];
+    }
+  };
+  // `Array.prototype.sort` is required to be stable, so rows that tie on
+  // the key keep Google's own ordering — the same guarantee Python's
+  // `list.sort` gives.
+  flights.sort((a, b) => {
+    const ka = rank(a);
+    const kb = rank(b);
+    return ka[0] - kb[0] || ka[1] - kb[1];
+  });
+}
 
 export interface SearchOptions {
   topN?: number;
   currency?: string | null;
   language?: string | null;
   country?: string | null;
+  /**
+   * Cancels the search. A round trip is several sequential page fetches
+   * with backoffs between them, so this reaches every one of them —
+   * including the sleeps — and rejects with the reason it was aborted with.
+   */
+  signal?: AbortSignal;
 }
 
 export interface BookingOptions {
@@ -29,6 +83,8 @@ export interface BookingOptions {
   country?: string | null;
   bookingToken?: string | null;
   sessionId?: string | null;
+  /** Cancels the booking request. */
+  signal?: AbortSignal;
 }
 
 /** Locale knobs plus cabin class for {@link SearchFlights.buildFlightBookingUrl}. */
@@ -38,8 +94,19 @@ export interface BookingUrlOptions extends GoogleFlightsUrlOptions {
 }
 
 export class SearchFlights {
+  /**
+   * @deprecated Kept only so the exported surface does not move. Searches
+   * no longer POST here: `GetShoppingResults` requires a browser-signed
+   * `x-goog-batchexecute-bgr` header and answers every other client with
+   * error 13. Results come from `PAGE_URL` in `tfs.ts` instead.
+   */
   static readonly BASE_URL =
     "https://www.google.com/_/FlightsFrontendUi/data/travel.frontend.flights.FlightsFrontendService/GetShoppingResults";
+  /**
+   * The `GetBookingResults` RPC. Still used by {@link SearchFlights.getBookingOptions},
+   * and still gated the same way — that call currently throws
+   * `SearchRejectedError`.
+   */
   static readonly BOOKING_URL =
     "https://www.google.com/_/FlightsFrontendUi/data/travel.frontend.flights.FlightsFrontendService/GetBookingResults";
 
@@ -50,7 +117,19 @@ export class SearchFlights {
     this.client = client ?? getClient();
   }
 
-  /** Search for flights using the given filters. */
+  /**
+   * Search for flights using the given filters.
+   *
+   * One page fetch for a one-way trip; for a round trip, one more per
+   * expanded outbound candidate (`topN`, default 5).
+   *
+   * @returns For one-way trips, `FlightResult[]`. For round trips, one
+   *   array per itinerary (`[outbound, return]`). `null` when nothing
+   *   survived the filters.
+   * @throws {SearchUnsupportedError} Multi-city, which the page cannot serve.
+   * @throws {SearchParseError} The page loaded but carried no readable rows.
+   * @throws {SearchClientError} Network or HTTP failure.
+   */
   async search(
     filters: FlightSearchFilters,
     options: SearchOptions = {},
@@ -61,6 +140,7 @@ export class SearchFlights {
       language: options.language ?? null,
       country: options.country ?? null,
       captureSession: true,
+      signal: options.signal,
     });
     if (flights == null) return null;
     if (filters.trip_type === TripType.ONE_WAY) return flights;
@@ -69,6 +149,7 @@ export class SearchFlights {
       currency: options.currency ?? null,
       language: options.language ?? null,
       country: options.country ?? null,
+      signal: options.signal,
     });
   }
 
@@ -79,18 +160,26 @@ export class SearchFlights {
       language: string | null;
       country: string | null;
       captureSession: boolean;
+      signal?: AbortSignal;
     },
   ): Promise<FlightResult[] | null> {
-    const encoded = filters.encode();
-    const url = withLocaleParams(
-      SearchFlights.BASE_URL,
-      opts.currency,
-      opts.language,
-      opts.country,
-    );
-    const response = await this.client.post(url, { body: `f.req=${encoded}` });
-    const inner = parseFirstWrbPayload(response.text);
-    if (inner == null) return null;
+    throwIfAborted(opts.signal);
+
+    const dropped = unsupportedFilters(filters);
+    if (dropped.length > 0) {
+      getSearchLogger().warn(
+        `Filters not supported by the search-page transport, ignored: ${dropped.join(", ")}`,
+      );
+    }
+
+    const url = pageUrl(buildTfs(filters), opts.currency, opts.language, opts.country);
+    const inner = await fetchPayload(this.client, url, { signal: opts.signal });
+    if (inner == null) {
+      throw new SearchParseError(
+        "Search page carried no ds:1 payload — Google may have changed " +
+          "the page shape, or served a consent/blocked page instead.",
+      );
+    }
 
     if (opts.captureSession) this._captureSessionId(inner);
 
@@ -98,27 +187,76 @@ export class SearchFlights {
       throw new SearchParseError("Shopping response shape changed — top-level is not an array");
     }
 
+    // Mirrors Python's
+    //   [item for i in (2, 3) if isinstance(inner[i], list) for item in inner[i][0]]
+    // wrapped in `except (IndexError, TypeError)`, condition for condition:
+    //
+    //   slot missing entirely      -> IndexError      -> SearchParseError
+    //   slot present, not a list   -> skipped by the isinstance check
+    //   slot is an empty list      -> IndexError on [0] -> SearchParseError
+    //   [0] is not iterable        -> TypeError       -> SearchParseError
+    //   [0] is a list (even empty) -> those are the rows
+    //
+    // Skipping a missing structure and returning `null` instead would
+    // report the likeliest future Google change — rows moving out of
+    // `[2][0]` — as "no flights on this route", which is exactly the
+    // silent failure this transport exists to avoid. A block that is
+    // present and simply holds no rows stays a legitimate empty answer.
     const flightsRaw: unknown[] = [];
-    for (const i of [2, 3]) {
-      const block = inner[i];
-      if (Array.isArray(block) && Array.isArray(block[0])) {
-        for (const item of block[0]) flightsRaw.push(item);
+    try {
+      for (const i of [2, 3]) {
+        if (i >= inner.length) {
+          throw new RangeError(`payload has ${inner.length} elements, no inner[${i}]`);
+        }
+        const block = inner[i];
+        if (!Array.isArray(block)) continue;
+        if (block.length === 0) {
+          throw new RangeError(`inner[${i}] is empty, no inner[${i}][0]`);
+        }
+        const rows = block[0];
+        // Python would iterate any iterable here; the only shape Google
+        // has ever served is a list, and anything else reaches
+        // SearchParseError there too (every "row" fails to parse), just
+        // by a longer route and with a less useful message.
+        if (!Array.isArray(rows)) {
+          throw new TypeError(`inner[${i}][0] is ${typeof rows}, not a list of rows`);
+        }
+        for (const item of rows) flightsRaw.push(item);
       }
+    } catch (err) {
+      throw new SearchParseError(
+        "Shopping response shape changed — no flights array at inner[2]/[3]: " +
+          `${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
     }
 
     const flights: FlightResult[] = [];
     const failureSamples: string[] = [];
     let anyFailure = false;
+    const noteFailure = (reason: string): void => {
+      anyFailure = true;
+      if (!failureSamples.includes(reason) && failureSamples.length < 3) {
+        failureSamples.push(reason);
+      }
+    };
     for (const row of flightsRaw) {
-      if (!Array.isArray(row)) continue;
+      // A row that is not a list is a *failed* row, not an absent one.
+      // Python hands it to `parse_flight_row` and gets back
+      // `TypeError: 'int' object is not subscriptable`, which counts
+      // towards the "parsed 0 of N" tripwire below. Skipping it quietly
+      // meant a block of scalars came back as "no flights on this route".
+      // One bad row among good ones still costs only that row.
+      if (!Array.isArray(row)) {
+        noteFailure(`TypeError: '${row === null ? "null" : typeof row}' row is not subscriptable`);
+        continue;
+      }
       try {
         flights.push(parseFlightRow(row));
       } catch (err) {
-        anyFailure = true;
-        const reason = `${err instanceof Error ? err.name : "Error"}: ${err instanceof Error ? err.message : String(err)}`;
-        if (!failureSamples.includes(reason) && failureSamples.length < 3) {
-          failureSamples.push(reason);
-        }
+        noteFailure(
+          `${err instanceof Error ? err.name : "Error"}: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
 
@@ -129,10 +267,24 @@ export class SearchFlights {
       );
     }
 
-    return flights.length > 0 ? flights : null;
+    const kept = applyClientSideFilters(flights, filters);
+    sortFlights(kept, filters.sort_by);
+    return kept.length > 0 ? kept : null;
   }
 
-  /** Fetch bookable fare options for a selected itinerary. */
+  /**
+   * Fetch bookable fare options for a selected itinerary.
+   *
+   * Currently unavailable: this is the one call still made against the
+   * `GetBookingResults` RPC, which since 2026-08 requires an
+   * `x-goog-batchexecute-bgr` header signed by Google's own page
+   * JavaScript. Expect {@link SearchRejectedError}. Per-itinerary booking
+   * links are still available — see
+   * {@link SearchFlights.buildFlightBookingUrl}, which needs no network
+   * call at all.
+   *
+   * @throws {SearchRejectedError} Google declined the RPC (the normal outcome).
+   */
   async getBookingOptions(
     flight: FlightResult | FlightResult[],
     filters: FlightSearchFilters,
@@ -197,7 +349,10 @@ export class SearchFlights {
       options.language ?? null,
       options.country ?? null,
     );
-    const response = await this.client.post(url, { body: `f.req=${encoded}` });
+    const response = await this.client.post(url, {
+      body: `f.req=${encoded}`,
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
 
     const chunks = [...iterWrbChunks(response.text)];
     if (chunks.length === 0) return [];
@@ -268,13 +423,30 @@ export class SearchFlights {
     );
   }
 
+  /**
+   * Cache the shopping session id from `inner[0][4]` of a search payload.
+   *
+   * A shape change here means booking calls fall back to "missing token"
+   * errors, so it warns rather than silently leaving the cache untouched.
+   */
   private _captureSessionId(inner: unknown): void {
-    if (!Array.isArray(inner)) return;
-    const first = inner[0];
-    if (!Array.isArray(first)) return;
+    const first = Array.isArray(inner) ? inner[0] : undefined;
+    if (!Array.isArray(first)) {
+      getSearchLogger().warn(
+        "Failed to capture the shopping session id from the search page " +
+          "(payload[0] is not an array); getBookingOptions() calls without an " +
+          "explicit sessionId will fail.",
+      );
+      return;
+    }
     const session = first[4];
     if (typeof session === "string" && session.length > 0) {
       this._lastSessionId = session;
+    } else {
+      getSearchLogger().warn(
+        `Search page payload[0][4] is ${JSON.stringify(session)}, not a non-empty ` +
+          "string; the session cache is unchanged.",
+      );
     }
   }
 
@@ -290,6 +462,7 @@ export class SearchFlights {
       currency: string | null;
       language: string | null;
       country: string | null;
+      signal?: AbortSignal;
     },
   ): Promise<Array<FlightResult[]>> {
     const numSegments = filters.flight_segments.length;
@@ -311,6 +484,7 @@ export class SearchFlights {
         language: opts.language,
         country: opts.country,
         captureSession: false,
+        signal: opts.signal,
       });
       if (subFlights == null) return [outbound, null];
       if (selectedCount + 1 < numSegments - 1) {
@@ -353,40 +527,4 @@ export class SearchFlights {
     const wrapped: unknown[] = [null, JSON.stringify(payload)];
     return encodeURIComponent(JSON.stringify(wrapped));
   }
-}
-
-function cloneFilters(filters: FlightSearchFilters): FlightSearchFilters {
-  // The constructor's date validator would re-reject past travel dates if
-  // we ran it on a clone — bypass by writing fields directly.
-  const out = Object.create(FlightSearchFilters.prototype) as FlightSearchFilters;
-  Object.assign(out, {
-    trip_type: filters.trip_type,
-    passenger_info: { ...filters.passenger_info },
-    flight_segments: filters.flight_segments.map((s) => {
-      const clone = Object.create(Object.getPrototypeOf(s)) as typeof s;
-      Object.assign(clone, {
-        departure_airport: s.departure_airport,
-        arrival_airport: s.arrival_airport,
-        travel_date: s.travel_date,
-        time_restrictions: s.time_restrictions,
-        selected_flight: s.selected_flight,
-      });
-      return clone;
-    }),
-    stops: filters.stops,
-    seat_type: filters.seat_type,
-    price_limit: filters.price_limit ? { ...filters.price_limit } : null,
-    airlines: filters.airlines ? [...filters.airlines] : null,
-    airlines_exclude: filters.airlines_exclude ? [...filters.airlines_exclude] : null,
-    alliances: filters.alliances ? [...filters.alliances] : null,
-    alliances_exclude: filters.alliances_exclude ? [...filters.alliances_exclude] : null,
-    max_duration: filters.max_duration,
-    layover_restrictions: filters.layover_restrictions ? { ...filters.layover_restrictions } : null,
-    sort_by: filters.sort_by,
-    exclude_basic_economy: filters.exclude_basic_economy,
-    emissions: filters.emissions,
-    bags: filters.bags ? { ...filters.bags } : null,
-    show_all_results: filters.show_all_results,
-  });
-  return out;
 }
