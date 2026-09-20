@@ -92,6 +92,7 @@ def assert_live_search(result: dict, *, results_key: str, trip_type: str) -> Non
 class TestMCPServer:
     """Test suite for MCP server tools."""
 
+    @pytest.mark.live
     def test_search_flights_one_way(self):
         """Test one-way flight search."""
         params = FlightSearchParams(
@@ -107,6 +108,7 @@ class TestMCPServer:
 
         assert_live_search(result, results_key="flights", trip_type="ONE_WAY")
 
+    @pytest.mark.live
     def test_search_flights_round_trip(self):
         """Test round-trip flight search."""
         params = FlightSearchParams(
@@ -125,6 +127,7 @@ class TestMCPServer:
 
         assert_live_search(result, results_key="flights", trip_type="ROUND_TRIP")
 
+    @pytest.mark.live
     def test_search_dates_one_way(self):
         """Test one-way date search."""
         start_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
@@ -147,6 +150,7 @@ class TestMCPServer:
         if result["success"]:
             assert "date_range" in result
 
+    @pytest.mark.live
     def test_search_dates_round_trip(self):
         """Test round-trip date search."""
         start_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
