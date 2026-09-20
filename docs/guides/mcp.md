@@ -318,6 +318,7 @@ vocabulary once.
 | `parse_error` | `false` | Google served a page fli couldn't read. Usually (not always) a regional consent/blocked interstitial. Not retryable as-is; set `FLI_SOCS_COOKIE` (EU/EEA) and retry — don't just retry the same request unchanged. |
 | `rejected_error` | `false` | Google refused the RPC outright (e.g. `get_booking_options`'s `GetBookingResults` call today). Deterministic; retrying the same request will not help. |
 | `timeout` | `true` | The request to Google Flights timed out. See retry guidance below. |
+| `certificate_error` | `false` | TLS certificate verification failed, most often behind a TLS-intercepting corporate proxy. Deterministic; set `FLI_CA_BUNDLE` (or `CURL_CA_BUNDLE` / `REQUESTS_CA_BUNDLE`) to a CA bundle path and try again — retrying unchanged will not help. |
 | `connection_error` | `true` | A network/DNS issue prevented reaching Google Flights. See retry guidance below. |
 | `http_error` | `true` iff `http_status` is 429 or 5xx | Non-2xx HTTP response from Google; check `http_status`. See retry guidance below. |
 | `search_error` | `false` | Any other typed search-client failure not covered above. |
@@ -381,6 +382,23 @@ The MCP server can be configured via environment variables:
 | `FLI_MCP_DEFAULT_SORT_BY` | Default sorting strategy | CHEAPEST |
 | `FLI_MCP_DEFAULT_DEPARTURE_WINDOW` | Default departure window (HH-HH) | null |
 | `FLI_MCP_MAX_RESULTS` | Maximum results returned | null (no limit) |
+
+The underlying Google Flights HTTP client (shared with the CLI, not
+`FLI_MCP_`-prefixed) also honors these variables:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `FLI_TIMEOUT` | Request timeout in seconds | 60 |
+| `FLI_SOCS_COOKIE` | Consent cookie sent to skip Google's EU/EEA interstitial; set empty to send none | a pre-accepted value |
+| `FLI_CA_BUNDLE` | Path to a PEM CA bundle for networks with a custom certificate authority (e.g. a TLS-intercepting corporate proxy) | unset |
+| `CURL_CA_BUNDLE` | Fallback CA bundle path, used when `FLI_CA_BUNDLE` is unset | unset |
+| `REQUESTS_CA_BUNDLE` | Fallback CA bundle path, used when the two above are unset | unset |
+
+If a search fails with `error_type: "certificate_error"`, configure one of
+the CA bundle variables above instead of disabling TLS verification. These
+are read once per worker thread, the first time that thread makes a
+request — for a long-running MCP server process, restart it after changing
+one so already-created sessions pick up the new value.
 
 ## Example Conversations
 

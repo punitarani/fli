@@ -171,6 +171,11 @@ Consequences to keep in mind when changing search code:
 - `FLI_SOCS_COOKIE` overrides the pre-accepted `SOCS` consent cookie the client
   sends so EU/EEA IPs skip Google's consent interstitial; set it empty to send
   no cookie.
+- `FLI_CA_BUNDLE` (then `CURL_CA_BUNDLE`, then `REQUESTS_CA_BUNDLE`) points the
+  client at a custom CA bundle for networks behind a TLS-intercepting
+  corporate proxy. A bad or missing path raises `SearchCertificateError`
+  (`error_type: "certificate_error"`) naming the variable; the client does
+  not retry it, since a fixed bundle either verifies or it doesn't.
 
 ## Key Files and Entry Points
 
@@ -287,6 +292,7 @@ as-is rather than renamed for the MCP tools.
 | `parse_error` | `false` | Google served a page fli couldn't read. Usually (not always) a regional consent/blocked interstitial. Not retryable as-is; set `FLI_SOCS_COOKIE` (EU/EEA) and retry — don't just retry the same request unchanged. |
 | `rejected_error` | `false` | Google refused the RPC outright (e.g. `get_booking_options`'s `GetBookingResults` call today — see above). Deterministic; retrying the same request will not help. |
 | `timeout` | `true` | The request to Google Flights timed out. See retry guidance below. |
+| `certificate_error` | `false` | TLS certificate verification failed, most often behind a TLS-intercepting corporate proxy. Deterministic; set `FLI_CA_BUNDLE` (or `CURL_CA_BUNDLE` / `REQUESTS_CA_BUNDLE`) and try again — retrying unchanged will not help. |
 | `connection_error` | `true` | A network/DNS issue prevented reaching Google Flights. See retry guidance below. |
 | `http_error` | `true` iff `http_status` is 429 or 5xx | Non-2xx HTTP response from Google; check `http_status`. See retry guidance below. |
 | `search_error` | `false` | Any other typed search-client failure not covered above. |

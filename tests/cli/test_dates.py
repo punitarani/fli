@@ -11,6 +11,7 @@ from fli.models import Airline
 from fli.models.google_flights.base import TripType
 from fli.search import DatePrice
 from fli.search.exceptions import (
+    SearchCertificateError,
     SearchClientError,
     SearchConnectionError,
     SearchHTTPError,
@@ -451,6 +452,11 @@ def test_dates_json_invalid_airport_code(runner, mock_search_dates, mock_console
         # Released v0.9.0 CLI --format json values — must not move.
         pytest.param(SearchTimeoutError("slow"), "timeout", True, id="timeout"),
         pytest.param(SearchConnectionError("no route"), "connection_error", True, id="connection"),
+        # Fix round 1 (I3): certificate_error is a SearchConnectionError
+        # subclass but, unlike its parent, deterministic — not retryable.
+        pytest.param(
+            SearchCertificateError("bad cert"), "certificate_error", False, id="certificate"
+        ),
         pytest.param(SearchHTTPError("bad gw", status_code=502), "http_error", True, id="http-5xx"),
         pytest.param(
             SearchClientError("generic"), "search_error", False, id="generic-search-error"

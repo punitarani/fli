@@ -38,6 +38,29 @@ def pin_today(monkeypatch):
     return _pin
 
 
+@pytest.fixture(autouse=True)
+def _scrub_ca_bundle_env(monkeypatch):
+    """Clear FLI_CA_BUNDLE / CURL_CA_BUNDLE / REQUESTS_CA_BUNDLE for every test.
+
+    ``fli.search.client._ca_bundle_from_env()`` reads these on first use of a
+    thread's session and raises ``SearchCertificateError`` if a configured
+    path is not a readable file. An ambient value is very plausible on a
+    developer machine or CI runner behind a corporate proxy, and since fli
+    reads these variables it is load-bearing. Without this fixture, any test
+    that indirectly builds a fresh session — a CLI command, a bare
+    ``Client()``/``get_client()`` — on a machine with e.g. a stale
+    ``CURL_CA_BUNDLE=/no/longer/there`` would
+    fail with an unrelated ``SearchCertificateError`` instead of exercising
+    the behavior actually under test. Autouse, session-wide, so no test file
+    has to remember to opt in; a test that wants to exercise the CA-bundle
+    mechanism itself sets the variable(s) back with ``monkeypatch.setenv``
+    after this fixture has already cleared them.
+    """
+    monkeypatch.delenv("FLI_CA_BUNDLE", raising=False)
+    monkeypatch.delenv("CURL_CA_BUNDLE", raising=False)
+    monkeypatch.delenv("REQUESTS_CA_BUNDLE", raising=False)
+
+
 def pytest_addoption(parser) -> None:
     """Add options to pytest."""
     parser.addoption("--fuzz", action="store_true", help="Run fuzz tests")

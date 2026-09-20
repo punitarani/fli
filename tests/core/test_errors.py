@@ -25,6 +25,7 @@ from pydantic import BaseModel, ValidationError
 from fli.core.errors import ErrorClassification, classify_error
 from fli.core.parsers import ParseError
 from fli.search.exceptions import (
+    SearchCertificateError,
     SearchClientError,
     SearchConnectionError,
     SearchHTTPError,
@@ -56,6 +57,13 @@ _EXPECTED: dict[type, tuple[type[BaseException], tuple[str, bool]]] = {
     SearchClientError: (SearchClientError("boom"), ("search_error", False)),
     SearchTimeoutError: (SearchTimeoutError("timed out"), ("timeout", True)),
     SearchConnectionError: (SearchConnectionError("no route"), ("connection_error", True)),
+    # A SearchConnectionError subclass, but deterministic (a fixed CA bundle
+    # / certificate either verifies or it doesn't) — unlike its parent, not
+    # retryable. See classify_error()'s docstring and PR #164.
+    SearchCertificateError: (
+        SearchCertificateError("bad cert"),
+        ("certificate_error", False),
+    ),
     SearchHTTPError: (SearchHTTPError("bad response", status_code=500), ("http_error", True)),
     SearchRejectedError: (SearchRejectedError(13), ("rejected_error", False)),
     SearchUnsupportedError: (SearchUnsupportedError("multi-city"), ("unsupported_error", False)),
