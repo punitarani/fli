@@ -187,10 +187,29 @@ export interface DateOutcome {
   error: unknown;
   /** False for dates skipped before any request, so they don't count as failures. */
   attempted: boolean;
+  /**
+   * How many rows the page decoded to *before* `applyClientSideFilters` ran,
+   * or `null`/absent when the page never loaded (`failure` is set) or the
+   * outcome was built by hand. Zero here means Google itself inlined
+   * nothing for the date; a positive count that still left `price` unset
+   * means the caller's own airline/price/duration/window filter removed
+   * every row — a different cause, so the two must not be conflated when
+   * deciding whether to blame a sparse passenger mix. Optional so existing
+   * hand-built ``DateOutcome`` literals (test fixtures predating this field)
+   * still type-check; an absent value reads the same as `null`.
+   */
+  rowsBeforeFilters?: number | null;
 }
 
 function outcome(over: Partial<DateOutcome> = {}): DateOutcome {
-  return { price: null, failure: null, error: null, attempted: true, ...over };
+  return {
+    price: null,
+    failure: null,
+    error: null,
+    attempted: true,
+    rowsBeforeFilters: null,
+    ...over,
+  };
 }
 
 /** Midnight UTC today. */
@@ -276,9 +295,30 @@ export class SearchDates {
   static readonly MAX_DATES_PER_SEARCH = MAX_DATES_PER_SEARCH;
 
   private readonly client: Client;
+  private _sparsePassengerMix = false;
 
   constructor(client?: Client) {
     this.client = client ?? getClient();
+  }
+
+  /**
+   * Whether the sparse-passenger-mix warning fired on the most recent `search()`.
+   *
+   * `true` exactly when the empty sweep this instance last returned (or
+   * threw out of) was consistent with Google's client-side pricing gap for
+   * children/infants rather than the caller's own filters — see
+   * {@link SearchDates._warnIfSparsePassengerMix}. Reset to `false` at the
+   * start of every `search()` call, including ones that throw, so a stale
+   * `true` from an earlier call never leaks into a later one.
+   *
+   * Reflects only the *last completed* `search()` call on this instance and
+   * is not meant for instances shared across concurrent searches. Not
+   * currently read by any caller in this package (unlike
+   * {@link SearchFlights.sparsePassengerMix}); exposed here for symmetry
+   * with the warning this class already logs.
+   */
+  get sparsePassengerMix(): boolean {
+    return this._sparsePassengerMix;
   }
 
   /**
@@ -304,6 +344,10 @@ export class SearchDates {
     filters: DateSearchFilters,
     options: DateSearchOptions = {},
   ): Promise<DatePrice[] | null> {
+    // Reset before anything below can throw, so a search that throws never
+    // leaves a stale true from an earlier call on this instance.
+    this._sparsePassengerMix = false;
+
     throwIfAborted(options.signal);
 
     const dropped = unsupportedFilters(filters);
@@ -352,7 +396,11 @@ export class SearchDates {
     throwIfAborted(options.signal);
 
     const result = SearchDates._collect(outcomes, tasks.length, health.skipped);
-    SearchDates._warnIfSparsePassengerMix(outcomes, result, filters.passenger_info);
+    this._sparsePassengerMix = SearchDates._warnIfSparsePassengerMix(
+      outcomes,
+      result,
+      filters.passenger_info,
+    );
     return result;
   }
 
@@ -362,26 +410,38 @@ export class SearchDates {
    * `_collect` already turns "every attempted date failed" or a tripped
    * breaker into a throw, and a minority of load failures into its own
    * summary warning (see its docstring) — so this only has something to add
-   * when nothing priced *and* not one attempted date failed to load: every
-   * page that loaded simply had no flights. For a party with children or
-   * infants that is the shape Google's client-side pricing produces, not
-   * evidence the route has no service.
+   * when nothing priced *and* not one attempted date failed to load.
+   *
+   * That alone is not enough, though: a date whose page loaded and decoded
+   * rows that the caller's own airline/price/duration/window filter then
+   * removed looks identical to one Google itself served nothing for, unless
+   * the pre-filter row count is checked too. Only when at least one loaded
+   * date's page decoded to *zero* rows before filtering is the emptiness
+   * actually Google's doing — see {@link DateOutcome.rowsBeforeFilters}. For
+   * a party with children or infants that is the shape Google's
+   * client-side pricing produces, not evidence the route has no service.
    *
    * Internal — underscore-prefixed rather than private, mirroring
    * {@link SearchDates._collect}, so tests can drive it with a fixed set of
    * outcomes instead of racing a real sweep's per-date failure logging into
    * the state they want to assert.
+   *
+   * @returns Whether the warning fired — the caller mirrors this onto
+   *   {@link SearchDates.sparsePassengerMix}.
    */
   static _warnIfSparsePassengerMix(
     outcomes: DateOutcome[],
     result: DatePrice[] | null,
     passengerInfo: PassengerInfo,
-  ): void {
-    if (result != null) return;
-    if (outcomes.some((o) => o.attempted && o.failure != null)) return;
-    if (hasChildrenOrInfants(passengerInfo)) {
-      getSearchLogger().warn(SPARSE_PASSENGER_MIX_WARNING);
+  ): boolean {
+    if (result != null) return false;
+    if (outcomes.some((o) => o.attempted && o.failure != null)) return false;
+    if (!outcomes.some((o) => o.attempted && o.failure == null && o.rowsBeforeFilters === 0)) {
+      return false;
     }
+    if (!hasChildrenOrInfants(passengerInfo)) return false;
+    getSearchLogger().warn(SPARSE_PASSENGER_MIX_WARNING);
+    return true;
   }
 
   /** List every date in one chunk's `from_date`..`to_date` range. */
@@ -629,6 +689,7 @@ export class SearchDates {
     );
 
     let flights: FlightResult[];
+    let rawFlights: FlightResult[];
     try {
       const payload = await fetchPayload(this.client, url, { signal: options.signal });
       if (payload == null) {
@@ -654,7 +715,14 @@ export class SearchDates {
       // Decoding and filtering sit inside the `try` on purpose: they walk
       // attacker-shaped data from the wire, and letting one odd row throw
       // out of here would sink the whole sweep.
-      flights = applyClientSideFilters(flightsIn(payload), filters);
+      //
+      // `rawFlights.length` is captured ahead of the filter call
+      // deliberately: it is what tells a genuinely empty Google page (0
+      // rows decoded) apart from a page Google filled that the caller's
+      // own airline/price/duration/window filter then emptied — see
+      // `DateOutcome.rowsBeforeFilters` and `_warnIfSparsePassengerMix`.
+      rawFlights = flightsIn(payload);
+      flights = applyClientSideFilters(rawFlights, filters);
     } catch (err) {
       // An in-flight date that was cancelled is not a failed date. Warning
       // about it, counting it towards "every date failed", or feeding it
@@ -686,9 +754,10 @@ export class SearchDates {
         cheapestPrice = flight.price;
       }
     }
-    if (cheapest == null) return outcome();
+    if (cheapest == null) return outcome({ rowsBeforeFilters: rawFlights.length });
 
     return outcome({
+      rowsBeforeFilters: rawFlights.length,
       price: {
         date: dates as [Date] | [Date, Date],
         price: cheapestPrice,

@@ -57,6 +57,36 @@ function hasChildrenOrInfants(passengerInfo: PassengerInfo): boolean {
 }
 
 /**
+ * Notes whether any fetched page decoded to zero rows before filtering.
+ *
+ * A round trip fetches the outbound page and then one page per expanded
+ * candidate (up to `topN`) as concurrent promises, so this is a fresh,
+ * per-{@link SearchFlights.search} object — never instance state. JavaScript
+ * runs those workers on one thread, so unlike the Python original this needs
+ * no lock, but it is still shared mutable state read after every worker's
+ * promise has settled, the same role `SweepHealth` plays in `dates.ts`.
+ *
+ * Distinguishes "Google itself inlined nothing" (rows === 0) from "Google
+ * inlined rows and the caller's own airline/price/duration/window filter
+ * removed every one of them" (rows > 0 but `applyClientSideFilters` emptied
+ * the list) — only the former is evidence of the sparse-passenger-mix
+ * pricing gap.
+ */
+class RowCountTracker {
+  private anyZero = false;
+
+  /** Note one page's decoded row count, before client-side filtering. */
+  record(rawRowCount: number): void {
+    if (rawRowCount === 0) this.anyZero = true;
+  }
+
+  /** Whether any recorded page decoded to zero rows. */
+  get anyZeroRows(): boolean {
+    return this.anyZero;
+  }
+}
+
+/**
  * Result ordering for `sortBy`.
  *
  * The search page serves Google's own default order, so the sort the
@@ -137,9 +167,35 @@ export class SearchFlights {
 
   private readonly client: Client;
   private _lastSessionId: string | null = null;
+  private _sparsePassengerMix = false;
 
   constructor(client?: Client) {
     this.client = client ?? getClient();
+  }
+
+  /**
+   * Whether the sparse-passenger-mix warning fired on the most recent `search()`.
+   *
+   * `true` exactly when the empty result this instance last returned (or
+   * threw out of) was consistent with Google's client-side pricing gap for
+   * children/infants — at least one fetched page decoded to zero rows
+   * before client-side filtering, and the party had a child or infant —
+   * rather than the caller's own airline/price/duration/window filter
+   * removing rows Google did inline. See {@link SPARSE_PASSENGER_MIX_WARNING}.
+   * Reset to `false` at the start of every `search()` call, including ones
+   * that throw, so a stale `true` from an earlier call never leaks into a
+   * later one.
+   *
+   * Reflects only the *last completed* `search()` call on this instance and
+   * is not meant for instances shared across concurrent searches — two
+   * overlapping `search()` calls on one `SearchFlights` would race on this
+   * the same way they already race on the cached session id used by
+   * {@link SearchFlights.getBookingOptions}. Any MCP-equivalent or CLI-style
+   * caller should read this after `search()` instead of recomputing the
+   * condition itself.
+   */
+  get sparsePassengerMix(): boolean {
+    return this._sparsePassengerMix;
   }
 
   /**
@@ -159,16 +215,24 @@ export class SearchFlights {
     filters: FlightSearchFilters,
     options: SearchOptions = {},
   ): Promise<Array<FlightResult | FlightResult[]> | null> {
+    // Reset before anything below can throw, so a search that throws never
+    // leaves a stale true from an earlier call on this instance.
+    this._sparsePassengerMix = false;
+
     const topN = options.topN ?? 5;
+    // Per-search — never instance state, which the round trip's concurrent
+    // expansion workers (below) would trample mid-flight.
+    const tracker = new RowCountTracker();
     const flights = await this._fetchFlights(filters, {
       currency: options.currency ?? null,
       language: options.language ?? null,
       country: options.country ?? null,
       captureSession: true,
       signal: options.signal,
+      tracker,
     });
     if (flights == null) {
-      this._warnIfSparsePassengerMix(filters);
+      this._warnIfSparsePassengerMix(filters, tracker);
       return null;
     }
     if (filters.trip_type === TripType.ONE_WAY) return flights;
@@ -178,8 +242,9 @@ export class SearchFlights {
       language: options.language ?? null,
       country: options.country ?? null,
       signal: options.signal,
+      tracker,
     });
-    if (combos.length === 0) this._warnIfSparsePassengerMix(filters);
+    if (combos.length === 0) this._warnIfSparsePassengerMix(filters, tracker);
     return combos;
   }
 
@@ -191,9 +256,17 @@ export class SearchFlights {
    * which the round-trip expansion calls once per candidate outbound. That
    * keeps this to exactly one warning per `search` call, one-way or
    * round-trip alike.
+   *
+   * `tracker` is what keeps this from misattributing an empty result: the
+   * final list can be empty either because Google inlined nothing
+   * (`tracker.anyZeroRows`) or because it inlined rows the caller's own
+   * airline/price/duration/window filter then removed entirely — the
+   * warning must only fire for the former.
    */
-  private _warnIfSparsePassengerMix(filters: FlightSearchFilters): void {
+  private _warnIfSparsePassengerMix(filters: FlightSearchFilters, tracker: RowCountTracker): void {
+    if (!tracker.anyZeroRows) return;
     if (hasChildrenOrInfants(filters.passenger_info)) {
+      this._sparsePassengerMix = true;
       getSearchLogger().warn(SPARSE_PASSENGER_MIX_WARNING);
     }
   }
@@ -206,6 +279,7 @@ export class SearchFlights {
       country: string | null;
       captureSession: boolean;
       signal?: AbortSignal;
+      tracker?: RowCountTracker;
     },
   ): Promise<FlightResult[] | null> {
     throwIfAborted(opts.signal);
@@ -312,6 +386,7 @@ export class SearchFlights {
       );
     }
 
+    opts.tracker?.record(flights.length);
     const kept = applyClientSideFilters(flights, filters);
     sortFlights(kept, filters.sort_by);
     return kept.length > 0 ? kept : null;
@@ -508,6 +583,7 @@ export class SearchFlights {
       language: string | null;
       country: string | null;
       signal?: AbortSignal;
+      tracker?: RowCountTracker;
     },
   ): Promise<Array<FlightResult[]>> {
     const numSegments = filters.flight_segments.length;
@@ -530,6 +606,7 @@ export class SearchFlights {
         country: opts.country,
         captureSession: false,
         signal: opts.signal,
+        tracker: opts.tracker,
       });
       if (subFlights == null) return [outbound, null];
       if (selectedCount + 1 < numSegments - 1) {

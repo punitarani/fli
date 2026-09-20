@@ -9,10 +9,18 @@
  * pin the one warning each call logs to explain the difference, and confirm
  * it stays silent whenever it would not apply.
  *
+ * A result can also come back empty because the *caller's own* client-side
+ * filter (airline, price cap, max duration, departure window) removed every
+ * row Google did inline — that is not evidence of the passenger-mix pricing
+ * gap, so a second family of tests below pins that the warning (and the
+ * `sparsePassengerMix` getter both classes expose) only fires when at least
+ * one fetched page decoded to zero rows *before* filtering.
+ *
  * Mirrors tests/search/test_sparse_passenger_warning.py.
  */
 
 import { describe, expect, test } from "bun:test";
+import { Airline } from "../../src/models/airline.ts";
 import { Airport } from "../../src/models/airport.ts";
 import {
   FlightSegment,
@@ -49,9 +57,9 @@ function futureDate(daysAhead = 45): string {
 }
 
 /** A minimal flight row `parseFlightRow` accepts. */
-function flightRow(price = 199.99): unknown {
+function flightRow(price = 199.99, airlineCode = "DL"): unknown {
   const leg: unknown[] = [
-    "AA",
+    airlineCode,
     null,
     null,
     "JFK",
@@ -73,12 +81,12 @@ function flightRow(price = 199.99): unknown {
     false,
     [2026, 12, 25],
     [2026, 12, 25],
-    ["AA", "100"],
+    [airlineCode, "100"],
   ];
   while (leg.length < 32) leg.push(null);
   const detail: unknown[] = Array.from({ length: 25 }, () => null);
-  detail[0] = "AA";
-  detail[1] = ["American Airlines"];
+  detail[0] = airlineCode;
+  detail[1] = ["Carrier"];
   detail[2] = [leg];
   detail[9] = 375;
   const row: unknown[] = Array.from({ length: 11 }, () => null);
@@ -99,7 +107,10 @@ function searchPage(rows: unknown[]): string {
   return asSearchPage(payload);
 }
 
-function oneWayFlightFilters(passengerInfo: PassengerInfo): FlightSearchFilters {
+function oneWayFlightFilters(
+  passengerInfo: PassengerInfo,
+  overrides: Partial<ConstructorParameters<typeof FlightSearchFilters>[0]> = {},
+): FlightSearchFilters {
   return new FlightSearchFilters({
     passenger_info: passengerInfo,
     flight_segments: [
@@ -109,10 +120,14 @@ function oneWayFlightFilters(passengerInfo: PassengerInfo): FlightSearchFilters 
         travel_date: futureDate(),
       }),
     ],
+    ...overrides,
   });
 }
 
-function roundTripFlightFilters(passengerInfo: PassengerInfo): FlightSearchFilters {
+function roundTripFlightFilters(
+  passengerInfo: PassengerInfo,
+  overrides: Partial<ConstructorParameters<typeof FlightSearchFilters>[0]> = {},
+): FlightSearchFilters {
   return new FlightSearchFilters({
     trip_type: TripType.ROUND_TRIP,
     passenger_info: passengerInfo,
@@ -128,10 +143,15 @@ function roundTripFlightFilters(passengerInfo: PassengerInfo): FlightSearchFilte
         travel_date: futureDate(52),
       }),
     ],
+    ...overrides,
   });
 }
 
-function oneWayDateFilters(days: number, passengerInfo: PassengerInfo): DateSearchFilters {
+function oneWayDateFilters(
+  days: number,
+  passengerInfo: PassengerInfo,
+  overrides: Partial<ConstructorParameters<typeof DateSearchFilters>[0]> = {},
+): DateSearchFilters {
   const fromD = futureDate(30);
   return new DateSearchFilters({
     passenger_info: passengerInfo,
@@ -144,6 +164,7 @@ function oneWayDateFilters(days: number, passengerInfo: PassengerInfo): DateSear
     ],
     from_date: fromD,
     to_date: futureDate(30 + days - 1),
+    ...overrides,
   });
 }
 
@@ -160,34 +181,55 @@ function clientServing(bodies: string[]): Client {
   });
 }
 
+/**
+ * A Client whose response body can be swapped between calls, so the same
+ * SearchFlights/SearchDates instance can be reused across two searches —
+ * needed to test that `sparsePassengerMix` resets on the *same* instance
+ * (TS `Client` takes its `fetchImpl` once at construction, unlike Python's
+ * mutable `client.get`).
+ */
+function swappableClient(initialBody: string): { client: Client; setBody: (body: string) => void } {
+  let body = initialBody;
+  const client = new Client({
+    retries: 1,
+    backoffMs: 1,
+    fetchImpl: (async () => new Response(body, { status: 200 })) as unknown as typeof fetch,
+  });
+  return { client, setBody: (b: string) => (body = b) };
+}
+
 describe("SearchFlights sparse-passenger-mix warning", () => {
   test("one-way empty result with a child warns exactly once", async () => {
     const client = clientServing([searchPage([])]);
     const warnings: string[] = [];
     setSearchLogger({ warn: (m) => warnings.push(m), debug: () => {} });
+    const search = new SearchFlights(client);
     let result: unknown;
     try {
-      result = await new SearchFlights(client).search(oneWayFlightFilters(WITH_CHILD));
+      result = await search.search(oneWayFlightFilters(WITH_CHILD));
     } finally {
       setSearchLogger(null);
     }
     expect(result).toBeNull();
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toBe(FLIGHTS_SPARSE_WARNING);
+    expect(search.sparsePassengerMix).toBe(true);
   });
 
   test("one-way empty result, adults only, does not warn", async () => {
     const client = clientServing([searchPage([])]);
     const warnings: string[] = [];
     setSearchLogger({ warn: (m) => warnings.push(m), debug: () => {} });
+    const search = new SearchFlights(client);
     let result: unknown;
     try {
-      result = await new SearchFlights(client).search(oneWayFlightFilters(ADULT_ONLY));
+      result = await search.search(oneWayFlightFilters(ADULT_ONLY));
     } finally {
       setSearchLogger(null);
     }
     expect(result).toBeNull();
     expect(warnings).toHaveLength(0);
+    expect(search.sparsePassengerMix).toBe(false);
   });
 
   test("one-way non-empty result with a child does not warn", async () => {
@@ -255,80 +297,249 @@ describe("SearchFlights sparse-passenger-mix warning", () => {
   });
 });
 
+describe("SearchFlights sparse-passenger-mix misattribution", () => {
+  // Every row here is on airline DL; filtering for AA removes it entirely —
+  // Google *did* inline something, so the sparse-mix diagnosis does not
+  // apply even though the final result is empty and the party has a child.
+
+  test("one-way: rows filtered out by airline does not warn", async () => {
+    const client = clientServing([searchPage([flightRow(199.99, "DL")])]);
+    const warnings: string[] = [];
+    setSearchLogger({ warn: (m) => warnings.push(m), debug: () => {} });
+    const search = new SearchFlights(client);
+    let result: unknown;
+    try {
+      result = await search.search(oneWayFlightFilters(WITH_CHILD, { airlines: [Airline.AA] }));
+    } finally {
+      setSearchLogger(null);
+    }
+    expect(result).toBeNull();
+    expect(warnings).toHaveLength(0);
+    expect(search.sparsePassengerMix).toBe(false);
+  });
+
+  test("round trip: outbound rows filtered out does not warn", async () => {
+    // Never even reaches the return-leg fetch — the outbound leg's
+    // post-filter result is already empty.
+    const client = clientServing([searchPage([flightRow(199.99, "DL")])]);
+    const warnings: string[] = [];
+    setSearchLogger({ warn: (m) => warnings.push(m), debug: () => {} });
+    const search = new SearchFlights(client);
+    let result: unknown;
+    try {
+      result = await search.search(roundTripFlightFilters(WITH_CHILD, { airlines: [Airline.AA] }));
+    } finally {
+      setSearchLogger(null);
+    }
+    expect(result).toBeNull();
+    expect(warnings).toHaveLength(0);
+    expect(search.sparsePassengerMix).toBe(false);
+  });
+
+  test("round trip: outbound survives, return-leg row filtered out does not warn", async () => {
+    // Outbound row matches the filter; the return-leg row does not. The
+    // return-leg page still carried a row (Google inlined it) — the
+    // caller's own filter removed it, not Google.
+    const client = clientServing([
+      searchPage([flightRow(199.99, "AA")]),
+      searchPage([flightRow(199.99, "DL")]),
+    ]);
+    const warnings: string[] = [];
+    setSearchLogger({ warn: (m) => warnings.push(m), debug: () => {} });
+    const search = new SearchFlights(client);
+    let result: Array<unknown> | null;
+    try {
+      result = (await search.search(
+        roundTripFlightFilters(WITH_CHILD, { airlines: [Airline.AA] }),
+      )) as Array<unknown> | null;
+    } finally {
+      setSearchLogger(null);
+    }
+    expect(result?.length ?? 0).toBe(0);
+    expect(warnings).toHaveLength(0);
+    expect(search.sparsePassengerMix).toBe(false);
+  });
+});
+
+describe("SearchFlights.sparsePassengerMix lifecycle", () => {
+  test("resets to false after a non-sparse search on the same instance", async () => {
+    const { client, setBody } = swappableClient(searchPage([]));
+    const search = new SearchFlights(client);
+    const warnings: string[] = [];
+    setSearchLogger({ warn: (m) => warnings.push(m), debug: () => {} });
+    try {
+      await search.search(oneWayFlightFilters(WITH_CHILD));
+    } finally {
+      setSearchLogger(null);
+    }
+    expect(search.sparsePassengerMix).toBe(true);
+
+    setBody(searchPage([flightRow()]));
+    const result = await search.search(oneWayFlightFilters(WITH_CHILD));
+    expect(result).not.toBeNull();
+    expect(search.sparsePassengerMix).toBe(false);
+  });
+
+  test("resets to false before a search that throws", async () => {
+    const { client, setBody } = swappableClient(searchPage([]));
+    const search = new SearchFlights(client);
+    const warnings: string[] = [];
+    setSearchLogger({ warn: (m) => warnings.push(m), debug: () => {} });
+    try {
+      await search.search(oneWayFlightFilters(WITH_CHILD));
+    } finally {
+      setSearchLogger(null);
+    }
+    expect(search.sparsePassengerMix).toBe(true);
+
+    setBody("<html><body>consent wall</body></html>");
+    setSearchLogger({ warn: () => {}, debug: () => {} });
+    try {
+      await expect(search.search(oneWayFlightFilters(WITH_CHILD))).rejects.toThrow();
+    } finally {
+      setSearchLogger(null);
+    }
+    expect(search.sparsePassengerMix).toBe(false);
+  });
+});
+
 function priced(price: number): DateOutcome {
   return {
     price: { date: [new Date(2030, 0, 1)], price, currency: "USD" },
     failure: null,
     error: null,
     attempted: true,
+    rowsBeforeFilters: 1,
   };
 }
 
-function loadedEmpty(): DateOutcome {
-  return { price: null, failure: null, error: null, attempted: true };
+function loadedEmptyRawZero(): DateOutcome {
+  return { price: null, failure: null, error: null, attempted: true, rowsBeforeFilters: 0 };
+}
+
+function loadedEmptyFilteredOut(rowsBeforeFilters = 2): DateOutcome {
+  return { price: null, failure: null, error: null, attempted: true, rowsBeforeFilters };
 }
 
 function failedOutcome(failure = "SearchConnectionError: transient"): DateOutcome {
-  return { price: null, failure, error: new Error(failure), attempted: true };
+  return {
+    price: null,
+    failure,
+    error: new Error(failure),
+    attempted: true,
+    rowsBeforeFilters: null,
+  };
 }
 
 describe("SearchDates._warnIfSparsePassengerMix (unit)", () => {
-  test("no result, no failures, child warns exactly once", () => {
-    const outcomes = [loadedEmpty(), loadedEmpty(), loadedEmpty()];
+  test("no result, no failures, zero raw rows, child warns exactly once", () => {
+    const outcomes = [loadedEmptyRawZero(), loadedEmptyRawZero(), loadedEmptyRawZero()];
     const warnings: string[] = [];
     setSearchLogger({ warn: (m) => warnings.push(m), debug: () => {} });
+    let warned: boolean;
     try {
-      SearchDates._warnIfSparsePassengerMix(outcomes, null, WITH_CHILD);
+      warned = SearchDates._warnIfSparsePassengerMix(outcomes, null, WITH_CHILD);
     } finally {
       setSearchLogger(null);
     }
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toBe(DATES_SPARSE_WARNING);
+    expect(warned).toBe(true);
   });
 
   test("no result, no failures, adults only does not warn", () => {
-    const outcomes = [loadedEmpty(), loadedEmpty(), loadedEmpty()];
+    const outcomes = [loadedEmptyRawZero(), loadedEmptyRawZero(), loadedEmptyRawZero()];
     const warnings: string[] = [];
     setSearchLogger({ warn: (m) => warnings.push(m), debug: () => {} });
+    let warned: boolean;
     try {
-      SearchDates._warnIfSparsePassengerMix(outcomes, null, ADULT_ONLY);
+      warned = SearchDates._warnIfSparsePassengerMix(outcomes, null, ADULT_ONLY);
     } finally {
       setSearchLogger(null);
     }
     expect(warnings).toHaveLength(0);
+    expect(warned).toBe(false);
   });
 
   test("no result but a failed date present, child does not warn", () => {
     // A failed date means `_collect` already explains the gap — the two
     // warnings must never stack.
-    const outcomes = [loadedEmpty(), loadedEmpty(), loadedEmpty(), failedOutcome()];
+    const outcomes = [
+      loadedEmptyRawZero(),
+      loadedEmptyRawZero(),
+      loadedEmptyRawZero(),
+      failedOutcome(),
+    ];
     const warnings: string[] = [];
     setSearchLogger({ warn: (m) => warnings.push(m), debug: () => {} });
+    let warned: boolean;
     try {
-      SearchDates._warnIfSparsePassengerMix(outcomes, null, WITH_CHILD);
+      warned = SearchDates._warnIfSparsePassengerMix(outcomes, null, WITH_CHILD);
     } finally {
       setSearchLogger(null);
     }
     expect(warnings).toHaveLength(0);
+    expect(warned).toBe(false);
   });
 
   test("a result present, child does not warn", () => {
     const p = priced(150);
     const warnings: string[] = [];
     setSearchLogger({ warn: (m) => warnings.push(m), debug: () => {} });
+    let warned: boolean;
     try {
-      SearchDates._warnIfSparsePassengerMix([p], [p.price as DatePrice], WITH_CHILD);
+      warned = SearchDates._warnIfSparsePassengerMix([p], [p.price as DatePrice], WITH_CHILD);
     } finally {
       setSearchLogger(null);
     }
     expect(warnings).toHaveLength(0);
+    expect(warned).toBe(false);
+  });
+
+  test("no result, rows filtered out every date, does not warn", () => {
+    // Every date's page carried rows; the caller's own filter emptied all.
+    const outcomes = [
+      loadedEmptyFilteredOut(2),
+      loadedEmptyFilteredOut(3),
+      loadedEmptyFilteredOut(1),
+    ];
+    const warnings: string[] = [];
+    setSearchLogger({ warn: (m) => warnings.push(m), debug: () => {} });
+    let warned: boolean;
+    try {
+      warned = SearchDates._warnIfSparsePassengerMix(outcomes, null, WITH_CHILD);
+    } finally {
+      setSearchLogger(null);
+    }
+    expect(warnings).toHaveLength(0);
+    expect(warned).toBe(false);
+  });
+
+  test("no result, mixed zero and filtered rows, still warns", () => {
+    // At least one date's page was genuinely empty — still the pricing gap.
+    const outcomes = [loadedEmptyFilteredOut(2), loadedEmptyRawZero()];
+    const warnings: string[] = [];
+    setSearchLogger({ warn: (m) => warnings.push(m), debug: () => {} });
+    let warned: boolean;
+    try {
+      warned = SearchDates._warnIfSparsePassengerMix(outcomes, null, WITH_CHILD);
+    } finally {
+      setSearchLogger(null);
+    }
+    expect(warnings).toHaveLength(1);
+    expect(warned).toBe(true);
   });
 
   test("1 failed + 3 empty + child: exactly one warning total, and it is the sweep's own", () => {
     // Exercises `_collect` and `_warnIfSparsePassengerMix` together, in the
     // same order `SearchDates.search` calls them, so the "cannot stack"
     // contract between the two is pinned directly.
-    const outcomes = [loadedEmpty(), loadedEmpty(), loadedEmpty(), failedOutcome()];
+    const outcomes = [
+      loadedEmptyRawZero(),
+      loadedEmptyRawZero(),
+      loadedEmptyRawZero(),
+      failedOutcome(),
+    ];
     const warnings: string[] = [];
     setSearchLogger({ warn: (m) => warnings.push(m), debug: () => {} });
     let result: DatePrice[] | null;
@@ -350,42 +561,82 @@ describe("SearchDates sparse-passenger-mix warning (integration, stubbed)", () =
     const client = clientServing([searchPage([])]);
     const warnings: string[] = [];
     setSearchLogger({ warn: (m) => warnings.push(m), debug: () => {} });
+    const search = new SearchDates(client);
     let result: DatePrice[] | null;
     try {
-      result = await new SearchDates(client).search(oneWayDateFilters(3, WITH_CHILD));
+      result = await search.search(oneWayDateFilters(3, WITH_CHILD));
     } finally {
       setSearchLogger(null);
     }
     expect(result).toBeNull();
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toBe(DATES_SPARSE_WARNING);
+    expect(search.sparsePassengerMix).toBe(true);
   });
 
   test("empty sweep, adults only, does not warn", async () => {
     const client = clientServing([searchPage([])]);
     const warnings: string[] = [];
     setSearchLogger({ warn: (m) => warnings.push(m), debug: () => {} });
+    const search = new SearchDates(client);
     let result: DatePrice[] | null;
     try {
-      result = await new SearchDates(client).search(oneWayDateFilters(3, ADULT_ONLY));
+      result = await search.search(oneWayDateFilters(3, ADULT_ONLY));
     } finally {
       setSearchLogger(null);
     }
     expect(result).toBeNull();
     expect(warnings).toHaveLength(0);
+    expect(search.sparsePassengerMix).toBe(false);
   });
 
   test("sweep with results, child, does not warn", async () => {
     const client = clientServing([searchPage([flightRow()])]);
     const warnings: string[] = [];
     setSearchLogger({ warn: (m) => warnings.push(m), debug: () => {} });
+    const search = new SearchDates(client);
     let result: DatePrice[] | null;
     try {
-      result = await new SearchDates(client).search(oneWayDateFilters(3, WITH_CHILD));
+      result = await search.search(oneWayDateFilters(3, WITH_CHILD));
     } finally {
       setSearchLogger(null);
     }
     expect(result).not.toBeNull();
     expect(warnings).toHaveLength(0);
+    expect(search.sparsePassengerMix).toBe(false);
+  });
+
+  test("sweep: rows filtered out by airline every date does not warn", async () => {
+    const client = clientServing([searchPage([flightRow(199.99, "DL")])]);
+    const warnings: string[] = [];
+    setSearchLogger({ warn: (m) => warnings.push(m), debug: () => {} });
+    const search = new SearchDates(client);
+    let result: DatePrice[] | null;
+    try {
+      result = await search.search(oneWayDateFilters(3, WITH_CHILD, { airlines: [Airline.AA] }));
+    } finally {
+      setSearchLogger(null);
+    }
+    expect(result).toBeNull();
+    expect(warnings).toHaveLength(0);
+    expect(search.sparsePassengerMix).toBe(false);
+  });
+
+  test("sparsePassengerMix resets to false after a non-sparse sweep on the same instance", async () => {
+    const { client, setBody } = swappableClient(searchPage([]));
+    const search = new SearchDates(client);
+    const warnings: string[] = [];
+    setSearchLogger({ warn: (m) => warnings.push(m), debug: () => {} });
+    try {
+      await search.search(oneWayDateFilters(3, WITH_CHILD));
+    } finally {
+      setSearchLogger(null);
+    }
+    expect(search.sparsePassengerMix).toBe(true);
+
+    setBody(searchPage([flightRow()]));
+    const result = await search.search(oneWayDateFilters(3, WITH_CHILD));
+    expect(result).not.toBeNull();
+    expect(search.sparsePassengerMix).toBe(false);
   });
 });
