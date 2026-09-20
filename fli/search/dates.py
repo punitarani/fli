@@ -6,6 +6,7 @@ It is intended to be used for finding the cheapest dates to fly, not the cheapes
 """
 
 import logging
+import threading
 from copy import deepcopy
 from datetime import datetime, timedelta
 from typing import Any, NamedTuple
@@ -45,6 +46,54 @@ comfortably wider than the CLI's 60-day and the MCP prompt's 61-day defaults —
 and caps one search at roughly 190 MB of transfer rather than letting a
 "2026-01-01 to 2026-12-31" request quietly issue 365 requests.
 """
+
+SWEEP_FAILURE_THRESHOLD = 5
+"""Consecutive-from-the-start failures that abandon a sweep.
+
+Retries multiply. The client retries a request three times, and
+:func:`~fli.search._tfs.fetch_payload` fetches a page up to three times, so one
+date can cost nine HTTP requests before it gives up — and a client that is
+being blocked (an EU/EEA IP with the consent cookie disabled, say) fails that
+way on *every* date. Paying it 93 times to learn one fact is the wrong trade.
+
+The breaker only looks at the start of a sweep: it arms while no date has
+produced a usable page, and disarms permanently the moment one does. A sweep
+that is working, with a few transient misses scattered through it, therefore
+keeps the full retry budget for each of those misses.
+"""
+
+
+class _SweepHealth:
+    """Tracks whether a sweep has produced any usable page yet.
+
+    Shared by the worker threads pricing each date, so every read and write is
+    under one lock. ``should_stop`` answers "is this sweep failing
+    deterministically?", which is only ever true before the first success.
+    """
+
+    __slots__ = ("_lock", "_failures", "_any_success", "_threshold")
+
+    def __init__(self, threshold: int):
+        """Arm a breaker that trips after ``threshold`` failures without a success."""
+        self._lock = threading.Lock()
+        self._failures = 0
+        self._any_success = False
+        self._threshold = threshold
+
+    def record_success(self) -> None:
+        """Note a date whose page arrived; disarms the breaker for good."""
+        with self._lock:
+            self._any_success = True
+
+    def record_failure(self) -> None:
+        """Note a date whose page never arrived."""
+        with self._lock:
+            self._failures += 1
+
+    def should_stop(self) -> bool:
+        """Report whether the sweep has only ever failed, and failed enough."""
+        with self._lock:
+            return not self._any_success and self._failures >= self._threshold
 
 
 class DatePrice(BaseModel):
@@ -185,13 +234,24 @@ class SearchDates:
         # inside each chunk's worker deadlocks: both levels share one bounded
         # pool, so the outer tasks can occupy every worker while blocking on
         # inner tasks that can never be scheduled.
+        #
+        # ``health`` is the sweep's circuit breaker: a client that is being
+        # blocked fails identically on every date, and each failed date costs
+        # up to nine HTTP requests once the client's retries and the page
+        # retry multiply. Queued dates check it before spending anything.
+        health = _SweepHealth(SWEEP_FAILURE_THRESHOLD)
         outcomes = parallel_map(
             lambda task: self._price_one_date(
-                task[0], task[1], currency=currency, language=language, country=country
+                task[0],
+                task[1],
+                currency=currency,
+                language=language,
+                country=country,
+                health=health,
             ),
             tasks,
         )
-        return self._collect(outcomes)
+        return self._collect(outcomes, len(tasks))
 
     def _days_in(self, filters: DateSearchFilters) -> list[datetime]:
         """List every date in one chunk's ``from_date``..``to_date`` range."""
@@ -202,7 +262,7 @@ class SearchDates:
         ]
 
     @staticmethod
-    def _collect(outcomes: list[_DateOutcome]) -> list[DatePrice] | None:
+    def _collect(outcomes: list[_DateOutcome], total: int) -> list[DatePrice] | None:
         """Assemble priced dates, raising when nothing could be fetched at all.
 
         A date with no flights is a legitimate answer; a date whose page never
@@ -214,6 +274,12 @@ class SearchDates:
         back without a ``ds:1`` blob raises :class:`SearchParseError`, the same
         class (and hint) a single unreadable page raises there. Anything else
         raises the more general :class:`SearchClientError`.
+
+        Args:
+            outcomes: One entry per date in the range, in date order.
+            total: Dates the sweep set out to price, so the error can say how
+                many were abandoned when the circuit breaker stopped it.
+
         """
         results = [o.price for o in outcomes if o.price is not None]
         attempted = [o for o in outcomes if o.attempted]
@@ -224,15 +290,26 @@ class SearchDates:
                 if outcome.failure not in reasons and len(reasons) < 3:
                     reasons.append(outcome.failure)
             cause = next((o.error for o in failed if o.error is not None), None)
-            error_type = (
-                SearchParseError
-                if all(o.failure == _NO_PAYLOAD for o in failed)
-                else SearchClientError
-            )
-            raise error_type(
+            only_missing_payload = all(o.failure == _NO_PAYLOAD for o in failed)
+            error_type = SearchParseError if only_missing_payload else SearchClientError
+
+            message = (
                 f"Priced 0 of {len(attempted)} dates — every date in the range failed. "
                 f"Reasons: {'; '.join(reasons)}"
-            ) from cause
+            )
+            if len(attempted) < total:
+                message += (
+                    f". Gave up after {len(attempted)} of {total} dates: a sweep that has "
+                    "not loaded a single page is failing for the same reason on every date, "
+                    "and each one costs several requests"
+                )
+            if only_missing_payload:
+                message += (
+                    ". If you are on an EU/EEA IP, Google's consent interstitial serves no "
+                    "results — the client sends a pre-accepted SOCS cookie by default, so "
+                    "check FLI_SOCS_COOKIE has not been set to an empty value"
+                )
+            raise error_type(message) from cause
         return results or None
 
     def _build_chunk_filters(
@@ -285,6 +362,7 @@ class SearchDates:
         currency: str | None,
         language: str | None,
         country: str | None,
+        health: "_SweepHealth | None" = None,
     ) -> _DateOutcome:
         """Price one departure date through its own search-page fetch.
 
@@ -297,6 +375,10 @@ class SearchDates:
         Returns an outcome rather than a bare ``DatePrice | None`` so the
         caller can tell "this date had no flights" apart from "this date never
         loaded" — see :meth:`_collect`.
+
+        ``health`` is the sweep's circuit breaker. It is consulted before any
+        request, so a date still queued when the sweep is already known to be
+        failing deterministically costs nothing at all.
         """
         dates = [day]
         if filters.trip_type == TripType.ROUND_TRIP:
@@ -318,6 +400,13 @@ class SearchDates:
         if day.date() < earliest_searchable_date():
             return _DateOutcome(attempted=False)
 
+        # Nothing in this sweep has loaded and enough dates have failed, so
+        # this one will fail too. Skip it rather than spend its retry budget;
+        # ``attempted=False`` keeps it out of the "everything failed" tally,
+        # which the already-failed dates satisfy on their own.
+        if health is not None and health.should_stop():
+            return _DateOutcome(attempted=False)
+
         url = page_url(build_tfs(filters, travel_dates=travel_dates), currency, language, country)
         try:
             payload = fetch_payload(self.client, url)
@@ -328,7 +417,14 @@ class SearchDates:
                     "Pricing %s failed: the search page carried no ds:1 payload",
                     travel_dates[0],
                 )
+                if health is not None:
+                    health.record_failure()
                 return _DateOutcome(failure=_NO_PAYLOAD)
+
+            if health is not None:
+                # The page arrived and decoded; from here on the sweep is
+                # healthy and later misses get their full retry budget.
+                health.record_success()
 
             # The filters Google has no ``tfs`` field for (airlines, price cap,
             # duration, departure window) are applied to the decoded rows,
@@ -349,6 +445,8 @@ class SearchDates:
             # exists to prevent. The traceback stays available at DEBUG.
             logger.warning("Pricing %s failed: %s: %s", travel_dates[0], type(exc).__name__, exc)
             logger.debug("Pricing %s failed", travel_dates[0], exc_info=True)
+            if health is not None:
+                health.record_failure()
             return _DateOutcome(failure=f"{type(exc).__name__}: {exc}", error=exc)
 
         if not prices:

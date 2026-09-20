@@ -26,7 +26,12 @@ from fli.models import (
 )
 from fli.search import _tfs as tfs_module
 from fli.search import dates as dates_module
-from fli.search.exceptions import SearchClientError, SearchConnectionError
+from fli.search._concurrency import get_executor
+from fli.search.exceptions import (
+    SearchClientError,
+    SearchConnectionError,
+    SearchParseError,
+)
 from tests.search._pages import as_search_page
 
 # Far enough out that every date in the widest range below is bookable.
@@ -460,3 +465,119 @@ class TestPerDateProcessingIsTotal:
             "warnings must not carry exc_info — logging.lastResort prints the full traceback"
         )
         assert any("connection refused" in r.getMessage() for r in warnings)
+
+
+# ---------------------------------------------------------------------------
+# Circuit breaker for a sweep that is failing deterministically (round 2, N4)
+# ---------------------------------------------------------------------------
+
+
+class TestSweepCircuitBreaker:
+    """A consent-blocked client fails identically on every date.
+
+    `fetch_payload`'s retry and the client's own tenacity retries multiply, so
+    paying three page fetches per date for a certain failure costs hundreds of
+    requests to learn one thing. Once enough dates have come back payload-less
+    and none has succeeded, stop.
+    """
+
+    BLANK = "<html>no data callback here</html>"
+
+    @staticmethod
+    def _ceiling() -> int:
+        """Most fetches a fully blocked sweep can cost, whatever its length.
+
+        The breaker trips after ``SWEEP_FAILURE_THRESHOLD`` failures, and every
+        date already in flight at that moment still finishes its own retries —
+        so the bound is (threshold + pool size) x attempts per page, with no
+        term for the number of dates requested.
+        """
+        workers = get_executor()._max_workers
+        return (dates_module.SWEEP_FAILURE_THRESHOLD + workers) * tfs_module.PAGE_FETCH_ATTEMPTS
+
+    def test_always_blank_sweep_stops_early(self, no_backoff):
+        client = StubClient(self.BLANK)
+        with pytest.raises(SearchParseError) as excinfo:
+            _search_with(client).search(_filters(days=30))
+
+        # Without the breaker this is 30 dates x 3 attempts = 90 fetches.
+        assert client.calls < 90, "the breaker did not stop the sweep"
+        assert client.calls <= self._ceiling(), f"stopped, but late: {client.calls} fetches"
+        message = str(excinfo.value)
+        assert "consent/blocked page" in message
+        assert "FLI_SOCS_COOKIE" in message
+
+    def test_breaker_does_not_trip_once_any_date_succeeds(self, no_backoff):
+        """A healthy first date means later misses are transient, not systemic."""
+        good = _page([_row(150.0)])
+        blank = self.BLANK
+
+        class _FirstOneWorks(StubClient):
+            def get(self, url: str, **kwargs: Any) -> _Response:
+                with self._lock:
+                    self.calls += 1
+                    n = self.calls
+                return _Response(good if n == 1 else blank)
+
+        client = _FirstOneWorks()
+        results = _search_with(client).search(_filters(days=12))
+
+        # One date priced; every other date still got its full retry budget.
+        assert results is not None and len(results) == 1
+        assert client.calls == 1 + (12 - 1) * tfs_module.PAGE_FETCH_ATTEMPTS
+
+    def test_healthy_sweep_is_unaffected(self, no_backoff):
+        client = StubClient(_page([_row(150.0)]))
+        results = _search_with(client).search(_filters(days=20))
+        assert results is not None and len(results) == 20
+        assert client.calls == 20
+
+    def test_scattered_misses_below_the_threshold_do_not_trip(self, no_backoff):
+        """Fewer payload-less dates than the threshold must all be retried."""
+        good = _page([_row(150.0)])
+        blank = self.BLANK
+        misses = dates_module.SWEEP_FAILURE_THRESHOLD - 1
+
+        class _FewMisses(StubClient):
+            def __init__(self):
+                super().__init__()
+                self.seen: set[str] = set()
+
+            def get(self, url: str, **kwargs: Any) -> _Response:
+                with self._lock:
+                    self.calls += 1
+                    self.seen.add(url)
+                    bad = len(self.seen) <= misses
+                return _Response(blank if bad else good)
+
+        client = _FewMisses()
+        results = _search_with(client).search(_filters(days=10))
+        assert results is not None and len(results) == 10 - misses
+        assert client.calls == misses * tfs_module.PAGE_FETCH_ATTEMPTS + (10 - misses)
+
+    def test_exception_failures_also_trip_the_breaker(self, no_backoff):
+        """A dead network is just as deterministic as a consent page."""
+        client = StubClient(error=SearchConnectionError("connection refused"))
+        with pytest.raises(SearchClientError):
+            _search_with(client).search(_filters(days=30))
+        assert client.calls < 30, "exception failures should stop the sweep early too"
+
+    @pytest.mark.parametrize("days", [30, 61, MAX_FOR_TEST := 93])
+    def test_blocked_sweep_costs_the_same_at_any_range(self, days, no_backoff):
+        """The cost of learning "this client is blocked" must not scale with the range.
+
+        Before the breaker it was 3 fetches per date — 279 for a quarter, and
+        up to 837 once the client's own three retries multiplied in.
+        """
+        client = StubClient(self.BLANK)
+        with pytest.raises(SearchParseError):
+            _search_with(client).search(_filters(days=days))
+        assert client.calls <= self._ceiling(), (
+            f"{days}-date blocked sweep cost {client.calls} fetches"
+        )
+
+    def test_error_says_it_gave_up_early(self, no_backoff):
+        client = StubClient(self.BLANK)
+        with pytest.raises(SearchParseError) as excinfo:
+            _search_with(client).search(_filters(days=40))
+        assert "of 40 dates" in str(excinfo.value)
