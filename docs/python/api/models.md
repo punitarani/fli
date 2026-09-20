@@ -40,7 +40,7 @@ filters = FlightSearchFilters(
 - Flight segments must have different departure and arrival airports
 - Travel dates cannot be in the past
 - For round trips, exactly two flight segments are required
-- Passenger counts must be valid (at least one adult)
+- Passenger counts must be valid — see [`PassengerInfo`](#passengerinfo) below
 
 ::: fli.models.google_flights.FlightSearchFilters
 
@@ -87,6 +87,18 @@ Type of trip for flight search.
 ### PassengerInfo
 
 Configuration for passenger counts.
+
+Fields:
+
+- `adults` (default `1`)
+- `children` (default `0`)
+- `infants_in_seat` (default `0`)
+- `infants_on_lap` (default `0`)
+
+**Validation Rules:**
+- Total passengers (`adults + children + infants_in_seat + infants_on_lap`) must be
+  between 1 and 9 — Google Flights refuses to price a booking outside that range
+- `infants_on_lap` cannot exceed `adults` — each lap infant needs an adult to sit with
 
 ::: fli.models.google_flights.PassengerInfo
 

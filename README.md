@@ -75,6 +75,12 @@ The MCP server provides two main tools:
 | `country`           | string | ISO 3166-1 alpha-2 country code (e.g. 'GB') for `gl=` param |
 | `sort_by`           | string | CHEAPEST, DURATION, DEPARTURE_TIME, or ARRIVAL_TIME         |
 | `passengers`        | int    | Number of adult passengers                                  |
+| `children`          | int    | Number of children (ages 2-11)                               |
+| `infants_in_seat`   | int    | Number of infants (under 2) occupying their own seat        |
+| `infants_on_lap`    | int    | Number of lap infants (under 2, no seat)                    |
+
+> Total travelers (`passengers + children + infants_in_seat + infants_on_lap`) must be
+> between 1 and 9, and `infants_on_lap` cannot exceed `passengers`.
 
 #### `search_dates` Parameters
 
@@ -100,6 +106,11 @@ The MCP server provides two main tools:
 | `country`           | string | ISO 3166-1 alpha-2 country code (e.g. 'GB')                 |
 | `sort_by_price`     | bool   | Sort results by price (lowest first)                        |
 | `passengers`        | int    | Number of adult passengers                                  |
+| `children`          | int    | Number of children (ages 2-11)                               |
+| `infants_in_seat`   | int    | Number of infants (under 2) occupying their own seat        |
+| `infants_on_lap`    | int    | Number of lap infants (under 2, no seat)                    |
+
+> Same passenger limits as `search_flights`: total 1-9, `infants_on_lap` ≤ `passengers`.
 
 ## Quick Start
 
@@ -169,6 +180,9 @@ fli flights JFK LHR 2026-10-25 \
     --min-layover 90 \
     --max-layover 360 \
     --currency EUR --language en-GB --country GB
+
+# Family mix: 2 adults, 1 child, 1 lap infant (total must be 1-9)
+fli flights JFK LHR 2026-10-25 --passengers 2 --children 1 --infants-on-lap 1
 ```
 
 > ⚠️ **Experimental**
@@ -235,7 +249,13 @@ fli multi \
 | `--class, -c`           | Cabin class                                | `ECONOMY`, `BUSINESS`            |
 | `--stops, -s`           | Maximum stops                              | `NON_STOP`, `ONE_STOP`           |
 | `--sort, -o`            | Sort results by                            | `CHEAPEST`, `DURATION`           |
+| `--passengers, -p`      | Number of adult passengers                 | `2`                               |
+| `--children`            | Number of children (ages 2-11)             | `1`                               |
+| `--infants-in-seat`     | Number of infants occupying their own seat | `1`                               |
+| `--infants-on-lap`      | Number of lap infants (must be ≤ adults)   | `1`                               |
 | `--format`              | Output format                              | `text`, `json`                   |
+
+> Total passengers (adults + children + infants) must be between 1 and 9.
 
 #### Dates Command (`fli dates`)
 
@@ -259,6 +279,10 @@ fli multi \
 | `--time`                | Departure time window                      | `6-20`                   |
 | `--sort`                | Sort by price                              | (flag)                   |
 | `--[day]`               | Day filters                                | `--monday`, `--friday`   |
+| `--passengers, -p`      | Number of adult passengers                 | `2`                       |
+| `--children`            | Number of children (ages 2-11)             | `1`                       |
+| `--infants-in-seat`     | Number of infants occupying their own seat | `1`                       |
+| `--infants-on-lap`      | Number of lap infants (must be ≤ adults)   | `1`                       |
 | `--format`              | Output format                              | `text`, `json`           |
 
 #### Multi Command (`fli multi`)
@@ -271,6 +295,10 @@ fli multi \
 | `--class, -c`    | Cabin class                          | `ECONOMY`, `BUSINESS`          |
 | `--stops, -s`    | Maximum stops                        | `NON_STOP`, `ONE_STOP`         |
 | `--sort, -o`     | Sort results by                      | `CHEAPEST`, `DURATION`         |
+| `--passengers, -p` | Number of adult passengers         | `2`                             |
+| `--children`     | Number of children (ages 2-11)       | `1`                             |
+| `--infants-in-seat` | Number of infants occupying their own seat | `1`                     |
+| `--infants-on-lap` | Number of lap infants (must be ≤ adults) | `1`                       |
 
 ## MCP Server Integration
 
