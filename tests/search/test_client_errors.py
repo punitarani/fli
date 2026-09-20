@@ -24,6 +24,15 @@ def _clean_ca_bundle_env(monkeypatch):
     Individual tests opt back in with ``monkeypatch.setenv`` for the
     variable(s) they care about — this fixture only guarantees no ambient
     value (e.g. a developer's own ``REQUESTS_CA_BUNDLE``) leaks in.
+
+    Fix round 1 (C1) added an equivalent autouse fixture to
+    ``tests/conftest.py`` that clears the same three variables for the
+    *whole* suite, which makes the delenv calls here mechanically
+    redundant. Kept anyway, deliberately: this file's entire subject is
+    CA-bundle env var behavior, so a reader should be able to trust its
+    isolation by reading this file alone, without having to go verify
+    conftest.py also does it — explicit beats implicit for the one file
+    where it's the whole point.
     """
     monkeypatch.delenv("FLI_CA_BUNDLE", raising=False)
     monkeypatch.delenv("CURL_CA_BUNDLE", raising=False)
