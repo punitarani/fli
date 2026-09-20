@@ -132,3 +132,26 @@ class TestConsentCookie:
         monkeypatch.setattr(client_module, "SOCS_COOKIE", "")
         session = get_client()._session()
         assert session.cookies.get("SOCS", domain=".google.com") is None
+
+    def test_empty_env_var_disables_the_cookie(self, monkeypatch):
+        """``FLI_SOCS_COOKIE=""`` must mean "send nothing", not "use the default".
+
+        The module resolves the value at import time, so exercise the real
+        environment path rather than only the module constant.
+        """
+        import importlib
+
+        monkeypatch.setenv("FLI_SOCS_COOKIE", "")
+        try:
+            importlib.reload(client_module)
+            assert client_module.SOCS_COOKIE == ""
+            session = client_module.Client()._session()
+            assert session.cookies.get("SOCS", domain=".google.com") is None
+        finally:
+            monkeypatch.delenv("FLI_SOCS_COOKIE", raising=False)
+            importlib.reload(client_module)
+
+    def test_default_env_keeps_the_cookie_on(self):
+        """The author's default stays on — EU IPs otherwise hit the consent page."""
+        assert client_module.SOCS_COOKIE == client_module.DEFAULT_SOCS_COOKIE
+        assert client_module.SOCS_COOKIE
