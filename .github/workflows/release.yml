@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout main
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
@@ -258,7 +258,7 @@ jobs:
       # publishes always fail attestation verification.
       # See https://docs.pypi.org/trusted-publishers/troubleshooting/#reusable-workflows-on-github
       - name: Checkout release tag
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.release.outputs.tag }}
 
