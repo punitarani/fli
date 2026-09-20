@@ -24,10 +24,11 @@ import os
 import threading
 from typing import TYPE_CHECKING, Any
 
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential
 
 from fli.search._concurrency import TokenBucketRateLimiter
 from fli.search.exceptions import (
+    SearchCertificateError,
     SearchClientError,
     SearchConnectionError,
     SearchHTTPError,
@@ -82,6 +83,42 @@ DEFAULT_SOCS_COOKIE = (
 )
 SOCS_COOKIE = os.environ.get("FLI_SOCS_COOKIE", DEFAULT_SOCS_COOKIE)
 
+# A TLS-intercepting corporate proxy re-signs Google's certificate with a
+# private CA that curl's bundled trust store doesn't know about, so every
+# request fails verification. Checked in this order: FLI_CA_BUNDLE (this
+# client's own override) first, then CURL_CA_BUNDLE and REQUESTS_CA_BUNDLE —
+# the conventions curl and python-requests already use — so a developer who
+# has one of those set for other tools does not have to duplicate it, while
+# an explicit FLI_-prefixed value always wins.
+_CA_BUNDLE_ENV_VARS = ("FLI_CA_BUNDLE", "CURL_CA_BUNDLE", "REQUESTS_CA_BUNDLE")
+
+
+def _ca_bundle_from_env() -> str | None:
+    """Return the first configured CA bundle path from the supported env vars.
+
+    A configured path that is not a readable file raises
+    :class:`SearchCertificateError` naming both the variable and the path —
+    almost always a typo or a bundle that hasn't been mounted into a
+    container yet, and worth failing on immediately with a clear message
+    rather than surfacing later as a confusing curl error.
+
+    Called once per thread, from ``Client._session()`` when that thread's
+    session is first created — see its docstring for the caching
+    consequence (changing the env var afterwards does not affect an
+    already-created session).
+    """
+    for name in _CA_BUNDLE_ENV_VARS:
+        value = os.environ.get(name)
+        if not value:
+            continue
+        if not os.path.isfile(value) or not os.access(value, os.R_OK):
+            raise SearchCertificateError(
+                f"{name} points to a CA bundle path that does not exist or "
+                f"is not readable: {value!r}"
+            )
+        return value
+    return None
+
 
 class Client:
     """HTTP client with built-in rate limiting, retry and user agent impersonation functionality.
@@ -106,7 +143,17 @@ class Client:
         self._rate_limiter = TokenBucketRateLimiter(calls=calls_per_second, period=1.0)
 
     def _session(self) -> Session:
-        """Return this thread's ``Session``, creating it on first use."""
+        """Return this thread's ``Session``, creating it on first use.
+
+        The CA-bundle env vars (see ``_ca_bundle_from_env``) and
+        ``SOCS_COOKIE`` are only read the first time *this thread* needs a
+        session — once created, a thread's session is cached for its
+        lifetime (and the module-level singleton in ``get_client()``
+        extends that across the whole process). Changing ``FLI_CA_BUNDLE``
+        (or the other two) after a session already exists has no effect on
+        it; only a new thread, or a fresh ``Client()``, picks up the
+        change.
+        """
         session = getattr(self._sessions, "session", None)
         if session is None:
             # Deferred import: ``curl_cffi`` is heavy (~100ms cold) and
@@ -118,6 +165,9 @@ class Client:
             session.headers.update(self.DEFAULT_HEADERS)
             if SOCS_COOKIE:
                 session.cookies.set("SOCS", SOCS_COOKIE, domain=".google.com")
+            ca_bundle = _ca_bundle_from_env()
+            if ca_bundle:
+                session.verify = ca_bundle
             self._sessions.session = session
         return session
 
@@ -134,7 +184,20 @@ class Client:
     # Request entry points
     # ------------------------------------------------------------------
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(), reraise=True)
+    # A bad CA bundle path or an untrusted certificate is deterministic for
+    # a fixed environment — retrying the identical request three times with
+    # backoff before the user ever sees the actionable message just wastes
+    # their time, so SearchCertificateError is the one failure mode this
+    # decorator does not retry. retry_if_not_exception_type() sees the
+    # *wrapped* type here, not the raw curl exception: `except Exception`
+    # below always re-raises via `_wrap_request_error(...)` before this
+    # decorator's predicate ever runs.
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(),
+        retry=retry_if_not_exception_type(SearchCertificateError),
+        reraise=True,
+    )
     def get(self, url: str, **kwargs: Any) -> Response:
         """Make a rate-limited GET request with automatic retries."""
         self._rate_limiter.acquire()
@@ -146,7 +209,12 @@ class Client:
         except Exception as e:
             raise _wrap_request_error("GET", url, e) from e
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(), reraise=True)
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(),
+        retry=retry_if_not_exception_type(SearchCertificateError),
+        reraise=True,
+    )
     def post(self, url: str, **kwargs: Any) -> Response:
         """Make a rate-limited POST request with automatic retries."""
         self._rate_limiter.acquire()
@@ -157,6 +225,16 @@ class Client:
             return response
         except Exception as e:
             raise _wrap_request_error("POST", url, e) from e
+
+
+# libcurl's CURLE_PEER_FAILED_VERIFICATION code. curl_cffi's own
+# ``code2error`` dispatch maps this 1:1 to ``CertificateVerifyError`` on
+# both 0.15.0 and 0.16.3 (exceptions.py's CODE2ERROR table has no other
+# entry for it in either version), so the isinstance() check below is
+# normally enough on its own — see is_untyped_certificate_error in
+# _wrap_request_error for what this constant backs and why it's kept
+# despite being unreachable on those two versions.
+_CURLE_PEER_FAILED_VERIFICATION = 60
 
 
 def _wrap_request_error(method: str, url: str, exc: BaseException) -> SearchClientError:
@@ -177,6 +255,36 @@ def _wrap_request_error(method: str, url: str, exc: BaseException) -> SearchClie
     from curl_cffi.requests import exceptions as curl_exc
 
     host = _host_from_url(url)
+
+    # ``CertificateVerifyError`` is itself an ``SSLError`` -> ``ConnectionError``
+    # subclass, so this must run before the generic ``curl_exc.ConnectionError``
+    # branch below or a bad certificate would silently read as a vague "check
+    # your connection" message instead of naming the fix. Two independent
+    # forward-compat guards, kept as separate named conditions since they
+    # guard against different future breakages:
+    #
+    # - is_typed_certificate_error: the normal case today. ``getattr(...,
+    #   ())`` keeps this safe if a future curl_cffi release ever drops the
+    #   class entirely — ``isinstance(exc, ())`` is simply always False.
+    # - is_untyped_certificate_error: belt-and-suspenders for a future
+    #   release that raises the plain ``SSLError``/``ConnectionError`` base
+    #   class with the same code instead of the ``CertificateVerifyError``
+    #   subclass (see ``_CURLE_PEER_FAILED_VERIFICATION`` above — confirmed
+    #   unreachable on curl_cffi 0.15.0/0.16.3, kept anyway).
+    certificate_error_cls = getattr(curl_exc, "CertificateVerifyError", ())
+    is_typed_certificate_error = certificate_error_cls and isinstance(exc, certificate_error_cls)
+    is_untyped_certificate_error = (
+        isinstance(exc, curl_exc.ConnectionError)
+        and getattr(exc, "code", None) == _CURLE_PEER_FAILED_VERIFICATION
+    )
+    if is_typed_certificate_error or is_untyped_certificate_error:
+        env_vars = ", ".join(_CA_BUNDLE_ENV_VARS)
+        return SearchCertificateError(
+            f"TLS certificate verification failed for Google Flights ({host}). "
+            f"If your network uses a custom certificate authority (e.g. a "
+            f"TLS-intercepting corporate proxy), set one of {env_vars} to a "
+            f"CA bundle path and try again."
+        )
     if isinstance(exc, curl_exc.Timeout):
         return SearchTimeoutError(
             f"Timed out talking to Google Flights ({host}). "

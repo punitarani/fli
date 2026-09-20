@@ -28,6 +28,7 @@ from fli.mcp.server import (
     _find_airports_impl,
 )
 from fli.search.exceptions import (
+    SearchCertificateError,
     SearchClientError,
     SearchConnectionError,
     SearchHTTPError,
@@ -55,6 +56,15 @@ def _raiser(exc: BaseException):
 _SEARCH_CLIENT_ERROR_CASES = [
     pytest.param(SearchTimeoutError("slow"), "timeout", True, id="timeout"),
     pytest.param(SearchConnectionError("no route"), "connection_error", True, id="connection"),
+    # Carried forward from PR #164 (T23): a TLS certificate failure must be
+    # visible to MCP clients as its own, non-retryable error_type — not
+    # folded into its retryable parent, connection_error.
+    pytest.param(
+        SearchCertificateError("TLS certificate verification failed"),
+        "certificate_error",
+        False,
+        id="certificate",
+    ),
     pytest.param(
         SearchHTTPError("bad gateway", status_code=502), "http_error", True, id="http-5xx"
     ),
