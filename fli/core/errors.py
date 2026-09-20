@@ -34,10 +34,9 @@ PR #164 already independently converged on, and names *what happened*
 (usually, but not always, a consent/blocked interstitial — see
 ``FLI_SOCS_COOKIE`` below). ``"rejected_error"``, ``"unsupported_error"``
 and ``"validation_error"`` are new additions both surfaces now share.
-``"certificate_error"`` is a later addition (T23) carrying forward the
-other half of PR #164 — its ``error_type`` naming was never released, so it
-was free to pick, and follows the same "name what happened" convention as
-``parse_error``.
+``"certificate_error"`` is a later addition, carried forward from PR #164 —
+its ``error_type`` naming was never released, so it was free to pick, and
+follows the same "name what happened" convention as ``parse_error``.
 
 - ``validation_error`` (not retryable): bad parameters — pydantic
   ``ValidationError``, ``fli.core.parsers.ParseError``, or a bare

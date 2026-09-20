@@ -44,12 +44,12 @@ def _scrub_ca_bundle_env(monkeypatch):
 
     ``fli.search.client._ca_bundle_from_env()`` reads these on first use of a
     thread's session and raises ``SearchCertificateError`` if a configured
-    path is not a readable file. Before T23 these variables were never read
-    by fli, so an ambient value (very plausible on a developer machine or CI
-    runner behind a corporate proxy) was inert; after T23 they are
-    load-bearing. Without this fixture, any test that indirectly builds a
-    fresh session — a CLI command, a bare ``Client()``/``get_client()`` — on
-    a machine with e.g. a stale ``CURL_CA_BUNDLE=/no/longer/there`` would
+    path is not a readable file. An ambient value is very plausible on a
+    developer machine or CI runner behind a corporate proxy, and since fli
+    reads these variables it is load-bearing. Without this fixture, any test
+    that indirectly builds a fresh session — a CLI command, a bare
+    ``Client()``/``get_client()`` — on a machine with e.g. a stale
+    ``CURL_CA_BUNDLE=/no/longer/there`` would
     fail with an unrelated ``SearchCertificateError`` instead of exercising
     the behavior actually under test. Autouse, session-wide, so no test file
     has to remember to opt in; a test that wants to exercise the CA-bundle

@@ -260,9 +260,8 @@ def _wrap_request_error(method: str, url: str, exc: BaseException) -> SearchClie
     # subclass, so this must run before the generic ``curl_exc.ConnectionError``
     # branch below or a bad certificate would silently read as a vague "check
     # your connection" message instead of naming the fix. Two independent
-    # forward-compat guards, kept as separate named conditions (fix round 1,
-    # M2) since they guard against different future breakages and reading
-    # them as one combined boolean took a re-read to untangle:
+    # forward-compat guards, kept as separate named conditions since they
+    # guard against different future breakages:
     #
     # - is_typed_certificate_error: the normal case today. ``getattr(...,
     #   ())`` keeps this safe if a future curl_cffi release ever drops the
