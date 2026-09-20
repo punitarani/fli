@@ -242,9 +242,13 @@ VideoType = Literal["live_tv", "on_demand", "stream_to_device"]
 #: Whether Google flags the leg's Wi-Fi as complimentary or chargeable.
 WifiTier = Literal["free", "paid"]
 
-#: Human-readable label for Google's ``leg[13]`` seat-quality code. The
-#: first three are relative to the leg's own cabin (a 32" premium-economy
-#: seat can be "below_average" while a 32" economy seat is "above_average").
+#: Human-readable label for Google's ``leg[13]`` seat-quality code.
+#:
+#: These are labels, not an ordered score: "average"/"below_average"/
+#: "above_average" describe an economy-style pitch, while the remaining
+#: four name a seat *product*. The code tracks the fare's cabin rather
+#: than the airframe — in the captured fixtures AA 1209 (ORD-LAX, 737
+#: MAX 8) appears twice, as "average" in economy and "recliner" in first.
 SeatQuality = Literal[
     "average",
     "below_average",
@@ -269,6 +273,15 @@ class Amenities(BaseModel):
     ``video_type``, ``seat_quality``, ``legroom_inches``) refine the
     booleans above rather than replacing them: e.g. ``power=True`` plus
     ``power_type="usb"`` means "charging available, USB only".
+
+    Google never publishes an explicit "no" for any of these amenities —
+    the wire format only ever sets a flag or omits it — so ``False`` is
+    always an inference and is used exactly once: ``in_seat_video`` is
+    ``False`` when ``video_type == "stream_to_device"``, which is
+    Google's way of saying the aircraft has no seatback screen. Every
+    other unknown stays ``None``, including ``usb_power`` for a
+    plug-only cabin and ``on_demand_video`` for a live-TV or
+    stream-to-device leg.
     """
 
     wifi: bool | None = None

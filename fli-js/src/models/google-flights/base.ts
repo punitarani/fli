@@ -201,6 +201,18 @@ export const SEAT_QUALITIES = [
 ] as const;
 export type SeatQuality = (typeof SEAT_QUALITIES)[number];
 
+/**
+ * Per-leg amenities reported by Google Flights. Booleans are tri-state
+ * (true / false / null when Google did not publish that signal).
+ *
+ * Google never publishes an explicit "no" for any of these amenities — the
+ * wire format only ever sets a flag or omits it — so `false` is always an
+ * inference and is used exactly once: `in_seat_video` is false when
+ * `video_type === "stream_to_device"`, which is Google's way of saying the
+ * aircraft has no seatback screen. Every other unknown stays null,
+ * including `usb_power` for a plug-only cabin and `on_demand_video` for a
+ * live-TV or stream-to-device leg.
+ */
 export const AmenitiesSchema = z.object({
   wifi: z.boolean().nullable().optional(),
   power: z.boolean().nullable().optional(),

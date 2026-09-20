@@ -53,6 +53,39 @@ function leg(flights: FlightResult[], carrier: string, number: string): FlightLe
   throw new Error(`${carrier}${number} not found in fixture`);
 }
 
+function rawRows(name: string): unknown[][] {
+  const fixture = readFileSync(
+    new URL(`../../../tests/search/fixtures/${name}`, import.meta.url),
+    "utf8",
+  );
+  const outer = JSON.parse(fixture.slice(fixture.indexOf("[")));
+  const inner = JSON.parse(outer[0][2]);
+  return [2, 3].flatMap((i) => (Array.isArray(inner[i]) ? inner[i][0] : []));
+}
+
+/**
+ * Parse a real fixture row with leg[12]/[13]/[14] overridden. Cloning a
+ * genuine row keeps every other position realistic. Mirrors
+ * `_synthetic_leg` in tests/search/test_amenities_decoding.py.
+ */
+function syntheticLeg(
+  slots: unknown = null,
+  seatQuality: unknown = 1,
+  legroom: unknown = "31 in",
+): FlightLeg {
+  const row = structuredClone(rawRows("flight_search_jfk_lax_oneway_usd.bin")[0]) as unknown[];
+  const l = ((row[0] as unknown[])[2] as unknown[][])[0] as unknown[];
+  l[12] = slots;
+  l[13] = seatQuality;
+  l[14] = legroom;
+  l[30] = null; // isolate leg[14] from the long-form fallback
+  return parseFlightRow(row).legs[0] as FlightLeg;
+}
+
+function emptySlots(): unknown[] {
+  return Array.from({ length: 12 }, () => null);
+}
+
 const FIXTURES = [
   "flight_search_jfk_lax_oneway_usd.bin",
   "flight_search_jfk_lax_eur.bin",
@@ -118,10 +151,13 @@ describe("power slots (leg[12][1..6])", () => {
     expect(l.amenities?.usb_power).toBe(true);
   });
 
-  test("legacy AC-only cabin reports plug without USB", () => {
+  test("legacy AC-only cabin reports plug but does not deny USB", () => {
+    // Slot 3 occurs 7 times across 2 carriers in the whole corpus — too
+    // thin to put a `false` on a public tri-state boolean.
     const l = leg(bufAth, "AA", "1195");
+    expect(l.amenities?.power).toBe(true);
     expect(l.amenities?.power_type).toBe("plug");
-    expect(l.amenities?.usb_power).toBe(false);
+    expect(l.amenities?.usb_power).toBeNull();
   });
 
   test("power unknown when no power slot is set", () => {
@@ -137,7 +173,9 @@ describe("video slots (leg[12][8..10])", () => {
     const l = leg(jfkLax, "B6", "123");
     expect(l.amenities?.video_type).toBe("live_tv");
     expect(l.amenities?.in_seat_video).toBe(true);
-    expect(l.amenities?.on_demand_video).toBe(false);
+    // A live-TV seatback usually carries on-demand content too, so the
+    // absence of slot 9 is not evidence that on-demand is missing.
+    expect(l.amenities?.on_demand_video).toBeNull();
   });
 
   test("widebody reports on-demand video", () => {
@@ -150,8 +188,11 @@ describe("video slots (leg[12][8..10])", () => {
   test("no-seatback fleet reports stream to device", () => {
     const l = leg(jfkLax, "AA", "117");
     expect(l.amenities?.video_type).toBe("stream_to_device");
+    // The one negative these slots license: "stream to your own device"
+    // is Google's way of saying there is no seatback screen.
     expect(l.amenities?.in_seat_video).toBe(false);
-    expect(l.amenities?.on_demand_video).toBe(false);
+    // Streamed content is itself on-demand, so this stays unknown.
+    expect(l.amenities?.on_demand_video).toBeNull();
   });
 
   test("video unknown when no video slot is set", () => {
@@ -227,6 +268,108 @@ describe("cabin (leg[16])", () => {
         .map((l) => `${l.cabin}:${l.amenities?.seat_quality}`),
     );
     expect(seen).toEqual(new Set([`${SeatType.ECONOMY}:average`, `${SeatType.FIRST}:recliner`]));
+  });
+});
+
+describe("unobserved slots", () => {
+  for (const slot of [2, 4, 6]) {
+    test(`"some seats" power slot ${slot} does not assert power`, () => {
+      // Slots 2/4/6 occur zero times in 481 legs; nothing is inferred.
+      const slots = emptySlots();
+      slots[slot] = true;
+      const a = syntheticLeg(slots).amenities;
+      expect(a?.power).toBeNull();
+      expect(a?.power_type).toBeNull();
+      expect(a?.usb_power).toBeNull();
+    });
+  }
+
+  test("unknown Wi-Fi tier code still reports Wi-Fi", () => {
+    const slots = emptySlots();
+    slots[11] = 1;
+    const a = syntheticLeg(slots).amenities;
+    expect(a?.wifi).toBe(true);
+    expect(a?.wifi_tier).toBeNull();
+  });
+
+  test("unknown seat-quality code keeps the raw rating", () => {
+    const a = syntheticLeg(emptySlots(), 9).amenities;
+    expect(a?.legroom_rating).toBe(9);
+    expect(a?.seat_quality).toBeNull();
+  });
+
+  test("first set power slot wins even when unlabelled", () => {
+    // Impossible per the corpus, but Python and TypeScript must agree:
+    // both scan 1..6 in wire order and refuse to skip past a set slot
+    // they cannot name.
+    const slots = emptySlots();
+    slots[2] = true;
+    slots[3] = true;
+    const a = syntheticLeg(slots).amenities;
+    expect(a?.power).toBeNull();
+    expect(a?.power_type).toBeNull();
+    expect(a?.usb_power).toBeNull();
+  });
+});
+
+describe("slot value types", () => {
+  for (const flag of [true, 1]) {
+    test(`${JSON.stringify(flag)} counts as a set slot`, () => {
+      const slots = emptySlots();
+      slots[1] = flag;
+      expect(syntheticLeg(slots).amenities?.power_type).toBe("plug_and_usb");
+    });
+  }
+
+  for (const value of [false, 0, -1, 1.5, "1", null]) {
+    test(`${JSON.stringify(value)} does not set a slot`, () => {
+      const slots = emptySlots();
+      slots[1] = value;
+      expect(syntheticLeg(slots).amenities?.power).toBeNull();
+    });
+  }
+
+  // 2.0 is deliberately absent: JavaScript has no float/int distinction for
+  // whole numbers (JSON.parse("2.0") === 2), so it cannot be rejected here
+  // the way Python's isinstance(v, int) rejects the float 2.0. Every
+  // genuinely non-integral value behaves identically in both ports.
+  for (const value of [2.5, "2", true]) {
+    test(`Wi-Fi code ${JSON.stringify(value)} is ignored`, () => {
+      const slots = emptySlots();
+      slots[11] = value;
+      const a = syntheticLeg(slots).amenities;
+      expect(a?.wifi).toBeNull();
+      expect(a?.wifi_tier).toBeNull();
+    });
+  }
+});
+
+describe("legroom inches parsing", () => {
+  const cases: [string, number | null][] = [
+    ["31 in", 31],
+    ["31 inches", 31],
+    ["7 in", 7],
+    // Non-ASCII digits are not seat pitches. Python's str.isdigit() is
+    // True for these, so the shared guard must be ASCII-only.
+    ["² in", null],
+    ["١٢ in", null],
+    ["", null],
+    ["lie flat", null],
+    ["0 in", null],
+    ["-3 in", null],
+  ];
+  for (const [text, expected] of cases) {
+    test(`parses ${JSON.stringify(text)} as ${expected}`, () => {
+      expect(syntheticLeg(emptySlots(), 1, text).amenities?.legroom_inches).toBe(expected);
+    });
+  }
+
+  test("unparseable legroom does not drop the row", () => {
+    const row = structuredClone(rawRows("flight_search_jfk_lax_oneway_usd.bin")[0]) as unknown[];
+    (((row[0] as unknown[])[2] as unknown[][])[0] as unknown[])[14] = "² in";
+    const flight = parseFlightRow(row);
+    expect(flight.legs.length).toBeGreaterThan(0);
+    expect(flight.legs[0]?.amenities?.legroom_inches).toBeNull();
   });
 });
 

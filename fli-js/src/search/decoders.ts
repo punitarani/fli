@@ -80,8 +80,8 @@ function safeAirline(code: unknown): Airline | null {
 //
 // leg[12] is a sparse array of amenity flags with trailing nulls trimmed.
 // Two mutually-exclusive groups plus a Wi-Fi tier code were confirmed by
-// tabulating ~280 distinct legs across the captured fixtures (plus three
-// live public-page captures) against published fleet facts:
+// tabulating all 481 leg instances across the captured fixtures (plus
+// three live public-page captures) against published fleet facts:
 //
 //   slots 1..6  power group — exactly one is ever set on a leg.
 //   slots 8..10 video group — exactly one is ever set on a leg.
@@ -89,23 +89,34 @@ function safeAirline(code: unknown): Airline | null {
 //
 // Slots 2, 4 and 6 are reported to be "some seats only" variants of 1, 3
 // and 5, and slot 11 === 1 is reported to mean "Wi-Fi, tier unknown", but
-// none of those values occurs anywhere in the corpus. They are therefore
-// treated as "power/Wi-Fi present, flavour unknown" rather than guessed at.
+// none of those values occurs anywhere in the corpus. Nothing is inferred
+// from them: an unobserved slot yields null, never a guessed value.
+//
+// No slot in the corpus ever holds JSON `false`, so every `false` this
+// decoder emits is an inference. Only one is made — see `inSeatVideo` in
+// parseAmenities.
 
-/** Power slots whose flavour is confirmed, in wire order (first match wins). */
-const POWER_SLOTS: ReadonlyArray<readonly [number, PowerType]> = [
+/** Power slots whose flavour is confirmed. */
+const POWER_SLOTS: ReadonlyMap<number, PowerType> = new Map<number, PowerType>([
   [1, "plug_and_usb"],
   [3, "plug"],
   [5, "usb"],
-];
-/** Full power group, including the unconfirmed "some seats" variants. */
+]);
+/**
+ * Every index in the power group, scanned in wire order. Includes the
+ * unobserved 2/4/6 "some seats" variants deliberately: the first *set* slot
+ * wins even when it is one we cannot label, so a payload that ever does set
+ * one yields "unknown" rather than skipping ahead to a slot we can name and
+ * reporting something Google did not say.
+ */
 const POWER_GROUP: readonly number[] = [1, 2, 3, 4, 5, 6];
-/** Video slots, in wire order (first match wins). */
-const VIDEO_SLOTS: ReadonlyArray<readonly [number, VideoType]> = [
+/** Video slots, in wire order. */
+const VIDEO_SLOTS: ReadonlyMap<number, VideoType> = new Map<number, VideoType>([
   [8, "live_tv"],
   [9, "on_demand"],
   [10, "stream_to_device"],
-];
+]);
+const VIDEO_GROUP: readonly number[] = [8, 9, 10];
 /** Video products delivered on a seatback screen rather than to a phone. */
 const SEATBACK_VIDEO: ReadonlySet<VideoType> = new Set<VideoType>(["live_tv", "on_demand"]);
 /** Position of the Wi-Fi tier code within leg[12]. */
@@ -132,18 +143,20 @@ const SEAT_QUALITY_BY_CODE: ReadonlyMap<number, SeatQuality> = new Map<number, S
 /**
  * True when slots[index] is a set flag. Google's RPC payload encodes these
  * as JSON booleans while the public travel page encodes them as 1; accept
- * both and treat every other value (including 0 and strings) as unset.
+ * both and treat every other value (including 0, non-integers and strings)
+ * as unset. The integer check keeps this identical to Python's
+ * `isinstance(value, int)`, which rejects floats such as 1.5.
  */
 function slotOn(slots: unknown, index: number): boolean {
   const value = safeGet(slots, index);
   if (typeof value === "boolean") return value;
-  return typeof value === "number" && value > 0;
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
-/** First entry whose slot is set, else null. */
-function firstSlotValue<T>(slots: unknown, entries: ReadonlyArray<readonly [number, T]>): T | null {
-  for (const [index, value] of entries) {
-    if (slotOn(slots, index)) return value;
+/** Index of the first set slot in `group` (wire order), else null. */
+function firstSetSlot(slots: unknown, group: readonly number[]): number | null {
+  for (const index of group) {
+    if (slotOn(slots, index)) return index;
   }
   return null;
 }
@@ -162,17 +175,29 @@ function parseAmenities(
   seatQuality: unknown = null,
   legroom: unknown = null,
 ): Amenities | null {
-  const powerType = firstSlotValue(slots, POWER_SLOTS);
-  const power = POWER_GROUP.some((i) => slotOn(slots, i)) ? true : null;
-  // "plug" is explicitly the AC-outlet-only variant, so it is the one case
-  // where we can assert the *absence* of USB charging.
-  const usbPower = powerType == null ? null : powerType === "plug_and_usb" || powerType === "usb";
+  // Only a slot whose meaning the corpus confirms may set `power`; an
+  // unlabelled slot (2/4/6, never observed) leaves every power field
+  // unknown rather than asserting "there is power, flavour unknown".
+  const powerSlot = firstSetSlot(slots, POWER_GROUP);
+  const powerType = powerSlot == null ? null : (POWER_SLOTS.get(powerSlot) ?? null);
+  const power = powerType == null ? null : true;
+  // `powerType === "plug"` is the AC-outlet-only variant, but it rests on 7
+  // legs from 2 carriers in the whole corpus — far too thin to put a false
+  // on a public tri-state. The distinction survives losslessly in
+  // `power_type`; `usb_power` only ever says true or "unknown".
+  const usbPower = powerType === "plug_and_usb" || powerType === "usb" ? true : null;
 
-  const videoType = firstSlotValue(slots, VIDEO_SLOTS);
-  // The group is mutually exclusive, so a set slot also tells us which
-  // products are *not* offered on this leg.
+  const videoSlot = firstSetSlot(slots, VIDEO_GROUP);
+  const videoType = videoSlot == null ? null : (VIDEO_SLOTS.get(videoSlot) ?? null);
+  // INFERENCE: "stream to your own device" is Google's way of saying the
+  // aircraft has no seatback screen — true of every slot-10 fleet in the
+  // corpus (Alaska, AA 737/A321 Sharklets, every regional jet) — so it is
+  // the one negative these slots license. Nothing else is inferred: a
+  // live-TV seatback normally carries on-demand content too, and streamed
+  // content is itself on-demand, so the absence of slot 9 is not evidence
+  // that on-demand is unavailable.
   const inSeatVideo = videoType == null ? null : SEATBACK_VIDEO.has(videoType);
-  const onDemandVideo = videoType == null ? null : videoType === "on_demand";
+  const onDemandVideo = videoType === "on_demand" ? true : null;
 
   const wifiCode = asNonNegativeInt(safeGet(slots, WIFI_TIER_SLOT));
   const wifi = wifiCode ? true : null;
