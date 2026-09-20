@@ -239,7 +239,12 @@ What that means in practice:
   all of them. Ten dates are in flight at once, so around fourteen are
   attempted first — about 42 page fetches, whether the range is 30, 61 or
   93 days. One that was cut short but found prices returns them with a
-  warning.
+  warning. That breaker disarms for good the moment any page loads, even
+  an empty one, so it cannot catch a sweep that is mostly timeouts around
+  one lucky date — `search` throws that case too, whenever nothing priced
+  and at least half the attempted dates never loaded. A minority of
+  failures alongside real results, or alongside a confirmed-empty range,
+  still returns normally but logs one warning naming the counts.
 * **A page occasionally arrives without results.** Roughly one request in
   sixty returns HTTP 200 with no `ds:1` blob; the client retries that case
   up to twice (0.5s then 1.5s) before throwing `SearchParseError`.

@@ -145,6 +145,20 @@ class _DateOutcome(NamedTuple):
     attempted: bool = True
 
 
+def _reasons(failed: list[_DateOutcome]) -> list[str]:
+    """Up to 3 distinct failure messages, in the order they were first seen.
+
+    Shared by every ``_collect`` branch that raises or warns about failed
+    dates, so the same range always gets the same short list however it is
+    reported.
+    """
+    reasons: list[str] = []
+    for outcome in failed:
+        if outcome.failure not in reasons and len(reasons) < 3:
+            reasons.append(outcome.failure)
+    return reasons
+
+
 def _flights_in(payload: Any) -> list[FlightResult]:
     """Decode every flight row in a ``ds:1`` payload.
 
@@ -211,7 +225,9 @@ class SearchDates:
         Raises:
             ValueError: The range covers more than :data:`MAX_DATES_PER_SEARCH`
                 dates, which would cost one page fetch each.
-            SearchClientError: Every date in the range failed to load.
+            SearchClientError: Every date in the range failed to load, or
+                nothing priced because at least half the attempted dates
+                never loaded — see :meth:`_collect`.
 
         Notes:
             Every date in the range costs its own search-page fetch — the page
@@ -307,6 +323,20 @@ class SearchDates:
         blocked — and the tripped breaker is the evidence for that, not the
         exact mix of what each attempted date happened to do.
 
+        The breaker is not the only way a sweep can go quietly wrong, though:
+        it disarms for good the instant any page loads, empty or not, so "1
+        loaded, 29 timeouts" sails straight past it — one date out of thirty
+        is not enough evidence that a route has no flights. When nothing
+        priced and at least half the attempted dates never loaded (``failed
+        >= loaded``), that is raised too. A page did load in that case, which
+        rules out an EU/EEA consent wall — those block every request alike —
+        so this path never adds the ``FLI_SOCS_COOKIE`` hint the branch above
+        does.
+
+        Short of either raise, a sweep that lost some dates but not enough to
+        doubt the rest still owes the caller exactly one line saying so,
+        whether or not it ends up with anything to return.
+
         Args:
             outcomes: One entry per date in the range, in date order.
             total: Dates the sweep set out to price, so the error can say how
@@ -318,16 +348,18 @@ class SearchDates:
         results = [o.price for o in outcomes if o.price is not None]
         attempted = [o for o in outcomes if o.attempted]
         failed = [o for o in attempted if o.failure]
+        # "loaded" counts every attempted date whose page actually arrived,
+        # priced or not — it does not distinguish the two, because when
+        # ``results`` is empty (the only time this number matters below)
+        # every loaded date is by definition one with no flights.
+        loaded = len(attempted) - len(failed)
         # The breaker only ever trips on payload-less pages, so a non-zero skip
         # count *is* the blocked-page diagnosis, whatever else failed alongside.
         tripped = skipped > 0
         everything_failed = bool(attempted) and len(failed) == len(attempted)
 
         if not results and (everything_failed or tripped):
-            reasons: list[str] = []
-            for outcome in failed:
-                if outcome.failure not in reasons and len(reasons) < 3:
-                    reasons.append(outcome.failure)
+            reasons = _reasons(failed)
             cause = next((o.error for o in failed if o.error is not None), None)
             blocked = tripped or (bool(failed) and all(o.failure == _NO_PAYLOAD for o in failed))
             error_type = SearchParseError if blocked else SearchClientError
@@ -359,6 +391,27 @@ class SearchDates:
                 )
             raise error_type(message) from cause
 
+        if not results and failed and len(failed) >= loaded:
+            # The breaker never saw this coming: one loaded page (even an
+            # empty one) disarms it for good, so a sweep that is mostly
+            # timeouts around a single lucky date never trips it. Half the
+            # attempted dates never loading is its own signal that "no
+            # flights" cannot be concluded from the handful that did.
+            reasons = _reasons(failed)
+            cause = next((o.error for o in failed if o.error is not None), None)
+            blocked = bool(failed) and all(o.failure == _NO_PAYLOAD for o in failed)
+            error_type = SearchParseError if blocked else SearchClientError
+            message = (
+                f"Priced 0 of {total} dates — {len(failed)} of the {len(attempted)} dates "
+                f'tried failed to load, so "no flights" cannot be concluded from the '
+                f"{loaded} that did. Reasons: {'; '.join(reasons)}"
+            )
+            # Unlike the branch above, a page did load here — that rules out a
+            # consent wall, which blocks every request identically. Adding the
+            # FLI_SOCS_COOKIE hint would point at a diagnosis this sweep just
+            # disproved, so it is deliberately left off.
+            raise error_type(message) from cause
+
         if tripped:
             # Exactly one line, whatever the sweep's size: the caller is about
             # to act on a partial answer and has no other way to know it.
@@ -371,6 +424,31 @@ class SearchDates:
                 total,
                 skipped,
                 SWEEP_FAILURE_THRESHOLD,
+            )
+        elif failed and results:
+            # Neither raise fired — most dates loaded fine — but the caller
+            # still can't tell a complete sweep from this one just by looking
+            # at the list, so it gets the same "exactly one line" treatment.
+            logger.warning(
+                "Date sweep priced %d of %d dates: %d failed to load. The prices below "
+                "are real but incomplete.",
+                len(results),
+                total,
+                len(failed),
+            )
+        elif failed:
+            # No results, but too few dates failed to raise: most of the
+            # sweep loaded fine and simply found nothing. Still worth a line —
+            # otherwise a caller sees only `None`, indistinguishable from a
+            # sweep where every date loaded and truly had no flights.
+            logger.warning(
+                "Date sweep found no flights on the %d dates that loaded; %d of %d dates "
+                "failed to load, so treat this as provisional rather than a confirmed "
+                "empty range. Reasons: %s",
+                loaded,
+                len(failed),
+                len(attempted),
+                "; ".join(_reasons(failed)),
             )
         return results or None
 
