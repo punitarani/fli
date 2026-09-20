@@ -215,6 +215,66 @@ describe("SearchFlights.search (stubbed)", () => {
     expect(calls).toBe(3);
   });
 
+  describe("a shape-changed payload is a parse error, not 'no flights'", () => {
+    // Python raises SearchParseError when the payload loads but the row
+    // blocks are not where they should be. Returning null instead would
+    // report the likeliest future Google change — rows moving out of
+    // `[2][0]` — to users as "no flights on this route", which is the
+    // failure this transport exists to prevent.
+    async function searchPayload(payload: unknown) {
+      const client = new Client({
+        retries: 1,
+        backoffMs: 1,
+        fetchImpl: (async () =>
+          new Response(asSearchPage(payload), { status: 200 })) as unknown as typeof fetch,
+      });
+      // These payloads have no session id either; that warning is correct
+      // but is not what these tests are about.
+      setSearchLogger({ warn: () => {}, debug: () => {} });
+      try {
+        return await new SearchFlights(client).search(oneWayFilters());
+      } finally {
+        setSearchLogger(null);
+      }
+    }
+
+    test("payload too short to hold the row blocks raises", async () => {
+      // `inner[2]` does not exist at all.
+      await expect(searchPayload(["x", [1, 2, 3]])).rejects.toThrow(SearchParseError);
+      await expect(searchPayload(["x", [1, 2, 3]])).rejects.toThrow(
+        /no flights array at inner\[2\]\/\[3\]/,
+      );
+    });
+
+    test("an empty row block raises — there is no [0] to read", async () => {
+      await expect(searchPayload(["x", [1, 2, 3], [], []])).rejects.toThrow(SearchParseError);
+    });
+
+    test("a row block whose [0] is not a list raises", async () => {
+      await expect(searchPayload([null, null, [42], [42]])).rejects.toThrow(SearchParseError);
+    });
+
+    test("present-but-empty row blocks are genuinely no flights", async () => {
+      // `[[]]` is what Google serves for a route with no service: the
+      // block is there, `[0]` is there, and it holds no rows.
+      const payload: unknown[] = Array.from({ length: 4 }, () => null);
+      payload[0] = [null, null, null, null, "sid"];
+      payload[2] = [[]];
+      payload[3] = [[]];
+      expect(await searchPayload(payload)).toBeNull();
+    });
+
+    test("a non-list block is skipped, exactly as Python's isinstance check does", async () => {
+      // Google parks other things in these slots; only a list is read.
+      const payload: unknown[] = Array.from({ length: 4 }, () => null);
+      payload[0] = [null, null, null, null, "sid"];
+      payload[2] = [[syntheticFlightRow()]];
+      payload[3] = "not a block";
+      const results = (await searchPayload(payload)) as Array<{ price: number }>;
+      expect(results).toHaveLength(1);
+    });
+  });
+
   test("multi-city is refused before any request goes out", async () => {
     let calls = 0;
     const client = new Client({

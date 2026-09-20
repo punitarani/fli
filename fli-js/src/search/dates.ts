@@ -14,8 +14,9 @@
 import { formatIsoDate, parseIsoDate } from "../core/dates.ts";
 import type { FlightResult } from "../models/google-flights/base.ts";
 import { TripType } from "../models/google-flights/base.ts";
-import { DateSearchFilters } from "../models/google-flights/dates.ts";
+import type { DateSearchFilters } from "../models/google-flights/dates.ts";
 import { type Client, getClient } from "./client.ts";
+import { cloneFilters } from "./clone.ts";
 import { parallelMap } from "./concurrency.ts";
 import { parseFlightRow } from "./decoders.ts";
 import { SearchClientError, SearchParseError } from "./exceptions.ts";
@@ -133,6 +134,12 @@ export interface DateSearchOptions {
   currency?: string | null;
   language?: string | null;
   country?: string | null;
+  /**
+   * Cancels the sweep. A 93-date range is up to 93 page fetches with
+   * backoffs between their retries; this reaches every one of them,
+   * sleeps included.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -205,44 +212,6 @@ function flightsIn(payload: unknown): FlightResult[] {
     }
   }
   return flights;
-}
-
-function cloneSegments(filters: DateSearchFilters) {
-  return filters.flight_segments.map((s) => {
-    const clone = Object.create(Object.getPrototypeOf(s)) as typeof s;
-    Object.assign(clone, {
-      departure_airport: s.departure_airport,
-      arrival_airport: s.arrival_airport,
-      travel_date: s.travel_date,
-      time_restrictions: s.time_restrictions,
-      selected_flight: s.selected_flight,
-    });
-    return clone;
-  });
-}
-
-function cloneFilters(filters: DateSearchFilters): DateSearchFilters {
-  const out = Object.create(DateSearchFilters.prototype) as DateSearchFilters;
-  Object.assign(out, {
-    trip_type: filters.trip_type,
-    passenger_info: { ...filters.passenger_info },
-    flight_segments: cloneSegments(filters),
-    stops: filters.stops,
-    seat_type: filters.seat_type,
-    price_limit: filters.price_limit ? { ...filters.price_limit } : null,
-    airlines: filters.airlines ? [...filters.airlines] : null,
-    airlines_exclude: filters.airlines_exclude ? [...filters.airlines_exclude] : null,
-    alliances: filters.alliances ? [...filters.alliances] : null,
-    alliances_exclude: filters.alliances_exclude ? [...filters.alliances_exclude] : null,
-    max_duration: filters.max_duration,
-    layover_restrictions: filters.layover_restrictions ? { ...filters.layover_restrictions } : null,
-    emissions: filters.emissions,
-    bags: filters.bags ? { ...filters.bags } : null,
-    from_date: filters.from_date,
-    to_date: filters.to_date,
-    duration: filters.duration,
-  });
-  return out;
 }
 
 export class SearchDates {
@@ -512,7 +481,7 @@ export class SearchDates {
 
     let flights: FlightResult[];
     try {
-      const payload = await fetchPayload(this.client, url);
+      const payload = await fetchPayload(this.client, url, { signal: options.signal });
       if (payload == null) {
         // Logged here rather than thrown: one bad date is a warning, and
         // `_collect` decides whether *every* date failing is fatal.

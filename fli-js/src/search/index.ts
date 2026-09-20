@@ -6,10 +6,12 @@ export {
   getClient,
   resolveSocsCookie,
 } from "./client.ts";
+export { cloneFilters } from "./clone.ts";
 export {
   configureConcurrency,
   getDefaultMaxWorkers,
   parallelMap,
+  sleep,
   TokenBucketRateLimiter,
 } from "./concurrency.ts";
 export {

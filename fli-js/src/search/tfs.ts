@@ -40,6 +40,7 @@ import { TripType } from "../models/google-flights/base.ts";
 import type { DateSearchFilters } from "../models/google-flights/dates.ts";
 import type { FlightSearchFilters } from "../models/google-flights/flights.ts";
 import type { Client } from "./client.ts";
+import { sleep } from "./concurrency.ts";
 import { SearchUnsupportedError } from "./exceptions.ts";
 import { getSearchLogger } from "./logging.ts";
 import { encodeTfsPayload, encodeTfsSegment, type LegSpec } from "./proto.ts";
@@ -68,10 +69,9 @@ export const PAGE_FETCH_ATTEMPTS = 3;
 /** Backoff in milliseconds between page fetch attempts. */
 export const PAGE_RETRY_BACKOFF_MS = [500, 1500] as const;
 
-type SleepFn = (ms: number) => Promise<void>;
+type SleepFn = (ms: number, signal?: AbortSignal) => Promise<void>;
 
-const defaultSleep: SleepFn = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-let sleepImpl: SleepFn = defaultSleep;
+let sleepImpl: SleepFn = sleep;
 
 /**
  * Replace the page-retry backoff (test seam).
@@ -80,8 +80,8 @@ let sleepImpl: SleepFn = defaultSleep;
  * `_tfs._sleep` indirection the Python tests patch, so a retry test can
  * observe the backoff without waiting two seconds for it.
  */
-export function _setPageRetrySleep(sleep: SleepFn | null): void {
-  sleepImpl = sleep ?? defaultSleep;
+export function _setPageRetrySleep(fn: SleepFn | null): void {
+  sleepImpl = fn ?? sleep;
 }
 
 // `AF_initDataCallback({key: 'ds:1', hash: '..', data:[...], sideChannel: {}});`
@@ -320,7 +320,7 @@ export async function fetchPayload(
       getSearchLogger().debug(
         `Search page carried no ds:1 payload (attempt ${attempt + 1}/${PAGE_FETCH_ATTEMPTS}); retrying in ${delay}ms`,
       );
-      await sleepImpl(delay);
+      await sleepImpl(delay, options.signal);
     }
   }
   return null;
