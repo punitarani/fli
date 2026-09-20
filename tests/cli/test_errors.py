@@ -11,6 +11,7 @@ from fli.cli.errors import _write_log, json_error_payload, report_cli_error
 from fli.cli.main import app
 from fli.core.parsers import ParseError
 from fli.search.exceptions import (
+    SearchCertificateError,
     SearchClientError,
     SearchConnectionError,
     SearchHTTPError,
@@ -67,6 +68,9 @@ def test_write_log_creates_file_with_traceback(tmp_path):
         # T10 fix round 2 report's "Behaviour changes" section.
         (SearchTimeoutError("timed out"), "timeout", True),
         (SearchConnectionError("dns"), "connection_error", True),
+        # Carried forward from PR #164 (T23): a SearchConnectionError
+        # subclass, but deterministic — not retryable, unlike its parent.
+        (SearchCertificateError("bad cert"), "certificate_error", False),
         (SearchHTTPError("403", status_code=403), "http_error", False),
         (SearchClientError("generic"), "search_error", False),
         (RuntimeError("boom"), "unexpected_error", False),
@@ -175,6 +179,7 @@ def test_multi_command_reports_unsupported(runner, tmp_path):
     "exc, expected_msg",
     [
         (SearchTimeoutError("slow"), "Request timed out. slow"),
+        (SearchCertificateError("bad cert"), "TLS certificate error. bad cert"),
         (SearchConnectionError("dns"), "Network error. dns"),
         (SearchHTTPError("403", status_code=403), "Google Flights error. 403"),
         (SearchClientError("generic failure"), "Search failed. generic failure"),
