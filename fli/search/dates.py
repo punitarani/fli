@@ -14,7 +14,7 @@ from typing import Any, NamedTuple
 from pydantic import BaseModel
 
 from fli.core import extract_currency_from_price_token
-from fli.models import DateSearchFilters, FlightResult
+from fli.models import DateSearchFilters, FlightResult, PassengerInfo
 from fli.models.google_flights.base import TripType, earliest_searchable_date
 from fli.search._concurrency import parallel_map
 from fli.search._decoders import parse_flight_row
@@ -36,6 +36,30 @@ _NO_PAYLOAD = (
     "the search page carried no ds:1 payload — Google may have changed the "
     "page shape, or served a consent/blocked page instead"
 )
+
+# Same wording ``fli.search.flights`` uses for the same condition — see
+# ``SPARSE_PASSENGER_MIX_WARNING`` there for the live JFK-LHR / SFO-NRT row
+# counts behind it. Duplicated rather than imported so this module's
+# empty-result path stays self-contained.
+SPARSE_PASSENGER_MIX_WARNING = (
+    "No itineraries were inlined for this passenger mix. Google's search page "
+    "prices parties with children or infants client-side, so it often carries "
+    "few or no rows for them — most of all in premium cabins. This does not "
+    "mean the route has no flights: an adults-only search shows the schedule."
+)
+
+
+def _has_children_or_infants(passenger_info: PassengerInfo) -> bool:
+    """Whether the party includes anyone Google prices client-side.
+
+    Extra adults ride the request for free; children and infants (lap or
+    seat) are the passenger types that make the search-page transport inline
+    fewer — sometimes zero — rows. See ``SPARSE_PASSENGER_MIX_WARNING``.
+    """
+    return (
+        passenger_info.children + passenger_info.infants_on_lap + passenger_info.infants_in_seat > 0
+    )
+
 
 MAX_DATES_PER_SEARCH = 93
 """Most dates a single :meth:`SearchDates.search` call will price.
@@ -288,7 +312,37 @@ class SearchDates:
             ),
             tasks,
         )
-        return self._collect(outcomes, len(tasks), skipped=health.skipped)
+        result = self._collect(outcomes, len(tasks), skipped=health.skipped)
+        self._warn_if_sparse_passenger_mix(outcomes, result, filters.passenger_info)
+        return result
+
+    @staticmethod
+    def _warn_if_sparse_passenger_mix(
+        outcomes: list[_DateOutcome],
+        result: list[DatePrice] | None,
+        passenger_info: PassengerInfo,
+    ) -> None:
+        """Warn once when an empty sweep may be Google's pricing gap, not a dead range.
+
+        ``_collect`` already turns "every attempted date failed" or a tripped
+        breaker into a raise, and a minority of load failures into its own
+        summary warning (see its docstring) — so this only has something to
+        add when nothing priced *and* not one attempted date failed to load:
+        every page that loaded simply had no flights. For a party with
+        children or infants that is the shape Google's client-side pricing
+        produces, not evidence the route has no service.
+
+        Internal — underscore-prefixed rather than private, mirroring
+        :meth:`_collect`, so tests can drive it with a fixed set of outcomes
+        instead of racing a real sweep's per-date failure logging into the
+        state they want to assert.
+        """
+        if result is not None:
+            return
+        if any(o.failure for o in outcomes if o.attempted):
+            return
+        if _has_children_or_infants(passenger_info):
+            logger.warning(SPARSE_PASSENGER_MIX_WARNING)
 
     def _days_in(self, filters: DateSearchFilters) -> list[datetime]:
         """List every date in one chunk's ``from_date``..``to_date`` range."""

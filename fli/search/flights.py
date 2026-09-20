@@ -19,6 +19,7 @@ from fli.models import (
     BookingOption,
     FlightResult,
     FlightSearchFilters,
+    PassengerInfo,
     SeatType,
 )
 from fli.models.google_flights.base import SortBy, TripType
@@ -48,6 +49,33 @@ logger = logging.getLogger(__name__)
 # typed error family in ``fli.search.exceptions`` so it inherits
 # ``SearchClientError`` and is classified as a search failure, not a crash.
 __all__ = ["SearchFlights", "SearchParseError"]
+
+# Google inlines fewer rows — in premium cabins often none — for parties with
+# children or infants, because those fares are priced client-side through the
+# gated RPC this transport cannot reach; extra adults cost nothing. Shared
+# verbatim by the CLI's empty-result hint and the MCP `search_flights` empty
+# response's `note` field, so every surface explains an empty result the
+# same way. Measured live 2026-09-20: JFK-LHR economy held 23 rows for one
+# adult and 16 with a lap infant; SFO-NRT business held 9 for one or two
+# adults and 0 with a child.
+SPARSE_PASSENGER_MIX_WARNING = (
+    "No itineraries were inlined for this passenger mix. Google's search page "
+    "prices parties with children or infants client-side, so it often carries "
+    "few or no rows for them — most of all in premium cabins. This does not "
+    "mean the route has no flights: an adults-only search shows the schedule."
+)
+
+
+def _has_children_or_infants(passenger_info: PassengerInfo) -> bool:
+    """Whether the party includes anyone Google prices client-side.
+
+    Extra adults ride the request for free; children and infants (lap or
+    seat) are the passenger types that make the search-page transport inline
+    fewer — sometimes zero — rows. See ``SPARSE_PASSENGER_MIX_WARNING``.
+    """
+    return (
+        passenger_info.children + passenger_info.infants_on_lap + passenger_info.infants_in_seat > 0
+    )
 
 
 def _sort_key(sort_by: SortBy) -> Callable[[FlightResult], Any]:
@@ -174,10 +202,11 @@ class SearchFlights:
             capture_session=True,
         )
         if flights is None:
+            self._warn_if_sparse_passenger_mix(filters)
             return None
         if filters.trip_type == TripType.ONE_WAY:
             return flights
-        return self._expand_multi_leg(
+        combos = self._expand_multi_leg(
             flights,
             filters,
             top_n=top_n,
@@ -185,6 +214,20 @@ class SearchFlights:
             language=language,
             country=country,
         )
+        if not combos:
+            self._warn_if_sparse_passenger_mix(filters)
+        return combos
+
+    def _warn_if_sparse_passenger_mix(self, filters: FlightSearchFilters) -> None:
+        """Warn once when an empty result may be Google's pricing gap, not a dead route.
+
+        Called only from :meth:`search`, after the trip's final result is known
+        to be empty — never from :meth:`_fetch_flights`, which the round-trip
+        expansion calls once per candidate outbound. That keeps this to exactly
+        one warning per :meth:`search` call, one-way or round-trip alike.
+        """
+        if _has_children_or_infants(filters.passenger_info):
+            logger.warning(SPARSE_PASSENGER_MIX_WARNING)
 
     def _fetch_flights(
         self,
