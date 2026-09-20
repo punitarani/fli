@@ -131,8 +131,14 @@ for (const { date, price } of dates ?? []) {
 ```
 
 `DatePrice.date` is a tuple of `Date` objects: `[outbound]` for one-way,
-`[outbound, return]` for round trips. Ranges larger than 61 days are split
-into multiple calls automatically.
+`[outbound, return]` for round trips.
+
+!!! warning "One page fetch per date"
+    Google's search page carries no calendar grid, so every date in the
+    range costs its own full page fetch (~2 MB). A single
+    `SearchDates.search` prices at most **93 dates**
+    (`MAX_DATES_PER_SEARCH`); a wider range throws `RangeError`. See
+    [Search transport](#search-transport).
 
 ## Filters, alliances, and locale
 
@@ -193,8 +199,61 @@ const search = new SearchFlights(client);
 ```
 
 Typed errors — `SearchTimeoutError`, `SearchConnectionError`,
-`SearchHTTPError`, all extending `SearchClientError` — let you branch on
-failure mode.
+`SearchHTTPError`, `SearchParseError`, `SearchRejectedError` and
+`SearchUnsupportedError`, all extending `SearchClientError` — let you
+branch on failure mode.
+
+## Search transport
+
+Searches are served by Google's public search page rather than the
+`FlightsFrontendService` RPC. Since 2026-08 `GetShoppingResults` and
+`GetCalendarGraph` require an `x-goog-batchexecute-bgr` header that only
+the page's own JavaScript can produce, so a plain HTTP client gets HTTP
+200 with no payload. `fli-js` issues
+`GET https://www.google.com/travel/flights?tfs=<protobuf>` instead and
+reads the results out of the page's inline `AF_initDataCallback` blob
+keyed `ds:1`. This matches the Python library, which moved the same way.
+
+What that means in practice:
+
+* **Three filters are not supported.** `emissions`, `bags` and
+  `exclude_basic_economy` have no `tfs` field and cannot be reconstructed
+  from the decoded rows, so they are dropped with a warning. Stops,
+  cabin, passengers, alliances and layover bounds ride in the request;
+  airline include/exclude, price cap, max duration and departure windows
+  are applied to the results after fetching, and `sort_by` orders them
+  afterwards (`TOP_FLIGHTS` / `BEST` keep Google's own ranking).
+* **Multi-city throws `SearchUnsupportedError`.** Google loads those
+  results client-side through the gated RPC, so the page carries no rows
+  to read. Search each leg separately.
+* **`getBookingOptions` is unavailable.** It calls `GetBookingResults`,
+  which is gated the same way, and currently throws
+  `SearchRejectedError`. `buildFlightBookingUrl` is built offline from
+  the itinerary and still works.
+* **Fewer rows per search.** Expect roughly 20–45 itineraries, fewer than
+  the old RPC returned — and a client-side filter cannot back-fill the
+  list the way Google's server-side one did.
+* **Date searches cost one page fetch per date**, capped at 93 dates. A
+  sweep that never loads a single page gives up after five dates and
+  throws rather than paying the retry budget on all of them; one that was
+  cut short but found prices returns them with a warning.
+* **A page occasionally arrives without results.** Roughly one request in
+  sixty returns HTTP 200 with no `ds:1` blob; the client retries that case
+  up to twice (0.5s then 1.5s) before throwing `SearchParseError`.
+* **`FLI_SOCS_COOKIE`.** EU/EEA IPs are redirected to Google's consent
+  interstitial, which serves no `ds:1` blob. The client sends a
+  pre-accepted `SOCS` consent cookie by default; set `FLI_SOCS_COOKIE` to
+  change the value, or to an empty string to send none.
+
+Warnings (dropped filters, a sweep cut short) go to `console.warn`.
+Redirect or silence them with `setSearchLogger`:
+
+```ts
+import { setSearchLogger } from "fli-js";
+
+setSearchLogger({ warn: (m) => myLogger.warn(m), debug: () => {} });
+setSearchLogger(null); // back to console.warn
+```
 
 ## Next steps
 

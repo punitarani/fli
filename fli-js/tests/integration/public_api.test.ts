@@ -37,6 +37,36 @@ describe("Public API surface", () => {
     expect(typeof fli.SearchConnectionError).toBe("function");
     expect(typeof fli.SearchHTTPError).toBe("function");
     expect(typeof fli.SearchParseError).toBe("function");
+    expect(typeof fli.SearchRejectedError).toBe("function");
+    expect(typeof fli.SearchUnsupportedError).toBe("function");
+  });
+
+  test("every search error is catchable as SearchClientError", () => {
+    // Consumers catch the base class to mean "the search failed"; a
+    // parse failure — which a consent or blocked page produces — has to
+    // land there too.
+    expect(new fli.SearchParseError("x")).toBeInstanceOf(fli.SearchClientError);
+    expect(new fli.SearchRejectedError(13)).toBeInstanceOf(fli.SearchClientError);
+    expect(new fli.SearchUnsupportedError("x")).toBeInstanceOf(fli.SearchClientError);
+  });
+
+  test("exports the search-page transport helpers", () => {
+    expect(typeof fli.buildTfs).toBe("function");
+    expect(typeof fli.pageUrl).toBe("function");
+    expect(typeof fli.extractPayload).toBe("function");
+    expect(typeof fli.fetchPayload).toBe("function");
+    expect(typeof fli.applyClientSideFilters).toBe("function");
+    expect(typeof fli.unsupportedFilters).toBe("function");
+    expect(fli.PAGE_URL).toBe("https://www.google.com/travel/flights");
+    expect(fli.PAGE_FETCH_ATTEMPTS).toBe(3);
+  });
+
+  test("exports the sweep limits and the consent-cookie knob", () => {
+    expect(fli.MAX_DATES_PER_SEARCH).toBe(93);
+    expect(fli.SWEEP_FAILURE_THRESHOLD).toBe(5);
+    expect(typeof fli.DEFAULT_SOCS_COOKIE).toBe("string");
+    expect(typeof fli.resolveSocsCookie).toBe("function");
+    expect(typeof fli.setSearchLogger).toBe("function");
   });
 
   test("exports core utilities", () => {
@@ -51,6 +81,9 @@ describe("Public API surface", () => {
     expect(typeof fli.buildBookingToken).toBe("function");
     expect(typeof fli.decodeBookingToken).toBe("function");
     expect(typeof fli.extractBookingTokenFromTfu).toBe("function");
+    expect(typeof fli.buildTfsToken).toBe("function");
+    expect(typeof fli.encodeTfsSegment).toBe("function");
+    expect(typeof fli.encodeTfsPayload).toBe("function");
   });
 
   test("exports wire / urls helpers", () => {

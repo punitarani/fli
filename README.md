@@ -531,6 +531,13 @@ const filters = new FlightSearchFilters({
 const results = await new SearchFlights().search(filters, { currency: "USD" });
 ```
 
+`fli-js` uses the same search-page transport as the Python package (see
+[Search transport](#search-transport) above), with the same consequences:
+`emissions` / `bags` / `exclude_basic_economy` are dropped with a warning,
+multi-city throws `SearchUnsupportedError`, `getBookingOptions` throws
+`SearchRejectedError`, date searches cost one page fetch per date and are
+capped at 93, and `FLI_SOCS_COOKIE` controls the consent cookie.
+
 The TypeScript source lives in [`fli-js/`](fli-js); see the
 [TypeScript Quick Start](https://punitarani.github.io/fli/typescript/quickstart/)
 for the full guide.
