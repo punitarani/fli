@@ -34,6 +34,10 @@ PR #164 already independently converged on, and names *what happened*
 (usually, but not always, a consent/blocked interstitial — see
 ``FLI_SOCS_COOKIE`` below). ``"rejected_error"``, ``"unsupported_error"``
 and ``"validation_error"`` are new additions both surfaces now share.
+``"certificate_error"`` is a later addition (T23) carrying forward the
+other half of PR #164 — its ``error_type`` naming was never released, so it
+was free to pick, and follows the same "name what happened" convention as
+``parse_error``.
 
 - ``validation_error`` (not retryable): bad parameters — pydantic
   ``ValidationError``, ``fli.core.parsers.ParseError``, or a bare
@@ -48,6 +52,12 @@ and ``"validation_error"`` are new additions both surfaces now share.
   refused the RPC outright (e.g. booking options); deterministic,
   retrying will not help.
 - ``timeout`` (retryable): ``SearchTimeoutError``.
+- ``certificate_error`` (not retryable): ``SearchCertificateError`` — a
+  ``SearchConnectionError`` subclass, checked first: TLS certificate
+  verification failed, most often behind a TLS-intercepting corporate
+  proxy. Deterministic for a fixed CA bundle configuration, so retrying
+  unchanged will not help; set ``FLI_CA_BUNDLE`` (or ``CURL_CA_BUNDLE`` /
+  ``REQUESTS_CA_BUNDLE``) to point at the right CA bundle and try again.
 - ``connection_error`` (retryable): ``SearchConnectionError``.
 - ``http_error`` (retryable iff ``http_status`` is 429 or 5xx):
   ``SearchHTTPError``, with the status in ``http_status`` when known.
@@ -74,6 +84,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from fli.search.exceptions import (
+    SearchCertificateError,
     SearchClientError,
     SearchConnectionError,
     SearchHTTPError,
@@ -132,6 +143,12 @@ def classify_error(exc: BaseException) -> ErrorClassification:
     """
     if isinstance(exc, SearchTimeoutError):
         return ErrorClassification("timeout", retryable=True)
+    if isinstance(exc, SearchCertificateError):
+        # Checked before its parent SearchConnectionError: a bad or missing
+        # CA bundle / an untrusted certificate is deterministic for a fixed
+        # environment, unlike a transient DNS blip or dropped connection —
+        # so, unlike connection_error, this is not retryable.
+        return ErrorClassification("certificate_error", retryable=False)
     if isinstance(exc, SearchConnectionError):
         return ErrorClassification("connection_error", retryable=True)
     if isinstance(exc, SearchHTTPError):

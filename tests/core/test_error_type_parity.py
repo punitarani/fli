@@ -62,6 +62,7 @@ from fli.mcp.server import (
     _execute_flight_search,
 )
 from fli.search.exceptions import (
+    SearchCertificateError,
     SearchClientError,
     SearchConnectionError,
     SearchHTTPError,
@@ -116,6 +117,11 @@ _INSTANCES: dict[type, BaseException] = {
     ValueError: ValueError("bad date range"),
     ValidationError: _pydantic_validation_error(),
     Exception: Exception("totally unclassified"),
+    # Carried forward from PR #164 (T23): a SearchConnectionError subclass,
+    # but deterministic for a fixed CA bundle — checked separately so CLI
+    # and MCP agree it is certificate_error/not-retryable, not the parent's
+    # connection_error/retryable.
+    SearchCertificateError: SearchCertificateError("bad cert"),
 }
 
 
