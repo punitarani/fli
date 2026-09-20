@@ -12,7 +12,7 @@
  *   - wraps low-level errors into the typed {@link SearchClientError} family
  */
 
-import { sleep, TokenBucketRateLimiter } from "./concurrency.ts";
+import { sleep, TokenBucketRateLimiter, throwIfAborted } from "./concurrency.ts";
 import {
   SearchClientError,
   SearchConnectionError,
@@ -254,6 +254,11 @@ export class Client {
     url: string,
     options: RequestOptions,
   ): Promise<ClientResponse> {
+    // Nothing is spent on behalf of a caller who has already cancelled —
+    // not a rate-limiter token, which would delay the next real request,
+    // and not a `fetchImpl` call.
+    throwIfAborted(options.signal);
+
     let lastError: unknown = null;
     for (let attempt = 0; attempt < this.retries; attempt++) {
       await this.rateLimiter.acquire();

@@ -5,6 +5,21 @@
  */
 
 /**
+ * Throw the caller's abort reason if `signal` has already fired.
+ *
+ * Used at every point where a cancelled call would otherwise spend
+ * something on the caller's behalf — a rate-limiter token (which delays
+ * the next real request), a `fetchImpl` call, a page fetch, a date.
+ * Real `fetch` rejects a pre-aborted signal without touching the network,
+ * but a custom `fetchImpl` is under no such obligation.
+ */
+export function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw signal.reason ?? new DOMException("Aborted", "AbortError");
+  }
+}
+
+/**
  * Sleep for `ms`, giving up promptly if `signal` aborts.
  *
  * Both backoffs in this package — the client's retry backoff and the

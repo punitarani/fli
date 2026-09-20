@@ -40,7 +40,7 @@ import { TripType } from "../models/google-flights/base.ts";
 import type { DateSearchFilters } from "../models/google-flights/dates.ts";
 import type { FlightSearchFilters } from "../models/google-flights/flights.ts";
 import type { Client } from "./client.ts";
-import { sleep } from "./concurrency.ts";
+import { sleep, throwIfAborted } from "./concurrency.ts";
 import { SearchUnsupportedError } from "./exceptions.ts";
 import { getSearchLogger } from "./logging.ts";
 import { encodeTfsPayload, encodeTfsSegment, type LegSpec } from "./proto.ts";
@@ -306,6 +306,7 @@ export async function fetchPayload(
   options: FetchPayloadOptions = {},
 ): Promise<unknown> {
   for (let attempt = 0; attempt < PAGE_FETCH_ATTEMPTS; attempt++) {
+    throwIfAborted(options.signal);
     const response = await client.get(url, options.signal ? { signal: options.signal } : {});
     const payload = extractPayload(response.text);
     if (payload != null) {

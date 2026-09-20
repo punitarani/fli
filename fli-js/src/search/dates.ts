@@ -17,7 +17,7 @@ import { TripType } from "../models/google-flights/base.ts";
 import type { DateSearchFilters } from "../models/google-flights/dates.ts";
 import { type Client, getClient } from "./client.ts";
 import { cloneFilters } from "./clone.ts";
-import { parallelMap } from "./concurrency.ts";
+import { parallelMap, throwIfAborted } from "./concurrency.ts";
 import { parseFlightRow } from "./decoders.ts";
 import { SearchClientError, SearchParseError } from "./exceptions.ts";
 import { getSearchLogger } from "./logging.ts";
@@ -258,6 +258,8 @@ export class SearchDates {
     filters: DateSearchFilters,
     options: DateSearchOptions = {},
   ): Promise<DatePrice[] | null> {
+    throwIfAborted(options.signal);
+
     const dropped = unsupportedFilters(filters);
     if (dropped.length > 0) {
       getSearchLogger().warn(
@@ -294,6 +296,15 @@ export class SearchDates {
       ([chunk, day]: [DateSearchFilters, Date]) => this._priceOneDate(chunk, day, options, health),
       tasks,
     );
+
+    // A cancelled sweep rejects; it never hands back the dates it happened
+    // to finish first. A truncated list of prices is indistinguishable
+    // from a complete one at the call site, so returning it would turn a
+    // cancellation into a wrong answer — and `_collect` would otherwise
+    // describe the cancelled dates as a blocked or failed sweep, which is
+    // not what happened.
+    throwIfAborted(options.signal);
+
     return SearchDates._collect(outcomes, tasks.length, health.skipped);
   }
 
@@ -457,6 +468,14 @@ export class SearchDates {
     }
     const travelDates = dates.map(formatIsoDate);
 
+    // The caller has cancelled: start no further date. `attempted: false`
+    // keeps it out of every tally — `search` rejects with the abort reason
+    // before `_collect` ever runs, and a cancelled date is not evidence of
+    // a blocked client.
+    if (options.signal?.aborted) {
+      return outcome({ attempted: false });
+    }
+
     // A date sweep can straddle today, and past dates are simply not
     // bookable — skip them rather than spend a request on them.
     if (day.getTime() < earliestSearchableDate().getTime()) {
@@ -507,6 +526,13 @@ export class SearchDates {
       // out of here would sink the whole sweep.
       flights = applyClientSideFilters(flightsIn(payload), filters);
     } catch (err) {
+      // An in-flight date that was cancelled is not a failed date. Warning
+      // about it, counting it towards "every date failed", or feeding it
+      // to the circuit breaker would all report a problem that is not
+      // there — the caller knows perfectly well why the sweep stopped.
+      if (options.signal?.aborted) {
+        return outcome({ attempted: false });
+      }
       // One concise line per bad date; the stack trace stays at debug.
       const name = err instanceof Error ? err.name : "Error";
       const detail = err instanceof Error ? err.message : String(err);
