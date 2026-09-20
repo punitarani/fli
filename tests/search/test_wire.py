@@ -228,6 +228,47 @@ def _back_to_back_chunks(count: int) -> str:
     return "".join(parts)
 
 
+def _trailing_boundary_chunks(count: int) -> str:
+    """Build header-less chunks whose only boundary sits at the very end.
+
+    The worst case for the decode window: the region between the cursor and
+    the next boundary spans the whole body, so re-slicing it once per chunk
+    copies the entire remainder every time.
+    """
+    parts = [")]}'\n\n"]
+    parts.extend(
+        json.dumps([_payload_row([index])], separators=(",", ":")) for index in range(count)
+    )
+    last = json.dumps([_payload_row([count])], separators=(",", ":"))
+    parts.append(f"\n{len(last) + 2}\n{last}\n")
+    return "".join(parts)
+
+
+def _sparse_boundary_chunks(count: int, spacing: int | None = None) -> str:
+    """Build header-less chunks carrying a length header only every ``spacing``.
+
+    The same hazard with several regions instead of one. ``spacing``
+    defaults to a third of the body so the *regions* grow with it: at a
+    fixed spacing the per-chunk copy is only a constant factor (the
+    re-reviewer measured 1.2x at 1000 chunks per region, 2.2x at 5000),
+    which no ratio test can see. Only a region that grows with the body
+    turns it back into a curve.
+    """
+    if spacing is None:
+        spacing = max(count // 3, 1)
+    parts = [")]}'\n\n"]
+    for index in range(count):
+        # Wider payloads than the other shapes on purpose: the cost of the
+        # defect is (chunks x region bytes), so a region has to be big in
+        # BYTES for the copy to outweigh Python's per-chunk overhead. Fixed
+        # width, so the body grows exactly with ``count``.
+        chunk = json.dumps([_payload_row([index, "x" * 200])], separators=(",", ":"))
+        if index and index % spacing == 0:
+            parts.append(f"\n{len(chunk) + 2}\n")
+        parts.append(chunk)
+    return "".join(parts)
+
+
 def _newline_separated_chunks(count: int) -> str:
     """Build valid chunks with no length headers, one newline between them."""
     body = "\n".join(
@@ -421,16 +462,24 @@ class TestGrammarDelimitingRobustness:
 
 
 class TestScalesLinearlyOnEveryBodyShape:
-    r"""Every framing shape must be O(n) — including the ones with no boundary.
+    r"""Every framing shape must be O(n) — whatever the boundaries look like.
 
     The reader looks ahead for the next ``\n<digits>\n[`` to bound each
-    decode. A body that has no such boundary — CRLF framing, or chunks
-    written back to back with no length headers — must not pay for that
-    lookahead once per chunk: an unmatched ``re.search`` scans to the end
-    of the document, which is O(n) per chunk and O(n^2) overall. Measured
-    before the fix at ~4x per doubling on all three no-boundary shapes,
-    where a 2 MB CRLF body took ~57 s against 69 ms for the reader that
-    never looked ahead at all.
+    decode, and there are two ways to make that per-chunk work instead of
+    per-region, both of which were real:
+
+    * a body with no boundary at all — CRLF framing, or chunks written back
+      to back with no length headers — makes the unmatched ``re.search``
+      scan to the end of the document once per chunk (a 2 MB CRLF body took
+      ~57 s against 69 ms for the reader that never looked ahead);
+    * a body whose boundaries are far apart makes the window *slice* copy
+      the whole remaining region once per chunk, which is the same shape of
+      cost without any search at all (80k chunks with one boundary at the
+      end copied ~105 GB and took 1.6 s against 81 ms).
+
+    Both are quadratic and neither shows up on the header-framed shape,
+    where every chunk has a boundary right behind it. Hence one ratio test
+    per shape rather than one for the format Google actually sends.
     """
 
     def test_header_framed_garbage(self):
@@ -451,6 +500,19 @@ class TestScalesLinearlyOnEveryBodyShape:
             _newline_separated_chunks, (2_000, 4_000, 8_000), "newline-separated valid"
         )
 
+    def test_only_boundary_at_the_very_end(self):
+        # Worst case for the window slice: one boundary, at the end, so the
+        # region between cursor and boundary is the whole remaining body.
+        _assert_scales_linearly(
+            _trailing_boundary_chunks, (5_000, 10_000, 20_000), "trailing boundary only"
+        )
+
+    def test_sparse_boundaries(self):
+        # The same hazard at a realistic density — a header every 500 chunks.
+        _assert_scales_linearly(
+            _sparse_boundary_chunks, (5_000, 10_000, 20_000), "sparse boundaries"
+        )
+
     def test_every_shape_still_decodes_every_chunk(self):
         # Speed is worthless if the shapes stopped parsing. Pin the output
         # of each one alongside its timing.
@@ -459,6 +521,12 @@ class TestScalesLinearlyOnEveryBodyShape:
         assert list(iter_wrb_chunks(_back_to_back_chunks(50))) == want
         assert list(iter_wrb_chunks(_newline_separated_chunks(50))) == want
         assert list(iter_wrb_chunks(_malformed_chunks(50))) == []
+        # The trailing-boundary shape carries one extra chunk after it.
+        assert list(iter_wrb_chunks(_trailing_boundary_chunks(50))) == [*want, [50]]
+        # The sparse shape carries a wider payload — see its builder.
+        assert list(iter_wrb_chunks(_sparse_boundary_chunks(50, spacing=10))) == [
+            [index, "x" * 200] for index in range(50)
+        ]
 
 
 # JSON fragments that could sit on either side of a boundary-shaped run of

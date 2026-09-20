@@ -132,40 +132,55 @@ def iter_wrb_chunks(body: str | bytes) -> Iterator[Any]:
     yielded = 0
     cursor = 0
     size = len(text)
-    # Lookahead state, carried across chunks on purpose — see below.
+    # Lookahead and window state, carried across chunks on purpose — see below.
     boundary: re.Match[str] | None = None
     no_more_boundaries = False
+    region = text
+    region_start = 0
     while cursor < size:
         while cursor < size and text[cursor] in _FRAMING_CHARS:
             cursor += 1
         if cursor >= size:
             break
 
-        # Decode the chunk alone rather than the whole body from an offset.
-        # A failed decode builds a ``JSONDecodeError``, and that constructor
-        # counts the newlines before the error position — O(offset) over
-        # whatever string it was handed. Passing the full body made a stream
-        # of bad chunks quadratic; a window keeps every failure O(chunk).
+        # Decode within the region ending at the next boundary rather than
+        # over the whole body. A failed decode builds a ``JSONDecodeError``,
+        # and that constructor counts the newlines before the error position
+        # — O(offset) over whatever string it was handed. Passing the full
+        # body made a stream of bad chunks quadratic; a bounded region keeps
+        # every failure proportional to the region, and a failure jumps
+        # straight to the region's end, so there is at most one per region.
         #
-        # The lookahead is cached because boundaries only move forward. A
-        # match found for an earlier cursor is still the next one until the
-        # cursor passes it (there can be nothing between them, or the search
-        # would have returned that instead), and once a search comes back
-        # empty there is nothing ahead to find again. Without both, a body
-        # that has no boundary at all — CRLF framing, or chunks written back
-        # to back with no headers — pays a scan to the end of the document
-        # once per chunk, which is the same O(n^2) in a different place.
+        # Both the lookahead and the slice are computed per REGION, not per
+        # chunk, and that is what keeps this linear:
+        #
+        # * the search is cached because boundaries only move forward. A
+        #   match found for an earlier cursor is still the next one until the
+        #   cursor passes it (there can be nothing between them, or the
+        #   search would have returned that instead), and once a search comes
+        #   back empty there is nothing ahead to find again. Without both, a
+        #   body with no boundary at all — CRLF framing, or chunks written
+        #   back to back with no headers — pays a scan to the end of the
+        #   document once per chunk.
+        # * the slice is cached with it, and the cursor is translated into
+        #   it, because re-slicing ``text[cursor:boundary.start()]`` per
+        #   chunk copies the whole remaining region every time. With one
+        #   boundary at the end of an 80k-chunk body that came to ~105 GB of
+        #   copying, 1.6 s against 81 ms for the reader that never sliced.
+        #
+        # Both hazards are invisible on the shape Google actually sends,
+        # where every chunk has a boundary right behind it and the region is
+        # one chunk long.
         if not no_more_boundaries and (boundary is None or boundary.start() < cursor):
             boundary = _CHUNK_BOUNDARY.search(text, cursor)
             no_more_boundaries = boundary is None
-
-        if boundary is None:
-            window, start, offset = text, cursor, 0
-        else:
-            window, start, offset = text[cursor : boundary.start()], 0, cursor
+            if boundary is None:
+                region, region_start = text, 0
+            else:
+                region, region_start = text[cursor : boundary.start()], cursor
 
         try:
-            outer, consumed = decoder.raw_decode(window, start)
+            outer, consumed = decoder.raw_decode(region, cursor - region_start)
         except (ValueError, RecursionError) as exc:
             # ``RecursionError`` is a ``RuntimeError``: deeply nested input
             # would otherwise escape the generator entirely.
@@ -177,7 +192,7 @@ def iter_wrb_chunks(body: str | bytes) -> Iterator[Any]:
                 break
             cursor = boundary.end()
             continue
-        cursor = offset + consumed
+        cursor = region_start + consumed
 
         for kind, value in _rows_from_outer(outer):
             if kind is _ROW_ERROR:
