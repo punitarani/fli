@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from fli.core.parsers import icao_to_iata
 from fli.models import Airport, display_name
 from fli.models.airport import AIRPORT_NAMES
 
@@ -70,7 +71,7 @@ for _city, _codes in CITY_AIRPORTS.items():
         if _code not in AIRPORT_NAMES:
             raise RuntimeError(f"CITY_AIRPORTS[{_city!r}] references unknown IATA code {_code!r}")
 
-MatchType = Literal["iata_exact", "iata_prefix", "city", "name"]
+MatchType = Literal["iata_exact", "icao_exact", "iata_prefix", "city", "name"]
 
 
 class AirportMatch(BaseModel):
@@ -94,7 +95,13 @@ def search_airports(query: str, limit: int = 10) -> list[AirportMatch]:
       3. city        (score 80)  - query is a prefix of a city in CITY_AIRPORTS
       4. name        (score <=70) - query is a substring of an airport's name;
                                    earlier match position scores higher
-      5. iata_prefix (score 60)  - query (<=3 chars) is a prefix of an IATA code
+      5. icao_exact  (score 65)  - query is a known 4-letter ICAO code (e.g. "KJFK")
+      6. iata_prefix (score 60)  - query (<=3 chars) is a prefix of an IATA code
+
+    An ICAO hit deliberately ranks below city and name matches: many ICAO codes
+    are also ordinary word fragments ("sant" is Tucuman's SANT, "kind" is
+    Indianapolis' KIND), and a partial "Santa..." search must not be hijacked.
+    For genuine ICAO input nothing else matches, so it is still the top result.
 
     Within a single result list, each IATA code appears at most once: the
     highest-priority match wins.
@@ -178,7 +185,19 @@ def search_airports(query: str, limit: int = 10) -> list[AirportMatch]:
             )
             seen_codes.add(code)
 
-    # Priority 5: IATA code prefix match (handles "SF" matching "SFO").
+    # Priority 5: Exact ICAO code match (e.g. "KJFK" -> JFK), mirroring resolve_airport().
+    # Scored below city/name matches on purpose - see the docstring.
+    iata_from_icao = icao_to_iata(query_upper)
+    if iata_from_icao in Airport.__members__ and iata_from_icao not in seen_codes:
+        airport = Airport[iata_from_icao]
+        results.append(
+            AirportMatch(
+                code=airport, name=display_name(airport), match_type="icao_exact", score=65.0
+            )
+        )
+        seen_codes.add(iata_from_icao)
+
+    # Priority 6: IATA code prefix match (handles "SF" matching "SFO").
     if len(query_upper) <= 3:
         for code in AIRPORT_NAMES:
             if code in seen_codes:

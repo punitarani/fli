@@ -169,3 +169,36 @@ class TestDisambiguatedNamesStayInternal:
             " (1S)"
         )  # digit-leading code: suffix shows "1S", not "_1S"
         assert display_name(Airline._1S) == Airline._1S.value.removesuffix(" (1S)")
+
+
+class TestIcaoLookup:
+    """`search_airports` resolves 4-letter ICAO codes, like `resolve_airport` does."""
+
+    def test_icao_code_is_an_exact_match(self):
+        """KJFK finds JFK as the top, exact result."""
+        from fli.core.airports import search_airports
+
+        results = search_airports("KJFK")
+        assert results[0].code.name == "JFK"
+        assert results[0].match_type == "icao_exact"
+
+    def test_icao_lookup_is_case_insensitive(self):
+        """Lower-case ICAO input resolves too."""
+        from fli.core.airports import search_airports
+
+        assert search_airports("egll")[0].code.name == "LHR"
+
+    def test_unknown_four_letter_query_still_falls_through(self):
+        """A 4-letter word that is not an ICAO code keeps using name/city search."""
+        from fli.core.airports import search_airports
+
+        results = search_airports("naha")
+        assert results and all(r.match_type != "icao_exact" for r in results)
+
+    def test_icao_hit_does_not_hijack_a_partial_word(self):
+        """A "Santa..." search leads with names even though "sant" is Tucuman's ICAO code."""
+        from fli.core.airports import search_airports
+
+        results = search_airports("sant", limit=1000)
+        assert results[0].match_type == "name"
+        assert "TUC" in {r.code.name for r in results}  # still offered, just not first

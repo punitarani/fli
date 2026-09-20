@@ -1422,17 +1422,19 @@ def find_airports(
         str,
         Field(
             description=(
-                "City name, airport name, or IATA code (e.g., 'new york', 'heathrow', 'JFK')"
+                "City name, airport name, IATA code, or ICAO code "
+                "(e.g., 'new york', 'heathrow', 'JFK', 'KJFK')"
             )
         ),
     ],
     limit: Annotated[int, Field(description="Maximum results to return", ge=1, le=50)] = 10,
 ) -> dict[str, Any]:
-    """Search for airports by city name, airport name, or IATA code.
+    """Search for airports by city name, airport name, IATA code, or ICAO code.
 
     Use this tool to find airport IATA codes before searching for flights.
     Supports city names (e.g., "new york" returns JFK, LGA, EWR),
-    airport names (e.g., "heathrow" returns LHR), and IATA codes.
+    airport names (e.g., "heathrow" returns LHR), IATA codes, and 4-letter
+    ICAO codes (e.g., "KJFK" returns JFK).
     """
     return _find_airports_impl(query, limit=limit)
 
