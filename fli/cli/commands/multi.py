@@ -4,11 +4,13 @@ import re
 from typing import Annotated
 
 import typer
+from pydantic import ValidationError
 
 from fli.cli.errors import report_cli_error
 from fli.cli.utils import display_flight_results, validate_time_range
 from fli.core import (
     build_multi_city_segments,
+    format_validation_error,
     normalize_date,
     parse_airlines,
     parse_cabin_class,
@@ -104,6 +106,30 @@ def multi(
             min=1,
         ),
     ] = 1,
+    children: Annotated[
+        int,
+        typer.Option(
+            "--children",
+            help="Number of children",
+            min=0,
+        ),
+    ] = 0,
+    infants_in_seat: Annotated[
+        int,
+        typer.Option(
+            "--infants-in-seat",
+            help="Number of infants in seat",
+            min=0,
+        ),
+    ] = 0,
+    infants_on_lap: Annotated[
+        int,
+        typer.Option(
+            "--infants-on-lap",
+            help="Number of infants on lap",
+            min=0,
+        ),
+    ] = 0,
 ):
     """Search for multi-city flights with multiple legs.
 
@@ -113,6 +139,7 @@ def multi(
         fli multi --leg SEA,HKG,2026-12-26 --leg PEK,SEA,2027-01-02
         fli multi -l SEA,NRT,2026-12-26 -l NRT,HKG,2026-12-30 -l HKG,SEA,2027-01-05 -c BUSINESS
         fli multi -l SEA,NRT,2026-12-26 -l HKG,SEA,2027-01-05 --passengers 2
+        fli multi -l SEA,NRT,2026-12-26 -l HKG,SEA,2027-01-05 --passengers 2 --children 1
 
     """
     try:
@@ -152,7 +179,12 @@ def multi(
         # Create search filters
         filters = FlightSearchFilters(
             trip_type=trip_type,
-            passenger_info=PassengerInfo(adults=passengers),
+            passenger_info=PassengerInfo(
+                adults=passengers,
+                children=children,
+                infants_in_seat=infants_in_seat,
+                infants_on_lap=infants_on_lap,
+            ),
             flight_segments=segments,
             stops=stops,
             seat_type=seat_type,
@@ -172,6 +204,9 @@ def multi(
 
     except ParseError as e:
         typer.echo(f"Error: {str(e)}")
+        raise typer.Exit(1) from e
+    except ValidationError as e:
+        typer.echo(f"Error: {format_validation_error(e)}")
         raise typer.Exit(1) from e
     except (AttributeError, ValueError) as e:
         typer.echo(f"Error: {str(e)}")
