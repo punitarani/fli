@@ -18,6 +18,7 @@ import { Client } from "../../src/search/client.ts";
 import {
   type DateOutcome,
   MAX_DATES_PER_SEARCH,
+  NO_PAYLOAD,
   SearchDates,
   SWEEP_FAILURE_THRESHOLD,
 } from "../../src/search/dates.ts";
@@ -86,6 +87,16 @@ function priced(price: number): DateOutcome {
     error: null,
     attempted: true,
   };
+}
+
+/** A `DateOutcome` whose page loaded with no flights, for driving `_collect` directly. */
+function loadedEmpty(): DateOutcome {
+  return { price: null, failure: null, error: null, attempted: true };
+}
+
+/** A `DateOutcome` for a date whose page never arrived, for driving `_collect` directly. */
+function failed(failure = "SearchConnectionError: connection refused"): DateOutcome {
+  return { price: null, failure, error: new Error(failure), attempted: true };
 }
 
 function oneWayFilters(fromAhead: number, toAhead: number): DateSearchFilters {
@@ -449,5 +460,151 @@ describe("SearchDates failure reporting", () => {
       setSearchLogger(null);
     }
     expect(warnings.filter((w) => w.includes("bags"))).toHaveLength(1);
+  });
+});
+
+describe("SearchDates mostly-failed sweeps (T20)", () => {
+  // The breaker cannot catch "1 loaded, 29 timeouts": it disarms for good
+  // the moment any page loads, empty or not. If nothing priced and at least
+  // half the attempted dates never made it to a page, that is raised too —
+  // mirrors fli/search/dates.py's TestMostlyFailedSweepIsLoud.
+
+  test("mostly timeouts around one loaded empty date raises SearchClientError", () => {
+    const outcomes = [loadedEmpty(), ...Array.from({ length: 29 }, () => failed())];
+    let thrown: unknown;
+    try {
+      SearchDates._collect(outcomes, 30, 0);
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(SearchClientError);
+    expect(thrown).not.toBeInstanceOf(SearchParseError);
+    const message = (thrown as Error).message;
+    expect(message).toContain("Priced 0 of 30");
+    expect(message).toContain("29 of the 30");
+    expect(message).not.toContain("FLI_SOCS_COOKIE");
+    expect((thrown as Error).cause).toBeInstanceOf(Error);
+  });
+
+  test("mostly no-payload failures raise SearchParseError without the SOCS hint", () => {
+    const outcomes = [loadedEmpty(), ...Array.from({ length: 3 }, () => failed(NO_PAYLOAD))];
+    let thrown: unknown;
+    try {
+      SearchDates._collect(outcomes, 4, 0);
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(SearchParseError);
+    expect((thrown as Error).message).not.toContain("FLI_SOCS_COOKIE");
+  });
+
+  test("a tie between loaded and failed dates raises", () => {
+    const outcomes = [loadedEmpty(), failed()];
+    expect(() => SearchDates._collect(outcomes, 2, 0)).toThrow(SearchClientError);
+  });
+
+  test("a minority of failures with no results returns null and warns exactly once", () => {
+    const warnings: string[] = [];
+    setSearchLogger({ warn: (m) => warnings.push(m), debug: () => {} });
+    let results: ReturnType<typeof SearchDates._collect>;
+    try {
+      results = SearchDates._collect([loadedEmpty(), loadedEmpty(), loadedEmpty(), failed()], 4, 0);
+    } finally {
+      setSearchLogger(null);
+    }
+    expect(results).toBeNull();
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("3");
+    expect(warnings[0]).toContain("loaded");
+    expect(warnings[0]).toContain("1 of 4");
+  });
+
+  test("partial results with a minority failure warn exactly once", () => {
+    const warnings: string[] = [];
+    setSearchLogger({ warn: (m) => warnings.push(m), debug: () => {} });
+    let results: ReturnType<typeof SearchDates._collect>;
+    try {
+      results = SearchDates._collect([priced(100), priced(200), failed()], 3, 0);
+    } finally {
+      setSearchLogger(null);
+    }
+    expect(results).toHaveLength(2);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("2 of 3");
+  });
+
+  test("partial results with a tripped breaker still warn exactly once", () => {
+    const warnings: string[] = [];
+    setSearchLogger({ warn: (m) => warnings.push(m), debug: () => {} });
+    let results: ReturnType<typeof SearchDates._collect>;
+    try {
+      results = SearchDates._collect(
+        [
+          priced(100),
+          ...Array.from({ length: 5 }, () => failed(NO_PAYLOAD)),
+          ...Array.from({ length: 24 }, () => ({
+            price: null,
+            failure: null,
+            error: null,
+            attempted: false,
+          })),
+        ],
+        30,
+        24,
+      );
+    } finally {
+      setSearchLogger(null);
+    }
+    expect(results).toHaveLength(1);
+    expect(warnings).toHaveLength(1);
+  });
+
+  test("all loaded empty returns null with no warnings", () => {
+    const warnings: string[] = [];
+    setSearchLogger({ warn: (m) => warnings.push(m), debug: () => {} });
+    let results: ReturnType<typeof SearchDates._collect>;
+    try {
+      results = SearchDates._collect(
+        Array.from({ length: 5 }, () => loadedEmpty()),
+        5,
+        0,
+      );
+    } finally {
+      setSearchLogger(null);
+    }
+    expect(results).toBeNull();
+    expect(warnings).toHaveLength(0);
+  });
+
+  test("all priced returns the list with no warnings", () => {
+    const warnings: string[] = [];
+    setSearchLogger({ warn: (m) => warnings.push(m), debug: () => {} });
+    let results: ReturnType<typeof SearchDates._collect>;
+    try {
+      results = SearchDates._collect(
+        Array.from({ length: 5 }, (_v, i) => priced(100 + i)),
+        5,
+        0,
+      );
+    } finally {
+      setSearchLogger(null);
+    }
+    expect(results).toHaveLength(5);
+    expect(warnings).toHaveLength(0);
+  });
+
+  test("attempted:false outcomes are ignored by the new arithmetic", () => {
+    // 5 past dates + 1 loaded-empty + 1 failed must behave as the tie case.
+    const outcomes = [
+      ...Array.from({ length: 5 }, () => ({
+        price: null,
+        failure: null,
+        error: null,
+        attempted: false,
+      })),
+      loadedEmpty(),
+      failed(),
+    ];
+    expect(() => SearchDates._collect(outcomes, 7, 0)).toThrow(SearchClientError);
   });
 });
