@@ -15,7 +15,9 @@ export {
   SearchConnectionError,
   SearchHTTPError,
   SearchParseError,
+  SearchRejectedError,
   SearchTimeoutError,
+  SearchUnsupportedError,
 } from "./exceptions.ts";
 export {
   type BookingOptions,
@@ -23,6 +25,7 @@ export {
   SearchFlights,
   type SearchOptions,
 } from "./flights.ts";
+export { getSearchLogger, type SearchLogger, setSearchLogger } from "./logging.ts";
 export {
   type BuildTfsTokenOptions,
   buildBookingToken,
