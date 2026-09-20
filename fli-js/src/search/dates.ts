@@ -35,8 +35,12 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /**
  * Same wording the flight path uses for the same condition, so a caller
  * who sees it on either path gets the same hint about what to check.
+ *
+ * Exported (mirroring the Python module's `_NO_PAYLOAD`, importable despite
+ * the underscore) so tests can build `DateOutcome`s that exercise the
+ * no-payload branch of {@link SearchDates._collect} exactly.
  */
-const NO_PAYLOAD =
+export const NO_PAYLOAD =
   "the search page carried no ds:1 payload — Google may have changed the " +
   "page shape, or served a consent/blocked page instead";
 
@@ -214,6 +218,23 @@ function flightsIn(payload: unknown): FlightResult[] {
   return flights;
 }
 
+/**
+ * Up to 3 distinct failure messages, in the order they were first seen.
+ *
+ * Shared by every `_collect` branch that raises or warns about failed
+ * dates, so the same range always gets the same short list however it is
+ * reported.
+ */
+function reasonsFor(failed: DateOutcome[]): string[] {
+  const reasons: string[] = [];
+  for (const o of failed) {
+    if (o.failure != null && !reasons.includes(o.failure) && reasons.length < 3) {
+      reasons.push(o.failure);
+    }
+  }
+  return reasons;
+}
+
 export class SearchDates {
   /**
    * @deprecated Kept only so the exported surface does not move. The
@@ -252,7 +273,9 @@ export class SearchDates {
    *   {@link MAX_DATES_PER_SEARCH} dates.
    * @throws {SearchParseError} Every date came back without a payload —
    *   a consent or block page, not an empty route.
-   * @throws {SearchClientError} Every date failed for some other reason.
+   * @throws {SearchClientError} Every date failed for some other reason,
+   *   or nothing priced because at least half the attempted dates never
+   *   loaded — see {@link SearchDates._collect}.
    */
   async search(
     filters: DateSearchFilters,
@@ -329,6 +352,20 @@ export class SearchDates {
    * either. With prices to show, the answer is real but incomplete, so it
    * comes with one warning naming the count.
    *
+   * The breaker is not the only way a sweep can go quietly wrong, though:
+   * it disarms for good the instant any page loads, empty or not, so "1
+   * loaded, 29 timeouts" sails straight past it — one date out of thirty
+   * is not enough evidence that a route has no flights. When nothing
+   * priced and at least half the attempted dates never loaded (`failed
+   * >= loaded`), that is raised too. A page did load in that case, which
+   * rules out an EU/EEA consent wall — those block every request alike —
+   * so this path never adds the `FLI_SOCS_COOKIE` hint the branch above
+   * does.
+   *
+   * Short of either throw, a sweep that lost some dates but not enough to
+   * doubt the rest still owes the caller exactly one line saying so,
+   * whether or not it ends up with anything to return.
+   *
    * Internal — underscore-prefixed rather than `private` so tests can
    * drive it with a fixed set of outcomes instead of racing the sweep's
    * concurrent fetches into the state they want to assert.
@@ -342,6 +379,11 @@ export class SearchDates {
     const results = outcomes.flatMap((o) => (o.price != null ? [o.price] : []));
     const attempted = outcomes.filter((o) => o.attempted);
     const failed = attempted.filter((o) => o.failure != null);
+    // "loaded" counts every attempted date whose page actually arrived,
+    // priced or not — it does not distinguish the two, because when
+    // `results` is empty (the only time this number matters below) every
+    // loaded date is by definition one with no flights.
+    const loaded = attempted.length - failed.length;
     // The breaker only ever trips on payload-less pages, so a non-zero
     // skip count *is* the blocked-page diagnosis, whatever else failed
     // alongside.
@@ -349,12 +391,7 @@ export class SearchDates {
     const everythingFailed = attempted.length > 0 && failed.length === attempted.length;
 
     if (results.length === 0 && (everythingFailed || tripped)) {
-      const reasons: string[] = [];
-      for (const o of failed) {
-        if (o.failure != null && !reasons.includes(o.failure) && reasons.length < 3) {
-          reasons.push(o.failure);
-        }
-      }
+      const reasons = reasonsFor(failed);
       const cause = failed.find((o) => o.error != null)?.error;
       const blocked =
         tripped || (failed.length > 0 && failed.every((o) => o.failure === NO_PAYLOAD));
@@ -388,6 +425,27 @@ export class SearchDates {
       throw new ErrorType(message, cause != null ? { cause } : undefined);
     }
 
+    if (results.length === 0 && failed.length > 0 && failed.length >= loaded) {
+      // The breaker never saw this coming: one loaded page (even an empty
+      // one) disarms it for good, so a sweep that is mostly timeouts
+      // around a single lucky date never trips it. Half the attempted
+      // dates never loading is its own signal that "no flights" cannot be
+      // concluded from the handful that did.
+      const reasons = reasonsFor(failed);
+      const cause = failed.find((o) => o.error != null)?.error;
+      const blocked = failed.length > 0 && failed.every((o) => o.failure === NO_PAYLOAD);
+      const ErrorType = blocked ? SearchParseError : SearchClientError;
+      const message =
+        `Priced 0 of ${total} dates — ${failed.length} of the ${attempted.length} dates ` +
+        `tried failed to load, so "no flights" cannot be concluded from the ${loaded} ` +
+        `that did. Reasons: ${reasons.join("; ")}`;
+      // Unlike the branch above, a page did load here — that rules out a
+      // consent wall, which blocks every request identically. Adding the
+      // FLI_SOCS_COOKIE hint would point at a diagnosis this sweep just
+      // disproved, so it is deliberately left off.
+      throw new ErrorType(message, cause != null ? { cause } : undefined);
+    }
+
     if (tripped) {
       // Exactly one line, whatever the sweep's size: the caller is about
       // to act on a partial answer and has no other way to know it.
@@ -396,6 +454,25 @@ export class SearchDates {
           `after ${SWEEP_FAILURE_THRESHOLD} pages came back without a ds:1 payload and none ` +
           "had loaded yet. The prices below are real but incomplete — retry, or check " +
           "FLI_SOCS_COOKIE if you are in the EU/EEA.",
+      );
+    } else if (failed.length > 0 && results.length > 0) {
+      // Neither throw fired — most dates loaded fine — but the caller
+      // still can't tell a complete sweep from this one just by looking
+      // at the list, so it gets the same "exactly one line" treatment.
+      getSearchLogger().warn(
+        `Date sweep priced ${results.length} of ${total} dates: ${failed.length} failed ` +
+          "to load. The prices below are real but incomplete.",
+      );
+    } else if (failed.length > 0) {
+      // No results, but too few dates failed to throw: most of the sweep
+      // loaded fine and simply found nothing. Still worth a line —
+      // otherwise a caller sees only `null`, indistinguishable from a
+      // sweep where every date loaded and truly had no flights.
+      const reasons = reasonsFor(failed);
+      getSearchLogger().warn(
+        `Date sweep found no flights on the ${loaded} dates that loaded; ${failed.length} ` +
+          `of ${attempted.length} dates failed to load, so treat this as provisional ` +
+          `rather than a confirmed empty range. Reasons: ${reasons.join("; ")}`,
       );
     }
     return results.length > 0 ? results : null;

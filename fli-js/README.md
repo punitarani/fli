@@ -135,7 +135,14 @@ What that means in practice:
   is 30, 61 or 93 days). Only pages served without results count towards that:
   a timeout or a dropped connection says nothing about the dates not yet tried,
   so those never abandon a sweep. A sweep cut short that still found prices
-  returns them with one warning saying so.
+  returns them with one warning saying so. The breaker itself disarms for
+  good the moment any page loads, even an empty one — so it cannot catch a
+  sweep that is mostly timeouts around one lucky date. `SearchDates.search`
+  throws that case too: if nothing priced and at least half the attempted
+  dates never loaded, that is not enough evidence to call the range
+  flight-free. A minority of failures alongside real results, or alongside
+  a confirmed-empty range, still returns normally but logs one warning
+  naming the counts.
 - **A page occasionally arrives without results.** Roughly one request in sixty
   returns HTTP 200 with no `ds:1` blob; the client retries that case up to twice
   (0.5s then 1.5s) before throwing `SearchParseError`. A healthy search never

@@ -85,6 +85,7 @@ Search for flights between two airports on a specific date.
 | `exclude_alliance` | list | No | null | Alliance(s) to **exclude** from results |
 | `min_layover` | int | No | null | Minimum layover duration (minutes) |
 | `max_layover` | int | No | null | Maximum layover duration (minutes) |
+| `top_n` | int | No | 5 | Round-trip only: outbound options expanded into return-flight combinations (1-10) |
 | `currency` | string | No | null | ISO 4217 code (`curr=`) — e.g. 'EUR', 'JPY' |
 | `language` | string | No | null | BCP-47 language code (`hl=`) — e.g. 'en-GB' |
 | `country` | string | No | null | ISO 3166-1 alpha-2 code (`gl=`) — e.g. 'GB' |
@@ -99,6 +100,12 @@ Search for flights between two airports on a specific date.
 > `passengers` — Google Flights' own booking limits. An invalid mix returns
 > `success: false` with the specific problem (e.g. `"Total passengers must be
 > between 1 and 9 (got 10: ...)"`), not a generic error.
+>
+> **`top_n` cost model:** a round trip costs `1 + top_n` page fetches (one outbound
+> search, plus one per outbound candidate expanded into return flights) — `top_n` is
+> capped at 10 for that reason. Round-trip results all from one airline? Raise `top_n`,
+> or `sort_by` differently: the default sort only ever expands the cheapest `top_n`
+> outbounds, which are often the same carrier. `top_n` is ignored for one-way searches.
 
 **Example Response:**
 
@@ -233,6 +240,7 @@ find out where (and at what price) a specific flight can be booked.
 | `exclude_airlines` | list | No | null | Airline IATA codes to **exclude** |
 | `alliance` / `exclude_alliance` | list | No | null | Restrict / exclude ONEWORLD, SKYTEAM, STAR_ALLIANCE |
 | `min_layover` / `max_layover` | int | No | null | Layover duration bounds (minutes) |
+| `top_n` | int | No | 5 | Round-trip only: outbound options the re-run search expands into return-flight combinations (1-10) |
 | `emissions` | string | No | ALL | ALL or LESS. **Currently ignored by the search transport** (logged as a warning). |
 | `checked_bags` | int | No | 0 | Checked bags included in price (0–2). **Currently ignored by the search transport** (logged as a warning). |
 | `carry_on` | bool | No | false | Include carry-on bag fee in price. **Currently ignored by the search transport** (logged as a warning). |
@@ -240,10 +248,10 @@ find out where (and at what price) a specific flight can be booked.
 | `language` | string | No | null | BCP-47 language code (`hl=`) |
 | `country` | string | No | null | ISO 3166-1 alpha-2 country (`gl=`) |
 
-> **Tip:** Pass the **same filters you used for `search_flights`** so the re-run
-> search reproduces the same result set. Otherwise — especially when
-> `flight_numbers` is omitted — the priced "top result" may differ from the one
-> the user saw.
+> **Tip:** Pass the **same filters you used for `search_flights`** — including
+> `top_n` — so the re-run search reproduces the same result set. Otherwise — especially
+> when `flight_numbers` is omitted — the priced "top result" may differ from the one the
+> user saw, and a flight only visible at a higher `top_n` may not be found at all.
 
 **Example Response:**
 
