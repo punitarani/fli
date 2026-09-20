@@ -26,6 +26,7 @@ from fli.core import (
     parse_max_stops,
     parse_sort_by,
     resolve_airport,
+    resolve_airports,
 )
 from fli.core.parsers import ParseError
 from fli.models import (
@@ -88,9 +89,8 @@ def _search_flights_core(
             f"{departure_window[0]}-{departure_window[1]}" if departure_window else None
         )
 
-        # Parse parameters using shared utilities
-        origin_airport = resolve_airport(origin)
-        destination_airport = resolve_airport(destination)
+        origin_airports = resolve_airports(origin)
+        destination_airports = resolve_airports(destination)
         seat_type = parse_cabin_class(cabin_class)
         stops = parse_max_stops(max_stops)
         parsed_airlines = parse_airlines(airlines)
@@ -124,8 +124,8 @@ def _search_flights_core(
 
         # Create flight segments using shared builder
         segments, trip_type = build_flight_segments(
-            origin=origin_airport,
-            destination=destination_airport,
+            origin=origin_airports,
+            destination=destination_airports,
             departure_date=departure_date,
             return_date=return_date,
             time_restrictions=time_restrictions,
@@ -133,8 +133,8 @@ def _search_flights_core(
 
         # Shareable Google Flights deep link for this search.
         booking_url = google_flights_url(
-            origin_airport.name.lstrip("_"),
-            destination_airport.name.lstrip("_"),
+            origin_airports[0].name.lstrip("_"),
+            destination_airports[0].name.lstrip("_"),
             departure_date,
             return_date,
             currency=currency,
@@ -295,8 +295,14 @@ def _search_flights_core(
 
 
 def flights(
-    origin: Annotated[str, typer.Argument(help="Departure airport IATA code (e.g., JFK)")],
-    destination: Annotated[str, typer.Argument(help="Arrival airport IATA code (e.g., LHR)")],
+    origin: Annotated[
+        str,
+        typer.Argument(help="Departure airport code, or a comma-separated list (e.g., JFK,LGA)"),
+    ],
+    destination: Annotated[
+        str,
+        typer.Argument(help="Arrival airport code, or a comma-separated list (e.g., LHR,LGW)"),
+    ],
     departure_date: Annotated[str, typer.Argument(help="Travel date (YYYY-MM-DD)")],
     return_date: Annotated[
         str | None,
@@ -483,6 +489,7 @@ def flights(
     Example:
         fli flights JFK LHR 2026-10-25 --time 6-20 --airlines BA,KL --stops NON_STOP
         fli flights JFK LHR 2026-10-25 --format json
+        fli flights JFK,LGA LHR,LGW 2026-10-25
         fli flights JFK LHR 2026-10-25 --exclude-basic
         fli flights JFK LAX 2026-10-25 --bags 1 --carry-on
         fli flights JFK LAX 2026-10-25 --emissions LESS

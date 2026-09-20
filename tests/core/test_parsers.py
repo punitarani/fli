@@ -8,6 +8,7 @@ from fli.core.parsers import (
     parse_emissions,
     parse_sort_by,
     resolve_airport,
+    resolve_airports,
 )
 from fli.models import Airline, Airport, EmissionsFilter, SortBy
 
@@ -151,3 +152,23 @@ class TestResolveAirportICAO:
 
     def test_three_letter_not_icao(self):
         assert resolve_airport("AAA") == Airport.AAA
+
+
+class TestResolveAirports:
+    """Tests for the comma-separated ``resolve_airports`` helper."""
+
+    def test_single_and_multiple_codes(self):
+        """Codes resolve in order, tolerating whitespace and case."""
+        assert resolve_airports("JFK") == [Airport.JFK]
+        assert resolve_airports(" jfk , LGA ") == [Airport.JFK, Airport.LGA]
+
+    @pytest.mark.parametrize("blank", ["", ",", ",,,", "   ", " , "])
+    def test_only_separators_raises_parse_error(self, blank):
+        """Input with no real codes raises ParseError rather than returning []."""
+        with pytest.raises(ParseError, match="No valid airport codes"):
+            resolve_airports(blank)
+
+    def test_unknown_code_in_list_raises(self):
+        """One bad code fails the whole list."""
+        with pytest.raises(ParseError, match="NOTREAL"):
+            resolve_airports("JFK,NOTREAL")

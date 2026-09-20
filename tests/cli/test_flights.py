@@ -389,3 +389,50 @@ def test_flights_json_no_results(runner, mock_search_flights, mock_console):
     assert payload["success"] is True
     assert payload["count"] == 0
     assert payload["flights"] == []
+
+
+def test_given_comma_separated_origin_list_then_returns_flights_from_all(
+    runner, mock_search_flights, mock_console
+):
+    """Comma-separated origin passes multiple airports to the search segment."""
+    result = runner.invoke(
+        app,
+        ["flights", "JFK,LGA", "LAX", datetime.now().strftime("%Y-%m-%d")],
+    )
+    assert result.exit_code == 0
+    args, _ = mock_search_flights.search.call_args
+    departure_airports = [apt for apt, _ in args[0].flight_segments[0].departure_airport]
+    assert Airport.JFK in departure_airports
+    assert Airport.LGA in departure_airports
+
+
+def test_given_comma_separated_destination_list_then_returns_flights_to_all(
+    runner, mock_search_flights, mock_console
+):
+    """Comma-separated destination passes multiple airports to the search segment."""
+    result = runner.invoke(
+        app,
+        ["flights", "JFK", "LHR,CDG", datetime.now().strftime("%Y-%m-%d")],
+    )
+    assert result.exit_code == 0
+    args, _ = mock_search_flights.search.call_args
+    arrival_airports = [apt for apt, _ in args[0].flight_segments[0].arrival_airport]
+    assert Airport.LHR in arrival_airports
+    assert Airport.CDG in arrival_airports
+
+
+@pytest.mark.parametrize("bad_origin", [",", ",,", " , "])
+def test_flights_separator_only_origin_is_a_clean_error(
+    runner, mock_search_flights, mock_console, bad_origin
+):
+    """An origin made only of separators gets a clear parse error.
+
+    Previously the empty airport list reached the models and surfaced as a raw
+    pydantic validation dump.
+    """
+    tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    result = runner.invoke(app, ["flights", bad_origin, "LAX", tomorrow])
+    assert result.exit_code != 0
+    assert "No valid airport codes" in result.output
+    assert "pydantic" not in result.output
+    mock_search_flights.search.assert_not_called()
