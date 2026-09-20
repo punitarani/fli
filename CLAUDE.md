@@ -190,6 +190,11 @@ Search for flights on a specific date.
 - `airlines` / `exclude_airlines` - Include / exclude airline IATA codes
 - `alliance` / `exclude_alliance` - Include / exclude ONEWORLD / SKYTEAM / STAR_ALLIANCE
 - `min_layover` / `max_layover` - Layover duration bounds in minutes
+- `top_n` - Round-trip only: outbound options expanded into return-flight
+  combinations (default 5, 1-10). Cost is `1 + top_n` page fetches. Round-trip
+  results all from one airline? Raise `top_n` (or `sort_by` differently) — the
+  default sort only ever expands the cheapest `top_n` outbounds, which are
+  often the same carrier (issue #142). Ignored for one-way searches.
 - `currency` / `language` / `country` - Google `curr=` / `hl=` / `gl=` URL params
 - `sort_by` - CHEAPEST, DURATION, DEPARTURE_TIME, ARRIVAL_TIME
 - `passengers` - Number of adult passengers (default 1)
@@ -242,9 +247,9 @@ options — each with a clickable `booking_url` and `google_click_url`.
 - `cabin_class`, `max_stops`, `passengers`, `children`, `infants_in_seat`,
   `infants_on_lap`, `airlines`, `exclude_basic_economy` - Same as `search_flights`
 - `departure_window`, `sort_by`, `exclude_airlines`, `alliance`, `exclude_alliance`,
-  `min_layover`, `max_layover`, `emissions`, `checked_bags`, `carry_on` - Same as
-  `search_flights`. Pass the **same filters used for `search_flights`** so the
-  re-run search reproduces the same result set; otherwise (especially when
+  `min_layover`, `max_layover`, `top_n`, `emissions`, `checked_bags`, `carry_on` - Same as
+  `search_flights`. Pass the **same filters used for `search_flights`** (including
+  `top_n`) so the re-run search reproduces the same result set; otherwise (especially when
   `flight_numbers` is omitted) the priced "top result" may differ from what the
   user saw.
 - `currency`, `language`, `country` - Same locale knobs as `search_flights`
