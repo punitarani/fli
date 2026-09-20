@@ -146,6 +146,41 @@ fli --help
     * Comprehensive error handling
     * Input validation
 
+## Search transport
+
+Searches are served by Google's public search page rather than the
+`FlightsFrontendService` RPC. Since 2026-08 `GetShoppingResults` and
+`GetCalendarGraph` require an `x-goog-batchexecute-bgr` header that only the
+page's own JavaScript can produce, so a plain HTTP client gets HTTP 200 with no
+payload. Fli issues `GET https://www.google.com/travel/flights?tfs=<protobuf>`
+instead and reads the results out of the page's inline `AF_initDataCallback`
+blob keyed `ds:1`.
+
+What that means in practice:
+
+* **Three filters are not supported.** `emissions`, `bags` and
+  `exclude_basic_economy` have no `tfs` field and cannot be reconstructed from
+  the decoded rows, so they are dropped with a warning. Stops, cabin,
+  passengers, alliances and layover bounds ride in the request; airline
+  include/exclude, price cap, max duration and departure windows are applied to
+  the results after fetching.
+* **Multi-city raises `SearchUnsupportedError`.** Google loads those results
+  client-side through the gated RPC, so the page carries no rows to read.
+  Search each leg separately.
+* **`get_booking_options` is unavailable.** It calls `GetBookingResults`, which
+  is gated the same way, and currently raises `SearchRejectedError`. The
+  per-flight `tfs` booking deep links are built offline and still work.
+* **Fewer rows per search.** Expect roughly 20-45 itineraries, fewer than the
+  old RPC returned — and a client-side filter cannot back-fill the list the way
+  Google's server-side one did.
+* **Date searches cost one page fetch per date.** The page has no calendar
+  grid, so a range is priced date by date; one `SearchDates.search` covers at
+  most 93 dates and a wider range raises `ValueError`.
+* **`FLI_SOCS_COOKIE`.** EU/EEA IPs are redirected to Google's consent
+  interstitial, which serves no `ds:1` blob. The client sends a pre-accepted
+  `SOCS` consent cookie by default; set `FLI_SOCS_COOKIE` to change the value,
+  or to an empty string to send none.
+
 ## CLI Usage
 
 ### Search for Flights

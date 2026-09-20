@@ -93,6 +93,35 @@ uv run mkdocs build         # Build static docs
 - **Shared Utilities**: Core parsing/building logic shared between CLI and MCP
 - **Validation**: Pydantic models ensure data integrity throughout
 
+## Search transport
+
+Searches go through Google's public search page, not the
+`FlightsFrontendService` RPC. Since 2026-08 `GetShoppingResults` and
+`GetCalendarGraph` require an `x-goog-batchexecute-bgr` header that only the
+page's JavaScript can produce, so the client issues
+`GET https://www.google.com/travel/flights?tfs=<protobuf>` and reads the
+`AF_initDataCallback` blob keyed `ds:1`. Request encoding lives in
+`fli/search/_tfs.py` and `fli/search/_proto.py`.
+
+Consequences to keep in mind when changing search code:
+
+- `emissions`, `bags` and `exclude_basic_economy` have no `tfs` field and no
+  post-hoc equivalent; `unsupported_filters()` names them and the caller warns.
+- Airline include/exclude, price cap, max duration and departure windows are
+  applied after fetching by `apply_client_side_filters()`; stops, cabin,
+  passengers, alliances and layover bounds are encoded into the request.
+- Multi-city raises `SearchUnsupportedError` — the page inlines no rows for it.
+- `get_booking_options` hits `GetBookingResults`, which is still gated, so it
+  currently raises `SearchRejectedError`. Booking deep links (`tfs`) are built
+  offline and unaffected.
+- A search returns fewer rows than the old RPC (~20-45), and client-side
+  filtering is not back-filled.
+- Date searches have no calendar grid: one page fetch per date, capped at
+  `fli.search.dates.MAX_DATES_PER_SEARCH` (93) per `SearchDates.search`.
+- `FLI_SOCS_COOKIE` overrides the pre-accepted `SOCS` consent cookie the client
+  sends so EU/EEA IPs skip Google's consent interstitial; set it empty to send
+  no cookie.
+
 ## Key Files and Entry Points
 
 - `fli/cli/main.py` - CLI entry point and command registration
@@ -146,6 +175,11 @@ Find cheapest travel dates within a range.
 Flights for that specific date (and return date for round trips).
 
 ### `get_booking_options`
+**Currently unavailable:** it calls `GetBookingResults`, which is gated behind
+the browser-signed header (see "Search transport"), so it raises
+`SearchRejectedError`. Use a flight's `booking_url` deep link instead. The rest
+of this section describes the tool for when that RPC becomes reachable again.
+
 Get bookable fares (vendor names, prices, and direct booking URLs) for a
 single itinerary. Runs a fresh search, selects the flight identified by
 `flight_numbers` (or the top result when omitted), then calls
