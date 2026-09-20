@@ -265,11 +265,12 @@ class TestDateChunkParallel:
         search = SearchDates()
         search.client = fake
 
-        # 180 days / 61 = 3 chunks, each pricing its dates concurrently.
-        results = search.search(_date_filters(days=180))
+        # 93 days is the per-search cap (see fli.search.dates) and spans two
+        # 61-day chunks; every date is priced by its own concurrent fetch.
+        results = search.search(_date_filters(days=93))
 
-        assert results is not None and len(results) == 180
-        assert fake.calls == 180
+        assert results is not None and len(results) == 93
+        assert fake.calls == 93
         assert fake.peak_in_flight >= 2, (
             f"Date pricing did not parallelise (peak={fake.peak_in_flight})"
         )

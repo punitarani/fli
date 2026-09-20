@@ -8,18 +8,36 @@ It is intended to be used for finding the cheapest dates to fly, not the cheapes
 import logging
 from copy import deepcopy
 from datetime import datetime, timedelta
+from typing import Any, NamedTuple
 
 from pydantic import BaseModel
 
 from fli.core import extract_currency_from_price_token
-from fli.models import DateSearchFilters
+from fli.models import DateSearchFilters, FlightResult
 from fli.models.google_flights.base import TripType, earliest_searchable_date
 from fli.search._concurrency import parallel_map
 from fli.search._decoders import parse_flight_row
-from fli.search._tfs import build_tfs, extract_payload, page_url, unsupported_filters
+from fli.search._tfs import (
+    apply_client_side_filters,
+    build_tfs,
+    extract_payload,
+    page_url,
+    unsupported_filters,
+)
 from fli.search.client import get_client
+from fli.search.exceptions import SearchClientError
 
 logger = logging.getLogger(__name__)
+
+MAX_DATES_PER_SEARCH = 93
+"""Most dates a single :meth:`SearchDates.search` call will price.
+
+The public search page carries no calendar grid, so every date in the range
+costs its own full page fetch (~2 MB). Ninety-three days is a whole quarter —
+comfortably wider than the CLI's 60-day and the MCP prompt's 61-day defaults —
+and caps one search at roughly 190 MB of transfer rather than letting a
+"2026-01-01 to 2026-12-31" request quietly issue 365 requests.
+"""
 
 
 class DatePrice(BaseModel):
@@ -28,6 +46,52 @@ class DatePrice(BaseModel):
     date: tuple[datetime] | tuple[datetime, datetime]
     price: float
     currency: str | None = None
+
+
+class _DateOutcome(NamedTuple):
+    """What pricing one date produced.
+
+    Attributes:
+        price: The cheapest itinerary for the date, or ``None`` when the date
+            was skipped, failed, or genuinely had no flights.
+        failure: Human-readable reason the date could not be priced, or
+            ``None`` when the fetch succeeded (even if it found nothing).
+        error: The exception behind ``failure``, kept for chaining.
+        attempted: ``False`` for dates skipped before any request (past
+            dates), so they don't count towards the "everything failed" check.
+
+    """  # noqa: D413
+
+    price: DatePrice | None = None
+    failure: str | None = None
+    error: BaseException | None = None
+    attempted: bool = True
+
+
+def _flights_in(payload: Any) -> list[FlightResult]:
+    """Decode every flight row in a ``ds:1`` payload.
+
+    Total by construction: a payload whose ``[2]`` / ``[3]`` slots are absent,
+    empty, or not the nested list we expect yields no flights instead of an
+    ``IndexError`` that would abort the whole sweep. Individual unparseable
+    rows are skipped the same way the flight search skips them.
+    """
+    flights: list[FlightResult] = []
+    if not isinstance(payload, list):
+        return flights
+    for index in (2, 3):
+        block = payload[index] if index < len(payload) else None
+        if not isinstance(block, list) or not block:
+            continue
+        rows = block[0]
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            try:
+                flights.append(parse_flight_row(row))
+            except (AttributeError, IndexError, KeyError, TypeError, ValueError):
+                continue
+    return flights
 
 
 class SearchDates:
@@ -66,42 +130,88 @@ class SearchDates:
             List of DatePrice objects containing date and price pairs, or None if no results
 
         Raises:
-            Exception: If the search fails or returns invalid data
+            ValueError: The range covers more than :data:`MAX_DATES_PER_SEARCH`
+                dates, which would cost one page fetch each.
+            SearchClientError: Every date in the range failed to load.
 
         Notes:
             - For date ranges larger than 61 days, splits into multiple searches.
             - We can't search more than 305 days in the future.
 
         """
-        from_date = datetime.strptime(filters.from_date, "%Y-%m-%d")
-        to_date = datetime.strptime(filters.to_date, "%Y-%m-%d")
-        date_range = (to_date - from_date).days + 1
-
-        if date_range <= self.MAX_DAYS_PER_SEARCH:
-            return self._search_chunk(
-                filters, currency=currency, language=language, country=country
+        dropped = unsupported_filters(filters)
+        if dropped:
+            logger.warning(
+                "Filters not supported by the search-page transport, ignored: %s",
+                ", ".join(dropped),
             )
 
-        # Build every chunk descriptor up front so the per-chunk requests
-        # share no mutable state. This both enables parallel execution and
-        # fixes a latent bug in the previous sequential version: each chunk
-        # rewrote ``filters.flight_segments[*].travel_date`` in place, so
-        # the second-and-later chunks had segment dates that no longer
-        # matched ``current_from``.
-        chunk_filters = self._build_chunk_filters(filters, from_date, to_date)
+        from_date = datetime.strptime(filters.from_date, "%Y-%m-%d")
+        to_date = datetime.strptime(filters.to_date, "%Y-%m-%d")
 
-        chunk_results = parallel_map(
-            lambda cf: self._search_chunk(
-                cf, currency=currency, language=language, country=country
+        # Build every chunk descriptor up front so the per-date requests share
+        # no mutable state. This both enables parallel execution and fixes a
+        # latent bug in the previous sequential version: each chunk rewrote
+        # ``filters.flight_segments[*].travel_date`` in place, so the
+        # second-and-later chunks had segment dates that no longer matched
+        # ``current_from``.
+        tasks = [
+            (chunk, day)
+            for chunk in self._build_chunk_filters(filters, from_date, to_date)
+            for day in self._days_in(chunk)
+        ]
+
+        if len(tasks) > MAX_DATES_PER_SEARCH:
+            raise ValueError(
+                f"This date search covers {len(tasks)} dates, above the "
+                f"{MAX_DATES_PER_SEARCH}-date limit. Google's search page serves no "
+                "calendar grid, so every date costs its own full page fetch. "
+                "Narrow the range (or run several smaller searches)."
+            )
+
+        # One flat map over every date. Nesting a second ``parallel_map``
+        # inside each chunk's worker deadlocks: both levels share one bounded
+        # pool, so the outer tasks can occupy every worker while blocking on
+        # inner tasks that can never be scheduled.
+        outcomes = parallel_map(
+            lambda task: self._price_one_date(
+                task[0], task[1], currency=currency, language=language, country=country
             ),
-            chunk_filters,
+            tasks,
         )
+        return self._collect(outcomes)
 
-        all_results: list[DatePrice] = []
-        for r in chunk_results:
-            if r:
-                all_results.extend(r)
-        return all_results if all_results else None
+    def _days_in(self, filters: DateSearchFilters) -> list[datetime]:
+        """List every date in one chunk's ``from_date``..``to_date`` range."""
+        from_date = filters.parsed_from_date
+        to_date = filters.parsed_to_date
+        return [
+            from_date + timedelta(days=offset) for offset in range((to_date - from_date).days + 1)
+        ]
+
+    @staticmethod
+    def _collect(outcomes: list[_DateOutcome]) -> list[DatePrice] | None:
+        """Assemble priced dates, raising when nothing could be fetched at all.
+
+        A date with no flights is a legitimate answer; a date whose page never
+        arrived is not. When *every* attempted date failed, returning an empty
+        list would report a dead transport as "this route has no flights" —
+        exactly the silent failure this client exists to avoid.
+        """
+        results = [o.price for o in outcomes if o.price is not None]
+        attempted = [o for o in outcomes if o.attempted]
+        failed = [o for o in attempted if o.failure]
+        if attempted and len(failed) == len(attempted):
+            reasons: list[str] = []
+            for outcome in failed:
+                if outcome.failure not in reasons and len(reasons) < 3:
+                    reasons.append(outcome.failure)
+            cause = next((o.error for o in failed if o.error is not None), None)
+            raise SearchClientError(
+                f"Priced 0 of {len(attempted)} dates — every date in the range failed. "
+                f"Reasons: {'; '.join(reasons)}"
+            ) from cause
+        return results or None
 
     def _build_chunk_filters(
         self,
@@ -114,6 +224,11 @@ class SearchDates:
         The flight segments are deep-copied per chunk and their
         ``travel_date`` advanced by the chunk offset so each chunk
         represents a distinct, self-contained search.
+
+        Copies are made with ``model_copy`` rather than by re-listing fields
+        in a fresh ``DateSearchFilters``: the hand-written list silently
+        dropped ``airlines_exclude``, ``alliances`` and ``alliances_exclude``,
+        so any search wide enough to be chunked ignored those filters.
         """
         chunks: list[DateSearchFilters] = []
         current_from = from_date
@@ -128,75 +243,17 @@ class SearchDates:
                         datetime.strptime(segment.travel_date, "%Y-%m-%d") + timedelta(days=shift)
                     ).strftime("%Y-%m-%d")
             chunks.append(
-                DateSearchFilters(
-                    trip_type=filters.trip_type,
-                    passenger_info=filters.passenger_info,
-                    flight_segments=segments,
-                    stops=filters.stops,
-                    seat_type=filters.seat_type,
-                    price_limit=filters.price_limit,
-                    airlines=filters.airlines,
-                    max_duration=filters.max_duration,
-                    layover_restrictions=filters.layover_restrictions,
-                    emissions=filters.emissions,
-                    bags=filters.bags,
-                    from_date=current_from.strftime("%Y-%m-%d"),
-                    to_date=current_to.strftime("%Y-%m-%d"),
-                    duration=filters.duration,
+                filters.model_copy(
+                    update={
+                        "flight_segments": segments,
+                        "from_date": current_from.strftime("%Y-%m-%d"),
+                        "to_date": current_to.strftime("%Y-%m-%d"),
+                    }
                 )
             )
             current_from = current_to + timedelta(days=1)
             chunk_index += 1
         return chunks
-
-    def _search_chunk(
-        self,
-        filters: DateSearchFilters,
-        currency: str | None = None,
-        language: str | None = None,
-        country: str | None = None,
-    ) -> list[DatePrice] | None:
-        """Price every date in one chunk's range and return the cheapest per date.
-
-        Google's ``GetCalendarGraph`` RPC used to hand back a whole date
-        grid in one call, but it now requires a browser-signed
-        ``x-goog-batchexecute-bgr`` header (see :mod:`fli.search._tfs`).
-        The public search page has no such grid, so each date is priced by
-        its own page fetch instead. The requests run concurrently under the
-        shared rate limiter, so a 61-day chunk costs one round trip's
-        latency plus the 10 req/sec drain, not 61 serial fetches.
-
-        Args:
-            filters: Search parameters including date range, airports, and preferences
-            currency: Optional ISO 4217 currency code passed via the ``curr`` URL param.
-            language: Optional BCP-47 language code passed via the ``hl`` URL param.
-            country: Optional ISO 3166-1 alpha-2 country code passed via the ``gl`` URL param.
-
-        Returns:
-            List of DatePrice objects containing date and price pairs, or None if no results
-
-        """
-        dropped = unsupported_filters(filters)
-        if dropped:
-            logger.warning(
-                "Filters not supported by the search-page transport, ignored: %s",
-                ", ".join(dropped),
-            )
-
-        from_date = datetime.strptime(filters.from_date, "%Y-%m-%d")
-        to_date = datetime.strptime(filters.to_date, "%Y-%m-%d")
-        days = [
-            from_date + timedelta(days=offset) for offset in range((to_date - from_date).days + 1)
-        ]
-
-        priced = parallel_map(
-            lambda day: self._price_one_date(
-                filters, day, currency=currency, language=language, country=country
-            ),
-            days,
-        )
-        results = [p for p in priced if p is not None]
-        return results or None
 
     def _price_one_date(
         self,
@@ -206,8 +263,19 @@ class SearchDates:
         currency: str | None,
         language: str | None,
         country: str | None,
-    ) -> DatePrice | None:
-        """Return the cheapest itinerary price for one departure date."""
+    ) -> _DateOutcome:
+        """Price one departure date through its own search-page fetch.
+
+        Google's ``GetCalendarGraph`` RPC used to hand back a whole date grid
+        in one call, but it now requires a browser-signed
+        ``x-goog-batchexecute-bgr`` header (see :mod:`fli.search._tfs`). The
+        public search page has no such grid, so each date costs its own page
+        fetch. Those run concurrently under the shared rate limiter.
+
+        Returns an outcome rather than a bare ``DatePrice | None`` so the
+        caller can tell "this date had no flights" apart from "this date never
+        loaded" — see :meth:`_collect`.
+        """
         dates = [day]
         if filters.trip_type == TripType.ROUND_TRIP:
             # ``duration`` is optional (its validator doesn't run on the
@@ -226,35 +294,35 @@ class SearchDates:
         # validate against, so a date the models accept is never silently
         # dropped here.
         if day.date() < earliest_searchable_date():
-            return None
+            return _DateOutcome(attempted=False)
 
         url = page_url(build_tfs(filters, travel_dates=travel_dates), currency, language, country)
         try:
             response = self.client.get(url, impersonate="chrome", allow_redirects=True)
             response.raise_for_status()
             payload = extract_payload(response.text)
-        except Exception:  # noqa: BLE001 — one bad date must not sink the sweep
-            logger.warning("Pricing %s failed", travel_dates[0], exc_info=True)
-            return None
+        except Exception as exc:  # noqa: BLE001 — one bad date must not sink the sweep
+            logger.warning("Pricing %s failed: %s", travel_dates[0], exc, exc_info=True)
+            return _DateOutcome(failure=f"{type(exc).__name__}: {exc}", error=exc)
         if payload is None:
-            return None
+            logger.warning("Pricing %s returned a page with no ds:1 payload", travel_dates[0])
+            return _DateOutcome(failure="the search page carried no ds:1 payload")
 
-        prices = []
-        for index in (2, 3):
-            if index < len(payload) and isinstance(payload[index], list):
-                for row in payload[index][0]:
-                    try:
-                        prices.append(parse_flight_row(row).price)
-                    except (AttributeError, KeyError, ValueError, TypeError):
-                        continue
-        prices = [p for p in prices if p]
+        # The filters Google has no ``tfs`` field for (airlines, price cap,
+        # duration, departure window) are applied to the decoded rows, exactly
+        # as the flight search applies them — otherwise the cheapest price for
+        # a date is taken over itineraries the caller asked to exclude.
+        flights = apply_client_side_filters(_flights_in(payload), filters)
+        prices = [flight.price for flight in flights if flight.price]
         if not prices:
-            return None
+            return _DateOutcome()
 
-        return DatePrice(
-            date=tuple(dates),
-            price=min(prices),
-            currency=currency,
+        return _DateOutcome(
+            price=DatePrice(
+                date=tuple(dates),
+                price=min(prices),
+                currency=currency,
+            )
         )
 
     @staticmethod
