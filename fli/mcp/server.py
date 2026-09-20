@@ -36,12 +36,14 @@ from fli.core import (
 from fli.core.parsers import ParseError
 from fli.mcp.errors import classify_error
 from fli.models import (
+    Airline,
     Airport,
     BagsFilter,
     DateSearchFilters,
     FlightSearchFilters,
     PassengerInfo,
     TripType,
+    display_name,
 )
 from fli.search import SearchDates, SearchFlights
 from fli.search.dates import MAX_DATES_PER_SEARCH
@@ -410,15 +412,24 @@ def _flight_idents(flight: Any) -> list[str]:
     return [f"{_airline_code(leg.airline)}{leg.flight_number}" for leg in _flight_legs(flight)]
 
 
+def _plain_name(value: Any) -> Any:
+    """Return an airport/airline's display name without the internal `` (CODE)`` suffix.
+
+    Legs are duck-typed here (tests and callers may pass plain strings), so
+    anything that is not an ``Airport``/``Airline`` member passes through as is.
+    """
+    return display_name(value) if isinstance(value, Airport | Airline) else value
+
+
 def _serialize_flight_leg(leg: Any) -> dict[str, Any]:
     """Serialize a single flight leg to a dictionary."""
     out: dict[str, Any] = {
-        "departure_airport": leg.departure_airport,
-        "arrival_airport": leg.arrival_airport,
+        "departure_airport": _plain_name(leg.departure_airport),
+        "arrival_airport": _plain_name(leg.arrival_airport),
         "departure_time": leg.departure_datetime,
         "arrival_time": leg.arrival_datetime,
         "duration": leg.duration,
-        "airline": leg.airline,
+        "airline": _plain_name(leg.airline),
         "airline_code": _airline_code(leg.airline),
         "flight_number": leg.flight_number,
     }
