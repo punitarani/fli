@@ -733,12 +733,14 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
                 "trip_type": trip_type.name,
                 "booking_url": booking_url,
             }
-            # Same condition the library warns on: an empty result for a
-            # party with children or infants often reflects Google's
-            # client-side pricing gap, not a route with no service — see
-            # SPARSE_PASSENGER_MIX_WARNING. Adults-only parties never get
-            # this key.
-            if params.children + params.infants_in_seat + params.infants_on_lap > 0:
+            # Read the library's own verdict rather than recomputing "empty +
+            # children/infants" here: SearchFlights.search already knows
+            # whether the empty result traces back to a page Google itself
+            # served with zero rows, versus the caller's own airline/price/
+            # duration/window filter removing rows Google did inline — that
+            # distinction lives in the fetch path, not in params, so it can
+            # only be answered correctly once, there.
+            if search_client.sparse_passenger_mix:
                 response["note"] = SPARSE_PASSENGER_MIX_WARNING
             return response
 

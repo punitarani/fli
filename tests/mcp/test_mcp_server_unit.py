@@ -25,6 +25,8 @@ from fli.mcp.server import (
     _serialize_layover,
 )
 from fli.search.flights import SPARSE_PASSENGER_MIX_WARNING
+from tests.search._pages import as_search_page
+from tests.search.test_parse_flights_data import _leg, _row
 
 # The tool calls below pass fixed travel dates; pin the models' clock so they
 # stay in the future no matter when the suite runs.
@@ -547,7 +549,23 @@ class TestEmptyResultSparsePassengerMixNote:
 
     @pytest.fixture(autouse=True)
     def _no_flights(self, monkeypatch):
-        monkeypatch.setattr("fli.mcp.server.SearchFlights.search", lambda self, *a, **k: None)
+        # Mirrors SearchFlights.search's real contract (set
+        # sparse_passenger_mix, then return None) rather than a bare
+        # `lambda: None`, so these tests exercise _execute_flight_search
+        # reading search_client.sparse_passenger_mix under the same
+        # condition the real library sets it — a party with a child or
+        # infant — without needing a stubbed HTTP client. The end-to-end
+        # case (the note tracking a genuinely empty Google page rather than
+        # the caller's own filter) is covered separately below with a
+        # stubbed page, where the real search() sets the attribute itself.
+        def _fake_search(self, filters, *a, **k):
+            info = filters.passenger_info
+            self._sparse_passenger_mix = (
+                info.children + info.infants_on_lap + info.infants_in_seat
+            ) > 0
+            return None
+
+        monkeypatch.setattr("fli.mcp.server.SearchFlights.search", _fake_search)
 
     def test_empty_with_infant_carries_a_note(self):
         params = FlightSearchParams(
@@ -582,6 +600,48 @@ class TestEmptyResultSparsePassengerMixNote:
         )
         result = _execute_flight_search(params)
         assert result["count"] == 1
+        assert "note" not in result
+
+
+class TestEmptyResultNoteTracksGoogleNotTheCallersFilter:
+    """End-to-end (stubbed page, real ``SearchFlights.search``).
+
+    A page that genuinely carries no rows still gets the note; a page that
+    carries a row the caller's own airline filter then removes does not —
+    that emptiness is the filter's doing, not Google's.
+    """
+
+    def _page(self, rows: list) -> str:
+        payload = [[None, None, None, None, "FAKE_SESSION"], None, [rows], None]
+        return as_search_page(payload)
+
+    def _stub_get(self, monkeypatch, body: str) -> None:
+        def _fake_get(self, url, **kwargs):  # noqa: ANN001
+            return type("R", (), {"text": body, "raise_for_status": lambda self: None})()
+
+        monkeypatch.setattr("fli.search.client.Client.get", _fake_get)
+
+    def test_genuinely_empty_page_carries_a_note(self, monkeypatch):
+        self._stub_get(monkeypatch, self._page([]))
+        params = FlightSearchParams(
+            origin="JFK", destination="LHR", departure_date="2026-12-01", children=1
+        )
+        result = _execute_flight_search(params)
+        assert result["count"] == 0
+        assert result["note"] == SPARSE_PASSENGER_MIX_WARNING
+
+    def test_rows_filtered_out_by_airline_has_no_note_key(self, monkeypatch):
+        row = _row(legs=[_leg(dep_iata="JFK", arr_iata="LHR", airline_code="DL")])
+        self._stub_get(monkeypatch, self._page([row]))
+        params = FlightSearchParams(
+            origin="JFK",
+            destination="LHR",
+            departure_date="2026-12-01",
+            children=1,
+            airlines=["AA"],
+        )
+        result = _execute_flight_search(params)
+        assert result["count"] == 0
         assert "note" not in result
 
 
