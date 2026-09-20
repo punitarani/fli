@@ -186,9 +186,13 @@ export const WIFI_TIERS = ["free", "paid"] as const;
 export type WifiTier = (typeof WIFI_TIERS)[number];
 
 /**
- * Human-readable label for Google's leg[13] seat-quality code. The first
- * three are relative to the leg's own cabin (a 32" premium-economy seat
- * can be "below_average" while a 32" economy seat is "above_average").
+ * Human-readable label for Google's leg[13] seat-quality code.
+ *
+ * These are labels, not an ordered score: "average"/"below_average"/
+ * "above_average" describe an economy-style pitch, while the remaining four
+ * name a seat *product*. The code tracks the fare's cabin rather than the
+ * airframe — in the captured fixtures AA 1209 (ORD-LAX, 737 MAX 8) appears
+ * twice, as "average" in economy and "recliner" in first.
  */
 export const SEAT_QUALITIES = [
   "average",
