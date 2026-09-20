@@ -1,0 +1,104 @@
+name: Live Canary
+
+# Runs the tests marked `live` (tests/search/test_search_flights_new_filters_live.py,
+# the fuzz test in test_search_flights_fuzz.py, and the four live cases in
+# tests/mcp/test_mcp_server.py::TestMCPServer) against the real Google Flights
+# network. These are excluded from the `--all` CI job (see ci.yml) because a
+# transient search-page variant or a runner IP being treated worse than a
+# residential one is a property of the network that day, not of this code —
+# so they must not gate merges, but they must still run somewhere and be
+# noisy when they break.
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: live-canary
+  cancel-in-progress: false
+
+env:
+  ISSUE_TITLE: "Live canary failing: Google Flights search"
+
+jobs:
+  live-canary:
+    name: Live search canary
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --extra dev --extra mcp
+
+      - name: Run live tests
+        id: live
+        # --all is required alongside -m live: without it, the pre-existing
+        # fuzz-gating in tests/conftest.py strips the fuzz-marked live case
+        # in test_search_flights_fuzz.py out of collection before -m even
+        # sees it (fuzz tests are dropped unless --fuzz/--all is passed).
+        run: uv run pytest tests/ --all -m live --live -vv --junitxml=live-junit.xml
+        env:
+          FORCE_COLOR: 1
+
+      - name: Upload live test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: Live canary results
+          path: live-junit.xml
+
+      - name: Find existing canary issue
+        if: always()
+        id: find_issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TITLE: ${{ env.ISSUE_TITLE }}
+        run: |
+          number=$(gh issue list --repo "$REPO" --state open --json number,title |
+            jq -r --arg t "$TITLE" '[.[] | select(.title == $t)][0].number // empty')
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update issue on failure
+        if: always() && steps.live.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TITLE: ${{ env.ISSUE_TITLE }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ISSUE_NUMBER: ${{ steps.find_issue.outputs.number }}
+        run: |
+          if [ -n "$ISSUE_NUMBER" ]; then
+            gh issue comment "$ISSUE_NUMBER" --repo "$REPO" \
+              --body "Live canary is still failing. Run: $RUN_URL"
+          else
+            gh issue create --repo "$REPO" \
+              --title "$TITLE" \
+              --body "The scheduled live-canary workflow failed against the real Google Flights network. Run: $RUN_URL"
+          fi
+
+      - name: Close issue on recovery
+        if: always() && steps.live.outcome == 'success' && steps.find_issue.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ISSUE_NUMBER: ${{ steps.find_issue.outputs.number }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPO" \
+            --body "Live canary passed again. Run: $RUN_URL"
+          gh issue close "$ISSUE_NUMBER" --repo "$REPO"
