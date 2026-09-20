@@ -164,7 +164,7 @@ class SearchFlights:
                 f"top_n must be an integer between 1 and 10 (inclusive); got {top_n!r} "
                 f"({type(top_n).__name__}). It controls how many outbound options a "
                 "round-trip search expands into return-flight combinations — cost is "
-                "`1 + top_n` page fetches, hence the cap."
+                "1 + top_n page fetches, hence the cap."
             )
         flights = self._fetch_flights(
             filters,
