@@ -1,4 +1,4 @@
-"""Table-driven tests for fli.mcp.errors.classify_error.
+"""Table-driven tests for fli.core.errors.classify_error.
 
 Requirement: this suite must fail if a new exception class is added to
 fli.search.exceptions without giving it a classification here. That is
@@ -6,6 +6,15 @@ enforced by iterating SearchClientError.__subclasses__() at collection
 time (see TestEverySearchClientErrorSubclassIsClassified) instead of
 hand-listing the classes — a new subclass shows up in the parametrize
 list automatically and fails until _EXPECTED is updated for it.
+
+classify_error moved here (from fli/mcp/errors.py) in T10 fix round 1: a
+review found fli.cli.errors.json_error_payload already emitted an
+error_type field with a different vocabulary for the same exceptions, so
+the classifier now lives in fli.core and is shared by both fli.mcp.server
+and fli.cli.errors — see fli/core/errors.py's module docstring for the
+full history and vocabulary table. tests/core/test_error_type_parity.py
+covers the "CLI and MCP agree" half of that; this file covers the
+classifier itself.
 """
 
 from __future__ import annotations
@@ -13,8 +22,8 @@ from __future__ import annotations
 import pytest
 from pydantic import BaseModel, ValidationError
 
+from fli.core.errors import ErrorClassification, classify_error
 from fli.core.parsers import ParseError
-from fli.mcp.errors import ErrorClassification, classify_error
 from fli.search.exceptions import (
     SearchClientError,
     SearchConnectionError,
@@ -45,12 +54,12 @@ def _all_subclasses(cls: type) -> set[type]:
 # `retryable` depends on the status code, not just the type.
 _EXPECTED: dict[type, tuple[type[BaseException], tuple[str, bool]]] = {
     SearchClientError: (SearchClientError("boom"), ("search_error", False)),
-    SearchTimeoutError: (SearchTimeoutError("timed out"), ("timeout_error", True)),
+    SearchTimeoutError: (SearchTimeoutError("timed out"), ("timeout", True)),
     SearchConnectionError: (SearchConnectionError("no route"), ("connection_error", True)),
     SearchHTTPError: (SearchHTTPError("bad response", status_code=500), ("http_error", True)),
     SearchRejectedError: (SearchRejectedError(13), ("rejected_error", False)),
     SearchUnsupportedError: (SearchUnsupportedError("multi-city"), ("unsupported_error", False)),
-    SearchParseError: (SearchParseError("no ds:1 payload"), ("blocked_error", False)),
+    SearchParseError: (SearchParseError("no ds:1 payload"), ("parse_error", False)),
 }
 
 
@@ -64,8 +73,8 @@ class TestEverySearchClientErrorSubclassIsClassified:
     def test_class_has_expected_mapping(self, exc_class):
         assert exc_class in _EXPECTED, (
             f"{exc_class.__name__} is a SearchClientError subclass with no entry in "
-            "tests/mcp/test_error_classification.py::_EXPECTED — classify_error() in "
-            "fli/mcp/errors.py needs an isinstance branch for it, and this table needs "
+            "tests/core/test_errors.py::_EXPECTED — classify_error() in "
+            "fli/core/errors.py needs an isinstance branch for it, and this table needs "
             "the expected (error_type, retryable) pair."
         )
 
@@ -152,4 +161,4 @@ class TestNonSearchExceptions:
 class TestErrorClassificationAsFields:
     def test_no_http_status_key_when_not_http_error(self):
         fields = classify_error(SearchTimeoutError("slow")).as_fields()
-        assert fields == {"error_type": "timeout_error", "retryable": True}
+        assert fields == {"error_type": "timeout", "retryable": True}

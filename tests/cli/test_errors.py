@@ -9,11 +9,15 @@ from typer.testing import CliRunner
 
 from fli.cli.errors import _write_log, json_error_payload, report_cli_error
 from fli.cli.main import app
+from fli.core.parsers import ParseError
 from fli.search.exceptions import (
     SearchClientError,
     SearchConnectionError,
     SearchHTTPError,
+    SearchParseError,
+    SearchRejectedError,
     SearchTimeoutError,
+    SearchUnsupportedError,
 )
 
 
@@ -58,20 +62,44 @@ def test_write_log_creates_file_with_traceback(tmp_path):
 @pytest.mark.parametrize(
     "exc, expected_type",
     [
+        # Released values (shipped before the shared classifier existed) —
+        # must stay exactly as they are; see fli/core/errors.py.
         (SearchTimeoutError("timed out"), "timeout"),
         (SearchConnectionError("dns"), "connection_error"),
         (SearchHTTPError("403", status_code=403), "http_error"),
         (SearchClientError("generic"), "search_error"),
         (RuntimeError("boom"), "unexpected_error"),
+        # Gained from the shared fli.core.errors.classify_error classifier
+        # (T10 fix round 1, maintainer ruling V1) — the CLI didn't
+        # distinguish these from "search_error"/"unexpected_error" before.
+        (SearchRejectedError(13), "rejected_error"),
+        (SearchUnsupportedError("multi-city"), "unsupported_error"),
+        (SearchParseError("no ds:1 payload"), "parse_error"),
+        (ParseError("unknown airport code 'ZZZ'"), "validation_error"),
+        (ValueError("bad date range"), "validation_error"),
     ],
 )
 def test_json_error_payload_maps_error_types(exc, expected_type):
-    """Each SearchClientError subclass should map to a distinct error_type string."""
+    """Each exception class should map to the shared classifier's error_type string."""
     message, error_type, log_path = json_error_payload(exc)
     assert error_type == expected_type
     assert isinstance(log_path, Path)
     assert log_path.exists()
     assert message  # non-empty
+
+
+def test_json_error_payload_pydantic_validation_error_maps_to_validation_error():
+    """Pydantic's own ValidationError should classify as validation_error too."""
+    from pydantic import BaseModel, ValidationError
+
+    class _Model(BaseModel):
+        passengers: int
+
+    try:
+        _Model(passengers="not-a-number")
+    except ValidationError as exc:
+        _, error_type, _ = json_error_payload(exc)
+        assert error_type == "validation_error"
 
 
 def test_report_cli_error_returns_typer_exit_and_writes_log(tmp_path, capsys):
@@ -277,7 +305,10 @@ class TestTransportErrorClassification:
         ("exc_factory", "expected_type"),
         [
             (lambda: __import__("fli.search", fromlist=["x"]).SearchParseError("x"), "parse_error"),
-            (lambda: __import__("fli.search", fromlist=["x"]).SearchRejectedError(13), "rejected"),
+            (
+                lambda: __import__("fli.search", fromlist=["x"]).SearchRejectedError(13),
+                "rejected_error",
+            ),
         ],
     )
     def test_json_error_types(self, exc_factory, expected_type):

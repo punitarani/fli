@@ -16,6 +16,7 @@ from pathlib import Path
 import typer
 
 from fli.cli.console import console
+from fli.core.errors import classify_error
 from fli.search.exceptions import (
     SearchClientError,
     SearchConnectionError,
@@ -98,18 +99,20 @@ def report_cli_error(
 
 
 def json_error_payload(exc: BaseException, *, command: str | None = None) -> tuple[str, str, Path]:
-    """Return ``(message, error_type, log_path)`` for JSON-mode error output."""
+    """Return ``(message, error_type, log_path)`` for JSON-mode error output.
+
+    ``error_type`` comes from the shared :func:`fli.core.errors.classify_error`
+    classifier — the same one ``fli.mcp.server`` uses for MCP tool error
+    responses — so a CLI ``--format json`` error and an MCP error for the
+    same exception always agree on the same ``error_type`` string. See that
+    module's docstring for the full vocabulary table and retry guidance.
+
+    The message formatting is unchanged from before this classifier existed:
+    ``str(exc)`` for any :class:`SearchClientError`, and
+    ``f"{type}: {exc}"`` for anything else — only ``error_type`` itself was
+    ever hand-rolled here, and it has moved to the shared classifier.
+    """
     log_path = _write_log(exc, command=command)
-    if isinstance(exc, SearchTimeoutError):
-        return str(exc), "timeout", log_path
-    if isinstance(exc, SearchConnectionError):
-        return str(exc), "connection_error", log_path
-    if isinstance(exc, SearchHTTPError):
-        return str(exc), "http_error", log_path
-    if isinstance(exc, SearchRejectedError):
-        return str(exc), "rejected", log_path
-    if isinstance(exc, SearchParseError):
-        return str(exc), "parse_error", log_path
-    if isinstance(exc, SearchClientError):
-        return str(exc), "search_error", log_path
-    return f"{exc.__class__.__name__}: {exc}", "unexpected_error", log_path
+    error_type = classify_error(exc).error_type
+    message = str(exc) if isinstance(exc, SearchClientError) else f"{exc.__class__.__name__}: {exc}"
+    return message, error_type, log_path

@@ -21,6 +21,7 @@ from fli.core import (
     build_date_search_segments,
     build_flight_segments,
     build_time_restrictions,
+    classify_error,
     format_validation_error,
     google_flights_url,
     parse_airlines,
@@ -34,7 +35,6 @@ from fli.core import (
     search_airports,
 )
 from fli.core.parsers import ParseError
-from fli.mcp.errors import classify_error
 from fli.models import (
     Airline,
     Airport,
@@ -1145,9 +1145,11 @@ def search_flights(
     Supports one-way and round-trip searches with various filtering options.
 
     On failure (`success: false`), the response also carries `error_type`
-    (e.g. `validation_error`, `timeout_error`, `blocked_error`) and a
-    `retryable` bool — classify the failure from `error_type` instead of
-    parsing the `error` message text.
+    (e.g. `validation_error`, `timeout`, `parse_error`) and a `retryable`
+    bool — classify the failure from `error_type` instead of parsing the
+    `error` message text. The client has already retried internally with
+    backoff; if `retryable` is true, retry at most once or twice more with
+    your own exponential backoff in seconds (429 means slow down further).
     """
     effective_departure_window = departure_window or CONFIG.default_departure_window
     params = FlightSearchParams(
@@ -1301,9 +1303,11 @@ def search_dates(
     Supports both one-way and round-trip searches.
 
     On failure (`success: false`), the response also carries `error_type`
-    (e.g. `validation_error`, `timeout_error`, `blocked_error`) and a
-    `retryable` bool — classify the failure from `error_type` instead of
-    parsing the `error` message text.
+    (e.g. `validation_error`, `timeout`, `parse_error`) and a `retryable`
+    bool — classify the failure from `error_type` instead of parsing the
+    `error` message text. The client has already retried internally with
+    backoff; if `retryable` is true, retry at most once or twice more with
+    your own exponential backoff in seconds (429 means slow down further).
     """
     effective_departure_window = departure_window or CONFIG.default_departure_window
     params = DateSearchParams(
@@ -1482,7 +1486,10 @@ def get_booking_options(
     flight_numbers"), the response also carries ``error_type`` (e.g.
     ``validation_error``, ``rejected_error``) and a ``retryable`` bool —
     classify the failure from ``error_type`` instead of parsing the
-    ``error`` message text.
+    ``error`` message text. The client has already retried internally with
+    backoff; if ``retryable`` is true, retry at most once or twice more
+    with your own exponential backoff in seconds (429 means slow down
+    further).
     """
     effective_departure_window = departure_window or CONFIG.default_departure_window
     params = FlightSearchParams(

@@ -36,7 +36,7 @@ from pathlib import Path
 
 import pytest
 
-from fli.mcp.errors import classify_error
+from fli.core.errors import classify_error
 from fli.mcp.server import FlightSearchParams, _execute_booking_options
 from fli.models import (
     Airline,

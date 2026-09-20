@@ -46,7 +46,7 @@ def _raiser(exc: BaseException):
 
 # (exception instance, expected error_type, expected retryable)
 _SEARCH_CLIENT_ERROR_CASES = [
-    pytest.param(SearchTimeoutError("slow"), "timeout_error", True, id="timeout"),
+    pytest.param(SearchTimeoutError("slow"), "timeout", True, id="timeout"),
     pytest.param(SearchConnectionError("no route"), "connection_error", True, id="connection"),
     pytest.param(
         SearchHTTPError("bad gateway", status_code=502), "http_error", True, id="http-5xx"
@@ -59,7 +59,7 @@ _SEARCH_CLIENT_ERROR_CASES = [
         False,
         id="unsupported",
     ),
-    pytest.param(SearchParseError("no ds:1 payload"), "blocked_error", False, id="blocked"),
+    pytest.param(SearchParseError("no ds:1 payload"), "parse_error", False, id="blocked"),
     pytest.param(SearchClientError("generic failure"), "search_error", False, id="generic"),
     pytest.param(RuntimeError("bug"), "unexpected_error", False, id="unexpected"),
 ]
