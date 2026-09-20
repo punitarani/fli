@@ -614,3 +614,19 @@ class TestSparsePassengerMixWarningDatesIntegration:
         result = search.search(_date_filters(3, PassengerInfo(adults=1, children=1)))
         assert result is not None
         assert search.sparse_passenger_mix is False
+
+    def test_attribute_resets_before_a_sweep_that_raises(self, caplog):
+        """A sweep that raises must not leave the previous sweep's verdict behind."""
+        client = _CountingDateClient(_empty_page())
+        search = _search_dates_with(client)
+        with caplog.at_level(logging.WARNING, logger="fli.search.dates"):
+            search.search(_date_filters(3, PassengerInfo(adults=1, children=1)))
+        assert search.sparse_passenger_mix is True
+
+        # Over the per-search date cap: raises before any page is fetched.
+        too_many = dates_module.MAX_DATES_PER_SEARCH + 1
+        calls_before = client.calls
+        with pytest.raises(ValueError, match="date limit"):
+            search.search(_date_filters(too_many, PassengerInfo(adults=1, children=1)))
+        assert client.calls == calls_before
+        assert search.sparse_passenger_mix is False
