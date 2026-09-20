@@ -152,6 +152,89 @@ def test_flights_json_query_echoes_full_passenger_mix(runner, mock_search_flight
     assert payload["query"]["infants_on_lap"] == 1
 
 
+def _field_8_codes(raw: bytes) -> list[int]:
+    """Walk the top-level tfs message and collect every field-8 (passenger) code."""
+    from fli.search._proto import _read_varint
+
+    codes: list[int] = []
+    offset = 0
+    while offset < len(raw):
+        tag, offset = _read_varint(raw, offset)
+        field, wire = tag >> 3, tag & 0x7
+        if wire == 0:
+            value, offset = _read_varint(raw, offset)
+            if field == 8:
+                codes.append(value)
+        elif wire == 2:
+            length, offset = _read_varint(raw, offset)
+            offset += length
+        else:  # pragma: no cover - the encoder emits only wire types 0 and 2
+            raise AssertionError(f"unexpected wire type {wire} at offset {offset}")
+    return codes
+
+
+def test_flights_json_booking_url_token_decodes_to_the_requested_mix(
+    runner, mock_console, monkeypatch
+):
+    """One un-patched assertion: decode the real tfs token in --format json output.
+
+    Every other CLI passenger-mix test uses ``mock_search_flights``, which
+    replaces the whole ``SearchFlights`` instance (``build_flight_booking_url``
+    included) and only checks the kwargs a mock recorded. Here only
+    ``SearchFlights.search`` is stubbed, so ``build_flight_booking_url`` runs
+    for real and produces an actual token — a bug in the token builder
+    itself, not just in how the CLI calls it, would be caught here too.
+    """
+    import base64
+    import urllib.parse
+
+    from fli.search.flights import SearchFlights
+
+    departure = datetime.now() + timedelta(days=30)
+    flight = FlightResult(
+        price=299.99,
+        currency="USD",
+        duration=360,
+        stops=0,
+        legs=[
+            FlightLeg(
+                airline=Airline.DL,
+                flight_number="123",
+                departure_airport=Airport.JFK,
+                arrival_airport=Airport.LAX,
+                departure_datetime=departure,
+                arrival_datetime=departure + timedelta(hours=6),
+                duration=360,
+            )
+        ],
+    )
+    monkeypatch.setattr(SearchFlights, "search", lambda self, *a, **k: [flight])
+
+    result = runner.invoke(
+        app,
+        [
+            "flights",
+            "JFK",
+            "LAX",
+            departure.strftime("%Y-%m-%d"),
+            "--passengers",
+            "2",
+            "--children",
+            "1",
+            "--format",
+            "json",
+        ],
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    booking_url = payload["flights"][0]["booking_url"]
+
+    tfs = urllib.parse.parse_qs(urllib.parse.urlparse(booking_url).query)["tfs"][0]
+    pad = "=" * ((4 - len(tfs) % 4) % 4)
+    raw = base64.urlsafe_b64decode(tfs + pad)
+    assert _field_8_codes(raw) == [1, 1, 2]
+
+
 def test_flights_invalid_passenger_mix_exits_nonzero_with_clean_message(
     runner, mock_search_flights, mock_console
 ):

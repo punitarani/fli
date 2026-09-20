@@ -279,6 +279,13 @@ _MAX_U64 = (1 << 64) - 1
 # ``FlightSearchFilters.format`` in :mod:`fli.models.google_flights.flights`.
 _PASSENGER_FIELDS = ("adults", "children", "infants_on_lap", "infants_in_seat")
 
+# Google's own per-booking limit — the same ceiling ``PassengerInfo`` enforces
+# in ``validate_passenger_counts`` (``fli.models.google_flights.base``).
+# ``PassengerInfo`` has no public constant for it (just the literal in that
+# validator), so this is a second copy of the same number rather than an
+# import; keep the two in sync if Google's limit ever changes.
+_MAX_TOTAL_PASSENGERS = 9
+
 
 def passenger_codes(passenger_info: Any) -> list[int]:
     """Convert a ``PassengerInfo`` into ``tfs`` field-8 codes, one per traveller.
@@ -301,12 +308,35 @@ def passenger_codes(passenger_info: Any) -> list[int]:
         booking page requires at least one traveller, and that is also the
         implicit default callers got before this helper existed.
 
+    Raises:
+        ValueError: Any count is not a non-negative ``int`` (``bool``
+            included — it is an ``int`` subclass but not a traveller count),
+            or the total exceeds :data:`_MAX_TOTAL_PASSENGERS`. Checked
+            before building the result list, so a wildly out-of-range count
+            (a duck-typed ``adults=10**6``, say) fails immediately instead of
+            allocating a list that size — callers that pass a validated
+            ``PassengerInfo`` never hit this; it exists for the duck-typed
+            callers this function otherwise tolerates.
+
     """
-    codes = [
-        code
-        for kind, code in zip(_PASSENGER_FIELDS, (1, 2, 3, 4), strict=False)
-        for _ in range(getattr(passenger_info, kind, 0))
-    ]
+    total = 0
+    counts: list[tuple[int, int]] = []  # (code, count), one pair per field
+    for kind, code in zip(_PASSENGER_FIELDS, (1, 2, 3, 4), strict=False):
+        count = getattr(passenger_info, kind, 0)
+        # `bool` is a subclass of `int` in Python, so `isinstance(True, int)`
+        # is true — excluded explicitly, since `True` is not a traveller count.
+        if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+            raise ValueError(f"passenger_info.{kind} must be a non-negative int, got {count!r}")
+        total += count
+        counts.append((code, count))
+
+    if total > _MAX_TOTAL_PASSENGERS:
+        raise ValueError(
+            f"passenger_info totals {total} travellers, over the "
+            f"{_MAX_TOTAL_PASSENGERS}-traveller limit Google's booking page enforces"
+        )
+
+    codes = [code for code, count in counts for _ in range(count)]
     return codes or [1]
 
 

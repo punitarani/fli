@@ -403,6 +403,16 @@ const PASSENGER_FIELDS: ReadonlyArray<readonly [keyof PassengerInfo, number]> = 
 ];
 
 /**
+ * Google's own per-booking limit. The Python port's `PassengerInfo` enforces
+ * this in `validate_passenger_counts`
+ * (`fli/models/google_flights/base.py`) — `PassengerInfoSchema` here has no
+ * equivalent cross-field check, so this is the one place on the TypeScript
+ * side that rejects an over-the-limit mix. Keep this in sync with the
+ * Python validator if Google's limit ever changes.
+ */
+const MAX_TOTAL_PASSENGERS = 9;
+
+/**
  * Convert a `PassengerInfo` into `tfs` field-8 codes, one per traveller.
  *
  * Shared by {@link buildTfs} in `tfs.ts` (the search token) and
@@ -415,11 +425,37 @@ const PASSENGER_FIELDS: ReadonlyArray<readonly [keyof PassengerInfo, number]> = 
  *   all-zero mix.
  * @returns One code per traveller, in field order. Falls back to `[1]` (a
  *   single adult) when the mix would otherwise be empty.
+ * @throws {RangeError} Any count is not a non-negative integer, or the
+ *   total exceeds {@link MAX_TOTAL_PASSENGERS}. Checked before building the
+ *   result array, so a wildly out-of-range count (a duck-typed
+ *   `adults: 1_000_000`, say) fails immediately instead of allocating an
+ *   array that size — callers that pass a validated `PassengerInfo` never
+ *   hit this; it exists for the duck-typed callers this function otherwise
+ *   tolerates.
  */
 export function passengerCodes(passengerInfo: Partial<PassengerInfo> | null | undefined): number[] {
-  const codes: number[] = [];
+  let total = 0;
+  const counts: Array<readonly [number, number]> = []; // [code, count]
   for (const [field, code] of PASSENGER_FIELDS) {
     const count = (passengerInfo as Partial<PassengerInfo> | null)?.[field] ?? 0;
+    if (!Number.isInteger(count) || count < 0) {
+      throw new RangeError(
+        `passengerInfo.${field} must be a non-negative integer, got ${JSON.stringify(count)}`,
+      );
+    }
+    total += count;
+    counts.push([code, count]);
+  }
+
+  if (total > MAX_TOTAL_PASSENGERS) {
+    throw new RangeError(
+      `passengerInfo totals ${total} travellers, over the ` +
+        `${MAX_TOTAL_PASSENGERS}-traveller limit Google's booking page enforces`,
+    );
+  }
+
+  const codes: number[] = [];
+  for (const [code, count] of counts) {
     for (let i = 0; i < count; i++) codes.push(code);
   }
   return codes.length > 0 ? codes : [1];

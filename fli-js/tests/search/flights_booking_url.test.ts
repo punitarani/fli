@@ -262,4 +262,20 @@ describe("buildFlightBookingUrl", () => {
     expect(typeof url).toBe("string");
     expect(url.startsWith("https://www.google.com/travel/flights/booking?tfs=")).toBe(true);
   });
+
+  test("a duck-typed count in the millions falls back quickly, not after building a giant token", () => {
+    // passengerCodes rejects a count this large before building any array,
+    // so the existing catch-all below still returns the generic fallback
+    // URL — quickly, not after tens of seconds spent building a
+    // multi-megabyte token.
+    const start = performance.now();
+    const url = search.buildFlightBookingUrl(oneWay(), {
+      passengerInfo: { adults: 1_000_000 } as PassengerInfo,
+    });
+    const elapsed = performance.now() - start;
+
+    expect(elapsed).toBeLessThan(1000);
+    expect(url.length).toBeLessThan(200);
+    expect(url.startsWith("https://www.google.com/travel/flights")).toBe(true);
+  });
 });

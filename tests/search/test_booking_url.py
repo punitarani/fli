@@ -314,3 +314,25 @@ class TestBuildFlightBookingUrl:
         url = client.build_flight_booking_url(_one_way(), passenger_info="not-a-passenger-info")
         assert isinstance(url, str)
         assert url.startswith("https://www.google.com/travel/flights/booking?tfs=")
+
+    def test_huge_duck_typed_count_falls_back_quickly(self):
+        """An out-of-range duck-typed count must not build a multi-megabyte URL.
+
+        ``passenger_codes`` rejects a count this large before building any
+        list, so the existing broad ``except Exception`` here still returns
+        the generic fallback URL — quickly, not after seconds spent building
+        a list with a million entries.
+        """
+        import time
+
+        class _Duck:
+            adults = 10**6
+
+        client = _make_client()
+        start = time.monotonic()
+        url = client.build_flight_booking_url(_one_way(), passenger_info=_Duck())
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 1.0
+        assert len(url) < 200
+        assert url.startswith("https://www.google.com/travel/flights")

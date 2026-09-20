@@ -411,6 +411,112 @@ class TestPassengerCodes:
 
         assert passenger_codes(object()) == [1]
 
+    def test_total_at_the_nine_traveller_ceiling_is_accepted(self):
+        from fli.models import PassengerInfo
+        from fli.search._proto import passenger_codes
+
+        info = PassengerInfo(adults=4, children=2, infants_in_seat=2, infants_on_lap=1)
+        assert len(passenger_codes(info)) == 9
+
+    @pytest.mark.parametrize(
+        "counts",
+        [
+            {"adults": 10, "children": 0},  # total 10, one over the ceiling
+            {"adults": 5, "children": 5},  # total 10 spread across two fields
+        ],
+    )
+    def test_total_over_nine_travellers_raises(self, counts):
+        from fli.search._proto import passenger_codes
+
+        class _Duck:
+            def __init__(self, **kw):
+                for k, v in kw.items():
+                    setattr(self, k, v)
+
+        with pytest.raises(ValueError, match="9"):
+            passenger_codes(_Duck(**counts))
+
+    @pytest.mark.parametrize(
+        "bad_value",
+        [2.5, "3", True],
+    )
+    def test_non_integer_count_raises(self, bad_value):
+        from fli.search._proto import passenger_codes
+
+        class _Duck:
+            adults = bad_value
+
+        with pytest.raises(ValueError, match="adults"):
+            passenger_codes(_Duck())
+
+    def test_negative_count_raises(self):
+        from fli.search._proto import passenger_codes
+
+        class _Duck:
+            adults = -1
+
+        with pytest.raises(ValueError, match="adults"):
+            passenger_codes(_Duck())
+
+    def test_huge_count_raises_immediately_instead_of_building_a_giant_list(self):
+        """A duck-typed count in the millions must fail fast, not build a list that big.
+
+        Before this guard, an ``adults=10**6``-shaped object made this
+        function (and everything downstream of it, including the booking
+        URL) spend seconds building a multi-megabyte result instead of
+        rejecting the obviously-impossible passenger count up front.
+        """
+        import time
+
+        from fli.search._proto import passenger_codes
+
+        class _Duck:
+            adults = 10**6
+
+        start = time.monotonic()
+        with pytest.raises(ValueError, match="9"):
+            passenger_codes(_Duck())
+        assert time.monotonic() - start < 1.0
+
+
+class TestPassengerCodesAcceptRejectTable:
+    """Which duck-typed inputs `passenger_codes` accepts or rejects.
+
+    The TypeScript port (`fli-js/tests/search/proto.test.ts`,
+    `describe("passengerCodes accept/reject table")`) runs this same table of
+    inputs against its own `passengerCodes` and must reach the same
+    accept/reject verdict for each row — keep the two in sync.
+    """
+
+    @pytest.mark.parametrize(
+        ("adults", "children", "accepted"),
+        [
+            (1, 0, True),
+            (0, 0, True),  # all-zero mix still books one adult
+            (9, 0, True),  # exactly Google's ceiling
+            (10, 0, False),  # one over the ceiling
+            (5, 5, False),  # ceiling crossed by summing two fields
+            (-1, 0, False),
+            (2.5, 0, False),
+            ("3", 0, False),
+            (True, 0, False),
+        ],
+    )
+    def test_accept_reject(self, adults, children, accepted):
+        from fli.search._proto import passenger_codes
+
+        class _Duck:
+            def __init__(self, adults, children):
+                self.adults = adults
+                self.children = children
+
+        info = _Duck(adults, children)
+        if accepted:
+            passenger_codes(info)  # must not raise
+        else:
+            with pytest.raises(ValueError):
+                passenger_codes(info)
+
 
 class TestToUrlsafeB64:
     def test_converts_standard_to_urlsafe(self):

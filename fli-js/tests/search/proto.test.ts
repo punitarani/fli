@@ -7,6 +7,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { Buffer } from "node:buffer";
+import type { PassengerInfo } from "../../src/models/google-flights/base.ts";
 import {
   _readVarint,
   buildBookingToken,
@@ -453,4 +454,62 @@ describe("passengerCodes", () => {
   test("object with no passenger fields defaults to a single adult", () => {
     expect(passengerCodes({})).toEqual([1]);
   });
+
+  test("exactly nine travellers is accepted", () => {
+    const info = { adults: 4, children: 2, infants_in_seat: 2, infants_on_lap: 1 };
+    expect(passengerCodes(info)).toHaveLength(9);
+  });
+
+  test("ten travellers, one over the ceiling, throws", () => {
+    expect(() => passengerCodes({ adults: 10, children: 0 })).toThrow(RangeError);
+  });
+
+  test("ten travellers spread across two fields throws", () => {
+    expect(() => passengerCodes({ adults: 5, children: 5 })).toThrow(RangeError);
+  });
+
+  test("a negative count throws, naming the field", () => {
+    expect(() => passengerCodes({ adults: -1 })).toThrow(/adults/);
+  });
+
+  test.each([2.5, "3", true])("a non-integer count (%p) throws", (bad) => {
+    expect(() => passengerCodes({ adults: bad as unknown as number })).toThrow(RangeError);
+  });
+
+  test("a duck-typed count in the millions throws immediately, not after building a list", () => {
+    // Before this guard, an `adults: 1_000_000`-shaped object made this
+    // function (and everything downstream, including the booking token)
+    // spend tens of seconds building a multi-megabyte array instead of
+    // rejecting the obviously-impossible count up front.
+    const start = performance.now();
+    expect(() => passengerCodes({ adults: 1_000_000 })).toThrow(RangeError);
+    expect(performance.now() - start).toBeLessThan(1000);
+  });
+});
+
+describe("passengerCodes accept/reject table", () => {
+  // Same table as Python's `TestPassengerCodesAcceptRejectTable` in
+  // tests/search/test_proto.py — both languages must reach the same
+  // accept/reject verdict for each row. Keep the two in sync.
+  const cases: Array<[string, { adults: unknown; children?: unknown }, boolean]> = [
+    ["baseline single adult", { adults: 1 }, true],
+    ["all-zero mix still books one adult", { adults: 0, children: 0 }, true],
+    ["exactly Google's ceiling", { adults: 9 }, true],
+    ["one over the ceiling", { adults: 10 }, false],
+    ["ceiling crossed by summing two fields", { adults: 5, children: 5 }, false],
+    ["negative count", { adults: -1 }, false],
+    ["non-integer count (float)", { adults: 2.5 }, false],
+    ["non-integer count (numeric string)", { adults: "3" }, false],
+    ["boolean count", { adults: true }, false],
+  ];
+
+  for (const [label, info, accepted] of cases) {
+    test(`${label} -> ${accepted ? "accepted" : "rejected"}`, () => {
+      if (accepted) {
+        expect(() => passengerCodes(info as Partial<PassengerInfo>)).not.toThrow();
+      } else {
+        expect(() => passengerCodes(info as Partial<PassengerInfo>)).toThrow(RangeError);
+      }
+    });
+  }
 });
