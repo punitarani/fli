@@ -21,6 +21,19 @@ class SearchConnectionError(SearchClientError):
     """A network/DNS issue prevented us from reaching Google Flights."""
 
 
+class SearchCertificateError(SearchConnectionError):
+    """TLS certificate verification failed while reaching Google Flights.
+
+    A subclass of :class:`SearchConnectionError` rather than a sibling —
+    it *is* a connection failure — but it is deterministic for a given CA
+    bundle configuration (unlike a transient DNS blip or dropped packet),
+    so callers classify and retry it differently. See
+    ``fli.search.client._ca_bundle_from_env`` and ``FLI_CA_BUNDLE`` /
+    ``CURL_CA_BUNDLE`` / ``REQUESTS_CA_BUNDLE`` for the fix a user behind a
+    TLS-intercepting corporate proxy needs.
+    """
+
+
 class SearchHTTPError(SearchClientError):
     """Google Flights returned a non-2xx HTTP response."""
 
