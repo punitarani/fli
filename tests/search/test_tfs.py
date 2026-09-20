@@ -313,12 +313,19 @@ class TestPassengerCodes:
         ],
     )
     def test_each_passenger_kind_has_its_wire_code(self, field: str, code: int) -> None:
-        counts = {"adults": 0, field: 1}
+        """One adult plus one traveller of the kind under test.
+
+        Every mix here must satisfy ``PassengerInfo``'s own rules (1-9
+        travellers, and a lap infant needs an adult to sit with), so the
+        baseline adult is always present rather than zeroed out.
+        """
+        counts = {"adults": 1}
+        counts[field] = counts.get(field, 0) + 1
         spec = _filters(
             [("JFK", "LAX", OUTBOUND_DATE)],
             passenger_info=PassengerInfo(**counts),
         )
-        assert _passenger_codes(build_tfs(spec)) == [code]
+        assert _passenger_codes(build_tfs(spec)) == [1, code]
 
     def test_lap_infant_is_three_not_four(self):
         """Pinned separately: this is the swap that quoted a lap infant a seat fare."""
@@ -343,6 +350,25 @@ class TestPassengerCodes:
     def test_default_is_a_single_adult(self):
         spec = _filters([("JFK", "LAX", OUTBOUND_DATE)])
         assert _passenger_codes(build_tfs(spec)) == [1]
+
+    def test_encodes_the_validator_boundary_mixes(self):
+        """The largest and most lap-heavy mixes `PassengerInfo` permits.
+
+        ``PassengerInfo`` caps a booking at nine travellers and requires one
+        adult per lap infant, so these two are the edges the encoder has to
+        keep handling — one entry per traveller, in field order.
+        """
+        full_house = _filters(
+            [("JFK", "LAX", OUTBOUND_DATE)],
+            passenger_info=PassengerInfo(adults=4, children=2, infants_in_seat=2, infants_on_lap=1),
+        )
+        assert _passenger_codes(build_tfs(full_house)) == [1, 1, 1, 1, 2, 2, 3, 4, 4]
+
+        one_lap_each = _filters(
+            [("JFK", "LAX", OUTBOUND_DATE)],
+            passenger_info=PassengerInfo(adults=2, infants_on_lap=2),
+        )
+        assert _passenger_codes(build_tfs(one_lap_each)) == [1, 1, 3, 3]
 
 
 class TestPageUrl:
