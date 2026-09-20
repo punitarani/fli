@@ -5,7 +5,6 @@ from typing import Annotated, Any
 import typer
 from pydantic import ValidationError
 
-from fli.cli.console import console
 from fli.cli.enums import OutputFormat
 from fli.cli.errors import json_error_payload, report_cli_error
 from fli.cli.utils import (
@@ -250,9 +249,13 @@ def _search_flights_core(
                 )
                 return
 
+            # Text mode prints no copy of the note: SearchFlights.search has
+            # already logged the same explanation as a warning, which — like
+            # every other library warning — reaches the terminal on stderr.
+            # Echoing it here showed the user the same paragraph twice. JSON
+            # callers rarely read stderr, which is why the note rides in the
+            # payload above instead.
             typer.echo("No flights found.")
-            if sparse_note:
-                console.print(sparse_note, style="dim", soft_wrap=True)
             raise typer.Exit(1)
 
         # Build per-flight booking deep-links (tfs; never raises).

@@ -1,6 +1,7 @@
 """Tests for the flights CLI command."""
 
 import json
+import logging
 from datetime import datetime, timedelta
 
 import pytest
@@ -520,13 +521,17 @@ def test_flights_no_results(runner, mock_search_flights, mock_console):
     assert "client-side" not in result.stdout
 
 
-def test_flights_no_results_with_child_explains_the_sparsity(runner, mock_search_flights):
-    """An empty result for a party with children/infants gets the extra hint.
+def test_flights_no_results_with_child_does_not_repeat_the_library_warning(
+    runner, mock_search_flights
+):
+    """Text mode leaves the explanation to the library's own warning.
 
-    Google's search page inlines fewer (sometimes zero) rows for those
-    parties — see SPARSE_PASSENGER_MIX_WARNING in fli.search.flights. The
-    CLI reads search_client.sparse_passenger_mix rather than recomputing
-    it, so the mock sets it the way the real library would for this party.
+    Google's search page inlines fewer (sometimes zero) rows for parties with
+    children/infants — see SPARSE_PASSENGER_MIX_WARNING in fli.search.flights.
+    ``SearchFlights.search`` logs that warning itself, and like every other
+    library warning it reaches the terminal on stderr, so printing it again
+    on stdout would show the user the same paragraph twice. (The mock here
+    logs nothing, which is what isolates the CLI's own output.)
     """
     mock_search_flights.search.return_value = []
     mock_search_flights.sparse_passenger_mix = True
@@ -546,10 +551,12 @@ def test_flights_no_results_with_child_explains_the_sparsity(runner, mock_search
     )
     assert result.exit_code == 1
     assert "No flights found" in result.stdout
-    assert "client-side" in result.stdout
+    assert "client-side" not in result.stdout
 
 
-def test_flights_no_results_with_infant_explains_the_sparsity(runner, mock_search_flights):
+def test_flights_no_results_with_infant_does_not_repeat_the_library_warning(
+    runner, mock_search_flights
+):
     mock_search_flights.search.return_value = []
     mock_search_flights.sparse_passenger_mix = True
 
@@ -565,16 +572,25 @@ def test_flights_no_results_with_infant_explains_the_sparsity(runner, mock_searc
         ],
     )
     assert result.exit_code == 1
-    assert "client-side" in result.stdout
+    assert "client-side" not in result.stdout
 
 
 class TestFlightsNoteTracksGoogleNotTheCallersFilter:
     """End-to-end (stubbed page, real ``SearchFlights.search``) — mirrors the MCP-level check.
 
-    A page that genuinely carries no rows still gets the hint; a page that
-    carries a row the caller's own airline filter then removes does not —
-    that emptiness is the filter's doing, not Google's.
+    A page that genuinely carries no rows is explained exactly once — by the
+    library's warning, not repeated on stdout; a page that carries a row the
+    caller's own airline filter then removes is not explained at all — that
+    emptiness is the filter's doing, not Google's.
     """
+
+    @staticmethod
+    def _sparse_warnings(caplog) -> list[str]:
+        return [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.WARNING and "client-side" in record.getMessage()
+        ]
 
     def _page(self, rows: list) -> str:
         payload = [[None, None, None, None, "FAKE_SESSION"], None, [rows], None]
@@ -586,20 +602,32 @@ class TestFlightsNoteTracksGoogleNotTheCallersFilter:
 
         monkeypatch.setattr("fli.search.client.Client.get", _fake_get)
 
-    def test_genuinely_empty_page_prints_the_hint(self, runner, monkeypatch):
+    def test_genuinely_empty_page_is_explained_exactly_once(self, runner, monkeypatch, caplog):
         self._stub_get(monkeypatch, self._page([]))
-        result = runner.invoke(
-            app,
-            ["flights", "JFK", "LHR", datetime.now().strftime("%Y-%m-%d"), "--children", "1"],
-        )
+        with caplog.at_level(logging.WARNING, logger="fli"):
+            result = runner.invoke(
+                app,
+                ["flights", "JFK", "LHR", datetime.now().strftime("%Y-%m-%d"), "--children", "1"],
+            )
         assert result.exit_code == 1
         assert "No flights found" in result.stdout
-        assert "client-side" in result.stdout
+        # Once, from the library (stderr in a real terminal) — never echoed on stdout too.
+        assert len(self._sparse_warnings(caplog)) == 1
+        assert "client-side" not in result.stdout
 
-    def test_rows_filtered_out_by_airline_prints_no_hint(self, runner, monkeypatch):
+    def test_rows_filtered_out_by_airline_is_not_explained(self, runner, monkeypatch, caplog):
         row = _row(legs=[_leg(dep_iata="JFK", arr_iata="LHR", airline_code="DL")])
         self._stub_get(monkeypatch, self._page([row]))
-        result = runner.invoke(
+        with caplog.at_level(logging.WARNING, logger="fli"):
+            result = self._invoke_filtered(runner)
+        assert result.exit_code == 1
+        assert "No flights found" in result.stdout
+        assert self._sparse_warnings(caplog) == []
+        assert "client-side" not in result.stdout
+
+    @staticmethod
+    def _invoke_filtered(runner):
+        return runner.invoke(
             app,
             [
                 "flights",
@@ -612,9 +640,6 @@ class TestFlightsNoteTracksGoogleNotTheCallersFilter:
                 "AA",
             ],
         )
-        assert result.exit_code == 1
-        assert "No flights found" in result.stdout
-        assert "client-side" not in result.stdout
 
 
 def test_basic_round_trip_flights(runner, mock_search_flights, mock_console):

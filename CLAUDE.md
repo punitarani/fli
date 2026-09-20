@@ -152,9 +152,11 @@ Consequences to keep in mind when changing search code:
   came back with zero rows, not when the caller's own airline/price/
   duration/window filter removed rows Google did return (see
   `SearchFlights.sparse_passenger_mix`). The MCP `search_flights` empty
-  response carries the same text as `note`, and the CLI prints it under
-  "No flights found.", both reading that attribute rather than recomputing
-  the condition — an adults-only search shows the schedule.
+  response and the CLI's `--format json` empty payload carry the same text
+  as `note`, both reading that attribute rather than recomputing the
+  condition. The CLI's text mode prints no copy of its own: the library's
+  warning already reaches the terminal on stderr, and echoing it showed the
+  same paragraph twice — an adults-only search shows the schedule.
 - Date searches have no calendar grid: one page fetch per date, capped at
   `fli.search.dates.MAX_DATES_PER_SEARCH` (93) per `SearchDates.search`. At the
   cap that is several hundred MB of pages and parsed JSON at peak.
