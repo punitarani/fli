@@ -1,4 +1,11 @@
-export { Client, type ClientOptions, type ClientResponse, getClient } from "./client.ts";
+export {
+  Client,
+  type ClientOptions,
+  type ClientResponse,
+  DEFAULT_SOCS_COOKIE,
+  getClient,
+  resolveSocsCookie,
+} from "./client.ts";
 export {
   configureConcurrency,
   getDefaultMaxWorkers,
