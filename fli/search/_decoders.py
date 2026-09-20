@@ -85,7 +85,7 @@ def _parse_leg(fl: list) -> FlightLeg:
     op_code = safe_get(airline_info, 2)
     operating_airline = _safe_airline(op_code) if op_code else None
 
-    amenities = _parse_amenities(safe_get(fl, 12))
+    amenities = _parse_amenities(safe_get(fl, 12), safe_get(fl, 13))
     aircraft = as_str(safe_get(fl, 17))
     legroom_short = as_str(safe_get(fl, 14))
     legroom_long = as_str(safe_get(fl, 30))
@@ -113,26 +113,18 @@ def _parse_leg(fl: list) -> FlightLeg:
     )
 
 
-def _parse_amenities(slots: Any) -> Amenities | None:
-    """Decode the 12-slot amenities array at ``leg[12]``.
+def _parse_amenities(slots: Any, seat_quality: Any = None) -> Amenities | None:
+    """Decode amenities at ``leg[12]`` and the seat-quality code at ``leg[13]``.
 
-    Confirmed slot mapping (live captures, May 2026):
+    ``leg[12][11]`` is the Wi-Fi tier, not a legroom rating. Seat quality
+    may be present even when the amenities array is missing.
 
-    - slot 1 → wifi (bool|None)
-    - slot 5 → power outlet (bool|None)
-    - slot 9 → on-demand video (bool|None)
-    - slot 11 → integer legroom rating (2 or 3 observed)
-
-    Returns None when none of the known slots carry a usable value (avoids
-    creating empty ``Amenities`` instances that would imply we know nothing
-    about the leg).
+    Return None when neither source carries a usable value.
     """
-    if not isinstance(slots, list) or not slots:
-        return None
     wifi = as_bool(safe_get(slots, 1))
     power = as_bool(safe_get(slots, 5))
     on_demand_video = as_bool(safe_get(slots, 9))
-    legroom_rating = as_non_negative_int(safe_get(slots, 11))
+    legroom_rating = as_non_negative_int(seat_quality)
     if wifi is None and power is None and on_demand_video is None and legroom_rating is None:
         return None
     return Amenities(
