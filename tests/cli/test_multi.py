@@ -6,7 +6,7 @@ import pytest
 from typer.testing import CliRunner
 
 from fli.cli.main import app
-from fli.models import Airline, Airport, FlightLeg, FlightResult
+from fli.models import Airline, Airport, FlightLeg, FlightResult, SeatType
 from fli.models.google_flights.base import TripType
 
 
@@ -197,6 +197,59 @@ class TestMultiCityCommand:
             ],
         )
         assert result.exit_code == 0
+        mock_search_flights.build_flight_booking_url.assert_called()
+        _, kwargs = mock_search_flights.build_flight_booking_url.call_args
+        assert kwargs["seat_type"] == SeatType.BUSINESS
+
+    def test_builds_booking_url_per_result(self, runner, mock_search_flights, mock_console):
+        """Each result gets a booking deep-link, like the flights command already does."""
+        mock_search_flights.search.return_value = _make_multi_city_results()
+        date1 = _future_date(30)
+        date2 = _future_date(34)
+        date3 = _future_date(37)
+
+        result = runner.invoke(
+            app,
+            [
+                "multi",
+                "--leg",
+                f"SEA,HKG,{date1}",
+                "--leg",
+                f"HKG,PEK,{date2}",
+                "--leg",
+                f"PEK,SEA,{date3}",
+            ],
+        )
+        assert result.exit_code == 0
+        assert mock_search_flights.build_flight_booking_url.call_count == 1
+        args, _ = mock_search_flights.build_flight_booking_url.call_args
+        assert isinstance(args[0], tuple)
+        assert len(args[0]) == 3
+
+    def test_booking_url_reflects_passenger_mix(self, runner, mock_search_flights, mock_console):
+        """The booking deep-link must be priced for the searched passenger mix, not a lone adult."""
+        date1 = _future_date(30)
+        date2 = _future_date(37)
+
+        result = runner.invoke(
+            app,
+            [
+                "multi",
+                "--leg",
+                f"SEA,HKG,{date1}",
+                "--leg",
+                f"HKG,SEA,{date2}",
+                "--passengers",
+                "2",
+                "--children",
+                "1",
+            ],
+        )
+        assert result.exit_code == 0
+        mock_search_flights.build_flight_booking_url.assert_called()
+        _, kwargs = mock_search_flights.build_flight_booking_url.call_args
+        assert kwargs["passenger_info"].adults == 2
+        assert kwargs["passenger_info"].children == 1
 
     def test_with_stops_filter(self, runner, mock_search_flights, mock_console):
         """Test multi-city search with stops filter."""
