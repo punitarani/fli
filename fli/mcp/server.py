@@ -27,7 +27,7 @@ from fli.core import (
     parse_emissions,
     parse_max_stops,
     parse_sort_by,
-    resolve_airport,
+    resolve_airports,
     search_airports,
 )
 from fli.core.parsers import ParseError
@@ -547,12 +547,8 @@ def _serialize_date_result(
 # =============================================================================
 
 
-def _resolve_airports(codes: str) -> list[Airport]:
-    """Resolve one or more comma-separated airport codes."""
-    airports = [resolve_airport(code.strip()) for code in codes.split(",") if code.strip()]
-    if not airports:
-        raise ParseError(f"No valid airport codes found in: '{codes}'")
-    return airports
+# Shared with the CLI; the private name is kept for backwards compatibility.
+_resolve_airports = resolve_airports
 
 
 def _build_flight_filters(

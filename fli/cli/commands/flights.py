@@ -26,6 +26,7 @@ from fli.core import (
     parse_max_stops,
     parse_sort_by,
     resolve_airport,
+    resolve_airports,
 )
 from fli.core.parsers import ParseError
 from fli.models import (
@@ -88,8 +89,8 @@ def _search_flights_core(
             f"{departure_window[0]}-{departure_window[1]}" if departure_window else None
         )
 
-        origin_airports = [resolve_airport(c.strip()) for c in origin.split(",") if c.strip()]
-        destination_airports = [resolve_airport(c.strip()) for c in destination.split(",") if c.strip()]
+        origin_airports = resolve_airports(origin)
+        destination_airports = resolve_airports(destination)
         seat_type = parse_cabin_class(cabin_class)
         stops = parse_max_stops(max_stops)
         parsed_airlines = parse_airlines(airlines)

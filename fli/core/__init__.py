@@ -24,6 +24,7 @@ from .parsers import (
     parse_sort_by,
     parse_time_range,
     resolve_airport,
+    resolve_airports,
     resolve_enum,
 )
 
@@ -38,6 +39,7 @@ __all__ = [
     "parse_sort_by",
     "parse_time_range",
     "resolve_airport",
+    "resolve_airports",
     "resolve_enum",
     # Builders
     "build_date_search_segments",

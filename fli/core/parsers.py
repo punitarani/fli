@@ -99,6 +99,27 @@ def resolve_airport(code: str) -> Airport:
         raise ParseError(f"Invalid airport code: '{code}'") from e
 
 
+def resolve_airports(codes: str) -> list[Airport]:
+    """Resolve one or more comma-separated airport codes.
+
+    Args:
+        codes: A single code or a comma-separated list (e.g. ``"JFK,LGA"``).
+            Blank entries from stray or doubled commas are ignored.
+
+    Returns:
+        The resolved airports, in the order given.
+
+    Raises:
+        ParseError: If any code is unknown, or no codes remain after
+            discarding blanks (e.g. ``","``).
+
+    """
+    airports = [resolve_airport(code.strip()) for code in codes.split(",") if code.strip()]
+    if not airports:
+        raise ParseError(f"No valid airport codes found in: '{codes}'")
+    return airports
+
+
 def parse_airlines(codes: list[str] | None) -> list[Airline] | None:
     """Parse a list of airline codes into Airline enums.
 
