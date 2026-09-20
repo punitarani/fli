@@ -545,7 +545,7 @@ cd fli
 # Install dependencies with uv
 uv sync --all-extras
 
-# Run tests
+# Run tests (offline only — no network access required)
 uv run pytest
 
 # Run linting
@@ -557,10 +557,20 @@ uv run mkdocs serve
 
 # Or use the Makefile for common tasks
 make install-all  # Install all dependencies
-make test         # Run tests
+make test         # Run tests (offline only)
+make test-live    # Run the small, stable live tests (real network)
 make lint         # Check code style
 make format       # Format code
 ```
+
+Tests that call the real Google Flights API are marked `live` and skipped by
+default (`--fuzz`, `--live` and `--all` are independent, skip-only gates —
+`--all` does *not* imply `--live`, and `--live` alone does *not* imply
+`--fuzz`). Run the small, stable live set with `make test-live` (or
+`pytest -m live --live`); the noisier 100-case fuzz-gated live test is a
+separate opt-in, `make test-live-fuzz` (`pytest --all -m live --live
+tests/search/test_search_flights_fuzz.py` — it needs `--all`/`--fuzz`
+*together with* `--live`, since it carries both markers).
 
 ### Docker Development
 

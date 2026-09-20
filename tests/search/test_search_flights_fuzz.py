@@ -1,4 +1,10 @@
-"""Fuzz testing for Search functionality."""
+"""Fuzz testing for Search functionality.
+
+``test_search_fuzz`` below calls ``SearchFlights.search`` with no mocking, so
+each of its parametrized cases hits the real Google Flights network. It is
+marked both ``fuzz`` (needs --fuzz/--all) and ``live`` (needs --live) so a
+plain ``--all`` run never dials out.
+"""
 
 import random
 from datetime import datetime, timedelta
@@ -89,6 +95,7 @@ def generate_random_test_cases(num_tests: int) -> list[tuple]:
 
 
 @pytest.mark.fuzz
+@pytest.mark.live
 @pytest.mark.parallel
 @pytest.mark.parametrize(
     "dep_airport, arr_airport, dep_date, adults, children, infants_on_lap, infants_in_seat, seat_type, stops, sort_by",  # noqa: E501
