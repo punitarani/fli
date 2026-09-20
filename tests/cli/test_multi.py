@@ -128,7 +128,6 @@ class TestMultiCityCommand:
         assert args[0].trip_type == TripType.MULTI_CITY
         assert len(args[0].flight_segments) == 3
 
-
     def test_with_passengers(self, runner, mock_search_flights, mock_console):
         """Test multi-city search passes adult passenger count into filters."""
         date1 = _future_date(30)
