@@ -29,6 +29,17 @@ def _isolated_tmp_log_dir(monkeypatch, tmp_path):
     monkeypatch.setattr("fli.cli.errors._LOG_DIR", tmp_path / "fli-logs")
 
 
+# The CLI invocations below pass fixed travel dates; pin the models' clock so
+# they stay in the future no matter when the suite runs.
+PINNED_TODAY = "2026-01-01"
+
+
+@pytest.fixture(autouse=True)
+def _pinned_clock(pin_today):
+    """Freeze "today" well before every date literal in this module."""
+    pin_today(PINNED_TODAY)
+
+
 def test_write_log_creates_file_with_traceback(tmp_path):
     """`_write_log` should write a file containing the traceback details."""
     try:

@@ -25,6 +25,16 @@ from fli.mcp.server import (
     _serialize_layover,
 )
 
+# The tool calls below pass fixed travel dates; pin the models' clock so they
+# stay in the future no matter when the suite runs.
+PINNED_TODAY = "2026-01-01"
+
+
+@pytest.fixture(autouse=True)
+def _pinned_clock(pin_today):
+    """Freeze "today" well before every date literal in this module."""
+    pin_today(PINNED_TODAY)
+
 
 def _make_raiser(exc: BaseException):
     """Return a callable that unconditionally raises ``exc``."""
