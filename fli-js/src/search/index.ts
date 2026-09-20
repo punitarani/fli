@@ -39,5 +39,19 @@ export {
   extractSessionIdFromTfu,
   type LegSpec,
 } from "./proto.ts";
+export {
+  applyClientSideFilters,
+  type BuildTfsOptions,
+  buildTfs,
+  extractPayload,
+  type FetchPayloadOptions,
+  fetchPayload,
+  PAGE_FETCH_ATTEMPTS,
+  PAGE_RETRY_BACKOFF_MS,
+  PAGE_URL,
+  pageUrl,
+  type TfsFilters,
+  unsupportedFilters,
+} from "./tfs.ts";
 export { withLocaleParams } from "./urls.ts";
 export { iterWrbChunks, parseFirstWrbPayload } from "./wire.ts";
