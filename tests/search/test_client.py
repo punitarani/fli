@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from unittest.mock import MagicMock
 
 import pytest
@@ -133,25 +134,62 @@ class TestConsentCookie:
         session = get_client()._session()
         assert session.cookies.get("SOCS", domain=".google.com") is None
 
-    def test_empty_env_var_disables_the_cookie(self, monkeypatch):
-        """``FLI_SOCS_COOKIE=""`` must mean "send nothing", not "use the default".
+    @staticmethod
+    def _reimport_client(env_value: str | None):
+        """Re-evaluate the module's import-time env read, in a throwaway module.
 
-        The module resolves the value at import time, so exercise the real
-        environment path rather than only the module constant.
+        ``importlib.reload`` would rebind the real ``fli.search.client``,
+        resetting the process-wide client singleton for every later test.
+        Executing the source into a fresh module object exercises the same
+        import-time expression while leaving ``sys.modules`` untouched.
         """
-        import importlib
+        import importlib.util
+        import os
 
-        monkeypatch.setenv("FLI_SOCS_COOKIE", "")
+        previous = os.environ.get("FLI_SOCS_COOKIE")
+        if env_value is None:
+            os.environ.pop("FLI_SOCS_COOKIE", None)
+        else:
+            os.environ["FLI_SOCS_COOKIE"] = env_value
         try:
-            importlib.reload(client_module)
-            assert client_module.SOCS_COOKIE == ""
-            session = client_module.Client()._session()
-            assert session.cookies.get("SOCS", domain=".google.com") is None
+            spec = importlib.util.spec_from_file_location(
+                "fli_client_env_probe", client_module.__file__
+            )
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
         finally:
-            monkeypatch.delenv("FLI_SOCS_COOKIE", raising=False)
-            importlib.reload(client_module)
+            if previous is None:
+                os.environ.pop("FLI_SOCS_COOKIE", None)
+            else:
+                os.environ["FLI_SOCS_COOKIE"] = previous
 
-    def test_default_env_keeps_the_cookie_on(self):
-        """The author's default stays on — EU IPs otherwise hit the consent page."""
-        assert client_module.SOCS_COOKIE == client_module.DEFAULT_SOCS_COOKIE
-        assert client_module.SOCS_COOKIE
+    def test_empty_env_var_disables_the_cookie(self):
+        """``FLI_SOCS_COOKIE=""`` must mean "send nothing", not "use the default"."""
+        module = self._reimport_client("")
+        assert module.SOCS_COOKIE == ""
+        session = module.Client()._session()
+        assert session.cookies.get("SOCS", domain=".google.com") is None
+
+    def test_env_var_overrides_the_default(self):
+        module = self._reimport_client("OVERRIDDEN")
+        assert module.SOCS_COOKIE == "OVERRIDDEN"
+
+    def test_unset_env_var_keeps_the_cookie_on(self):
+        """The author's default stays on — EU IPs otherwise hit the consent page.
+
+        Resolved from a clean environment rather than from the module constant,
+        so the test does not fail for a developer who exports the variable.
+        """
+        module = self._reimport_client(None)
+        assert module.SOCS_COOKIE == module.DEFAULT_SOCS_COOKIE
+        assert module.SOCS_COOKIE
+
+    def test_process_client_module_is_untouched(self):
+        """The probes above must not disturb the real module or its singleton."""
+        before = client_module.client
+        self._reimport_client("")
+        assert client_module.client is before
+        assert client_module.SOCS_COOKIE == os.environ.get(
+            "FLI_SOCS_COOKIE", client_module.DEFAULT_SOCS_COOKIE
+        )
