@@ -346,6 +346,13 @@ def _search_flights_core(
             emit_json(payload)
             raise typer.Exit(1) from e
         raise report_cli_error(e, command="flights") from e
+    except (typer.Exit, typer.Abort):
+        # click.exceptions.Exit/Abort are RuntimeError subclasses, so without
+        # this clause the broad except below would catch the deliberate
+        # `raise typer.Exit(1)` above (empty results) and report it as a
+        # crash: bogus "Unexpected error" text plus a traceback log file for
+        # a perfectly normal "no flights matched" outcome.
+        raise
     except Exception as e:  # noqa: BLE001 — fall back to clean reporting
         if output_format == OutputFormat.JSON:
             payload_info = json_error_payload(e, command="flights")
