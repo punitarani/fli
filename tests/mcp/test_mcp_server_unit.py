@@ -605,3 +605,22 @@ class TestExecuteBookingOptions:
         assert "booking_url" in result
         assert "note" in result
         assert "booking_url" in result["note"]
+
+
+class TestDateSearchCapSurfacing:
+    """The per-search date cap reaches the MCP caller as a plain error string."""
+
+    def test_over_the_cap_returns_a_readable_error(self):
+        from fli.mcp.server import DateSearchParams, _execute_date_search
+
+        params = DateSearchParams(
+            origin="JFK",
+            destination="LHR",
+            start_date="2026-02-01",
+            end_date="2026-12-01",
+        )
+        result = _execute_date_search(params)
+
+        assert result["success"] is False
+        assert "93-date limit" in result["error"]
+        assert result["dates"] == []

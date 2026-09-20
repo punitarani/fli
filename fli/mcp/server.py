@@ -199,7 +199,12 @@ class DateSearchParams(BaseModel):
         description="Arrival airport IATA code(s), comma-separated for multiple (e.g., 'LHR,CDG')"
     )
     start_date: str = Field(description="Start of date range in YYYY-MM-DD format")
-    end_date: str = Field(description="End of date range in YYYY-MM-DD format")
+    end_date: str = Field(
+        description=(
+            "End of date range in YYYY-MM-DD format. A range may span at most 93 dates; "
+            "each date costs its own page fetch."
+        )
+    )
     trip_duration: int = Field(
         3, ge=1, description="Trip duration in days (for round-trip searches)"
     )
@@ -1087,7 +1092,15 @@ def search_dates(
         ),
     ],
     start_date: Annotated[str, Field(description="Start of date range in YYYY-MM-DD format")],
-    end_date: Annotated[str, Field(description="End of date range in YYYY-MM-DD format")],
+    end_date: Annotated[
+        str,
+        Field(
+            description=(
+                "End of date range in YYYY-MM-DD format. A range may span at most 93 dates; "
+                "each date costs its own page fetch."
+            )
+        ),
+    ],
     trip_duration: Annotated[
         int,
         Field(description="Trip duration in days for round-trips", ge=1),
