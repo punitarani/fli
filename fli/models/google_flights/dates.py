@@ -1,6 +1,6 @@
 import json
 import urllib.parse
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from enum import Enum
 
 from pydantic import (
@@ -25,6 +25,7 @@ from fli.models.google_flights.base import (
     SeatType,
     TripType,
     earliest_searchable_date,
+    utc_today,
 )
 
 MAX_PAST_FROM_DATE_DAYS = 6
@@ -137,7 +138,7 @@ class DateSearchFilters(BaseModel):
         to_date = self.parsed_to_date.date()
         # The clamp target is plain "today", not the rejection floor: anchoring it
         # to earliest_searchable_date() would widen MAX_PAST_FROM_DATE_DAYS by a day.
-        current_date = datetime.now(timezone.utc).date()
+        current_date = utc_today()
 
         if from_date < current_date:
             delta = current_date - from_date

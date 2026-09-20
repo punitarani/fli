@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from fli.core import extract_currency_from_price_token
 from fli.models import DateSearchFilters
-from fli.models.google_flights.base import TripType
+from fli.models.google_flights.base import TripType, earliest_searchable_date
 from fli.search._concurrency import parallel_map
 from fli.search._decoders import parse_flight_row
 from fli.search._tfs import build_tfs, extract_payload, page_url, unsupported_filters
@@ -222,8 +222,10 @@ class SearchDates:
 
         # A date sweep can straddle today, and past dates are simply not
         # bookable — skip them rather than letting the segment validator
-        # abort the whole chunk.
-        if day.date() < datetime.now().date():
+        # abort the whole chunk. The floor is the same one the filter models
+        # validate against, so a date the models accept is never silently
+        # dropped here.
+        if day.date() < earliest_searchable_date():
             return None
 
         url = page_url(build_tfs(filters, travel_dates=travel_dates), currency, language, country)

@@ -53,6 +53,19 @@ TFS_MULTI_AIRPORT = (
 OUTBOUND_DATE = "2026-09-15"
 RETURN_DATE = "2026-09-19"
 
+# The travel dates above are part of the captured tokens, so they can't be
+# made relative — but the filter models reject a date in the past, which
+# would have made this whole module start failing on 2026-09-16. Pin the
+# models' clock to the capture date instead, so the assertions hold on any
+# calendar date the suite runs on.
+CAPTURE_DATE = "2026-08-26"
+
+
+@pytest.fixture(autouse=True)
+def _pinned_clock(pin_today):
+    """Freeze "today" at the date the ``tfs`` fixtures were captured."""
+    pin_today(CAPTURE_DATE)
+
 
 def _filters(segments, **kwargs) -> FlightSearchFilters:
     """Build filters over ``(origin, destination, date)`` triples."""
