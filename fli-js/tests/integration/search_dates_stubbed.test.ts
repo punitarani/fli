@@ -463,7 +463,7 @@ describe("SearchDates failure reporting", () => {
   });
 });
 
-describe("SearchDates mostly-failed sweeps (T20)", () => {
+describe("SearchDates mostly-failed sweeps", () => {
   // The breaker cannot catch "1 loaded, 29 timeouts": it disarms for good
   // the moment any page loads, empty or not. If nothing priced and at least
   // half the attempted dates never made it to a page, that is raised too —

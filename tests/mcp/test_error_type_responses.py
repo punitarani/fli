@@ -5,9 +5,9 @@ key (`flights` / `dates` / `options`) must be byte-identical to what they
 were before this change — these tests assert the new keys are *added*, not
 that the old ones changed.
 
-T10 fix round 3: dates are computed relative to `datetime.now()` at
-test-run time rather than pinned to a fixed clock, per the same fix
-applied to `tests/core/test_error_type_parity.py` — see that file's
+Dates are computed relative to `datetime.now()` at test-run time rather
+than pinned to a fixed clock, per the same fix applied to
+`tests/core/test_error_type_parity.py` — see that file's
 docstring for why a fixed pinned clock paired with fixed future dates is
 fragile (it can silently stop exercising the intended code path without
 any test failure to flag it).
@@ -56,7 +56,7 @@ def _raiser(exc: BaseException):
 _SEARCH_CLIENT_ERROR_CASES = [
     pytest.param(SearchTimeoutError("slow"), "timeout", True, id="timeout"),
     pytest.param(SearchConnectionError("no route"), "connection_error", True, id="connection"),
-    # Carried forward from PR #164 (T23): a TLS certificate failure must be
+    # Carried forward from PR #164: a TLS certificate failure must be
     # visible to MCP clients as its own, non-retryable error_type — not
     # folded into its retryable parent, connection_error.
     pytest.param(

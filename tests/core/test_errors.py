@@ -7,11 +7,10 @@ time (see TestEverySearchClientErrorSubclassIsClassified) instead of
 hand-listing the classes — a new subclass shows up in the parametrize
 list automatically and fails until _EXPECTED is updated for it.
 
-classify_error moved here (from fli/mcp/errors.py) in T10 fix round 1: a
-review found fli.cli.errors.json_error_payload already emitted an
-error_type field with a different vocabulary for the same exceptions, so
-the classifier now lives in fli.core and is shared by both fli.mcp.server
-and fli.cli.errors — see fli/core/errors.py's module docstring for the
+classify_error moved here (from fli/mcp/errors.py): fli.cli.errors.json_error_payload
+already emitted an error_type field with a different vocabulary for the same
+exceptions, so the classifier now lives in fli.core and is shared by both
+fli.mcp.server and fli.cli.errors — see fli/core/errors.py's module docstring for the
 full history and vocabulary table. tests/core/test_error_type_parity.py
 covers the "CLI and MCP agree" half of that; this file covers the
 classifier itself.

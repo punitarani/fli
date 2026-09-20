@@ -360,7 +360,7 @@ class TestClientSideFiltersApplyToDates:
 
 
 # ---------------------------------------------------------------------------
-# Transient pages without a ds:1 payload (fix round 1, F2)
+# Transient pages without a ds:1 payload
 # ---------------------------------------------------------------------------
 
 
@@ -430,7 +430,7 @@ class TestTransientPageRetry:
 
 
 # ---------------------------------------------------------------------------
-# Per-date processing must be total (fix round 1, R5)
+# Per-date processing must be total
 # ---------------------------------------------------------------------------
 
 
@@ -468,7 +468,7 @@ class TestPerDateProcessingIsTotal:
 
 
 # ---------------------------------------------------------------------------
-# Circuit breaker for a sweep that is failing deterministically (round 2, N4)
+# Circuit breaker for a sweep that is failing deterministically
 # ---------------------------------------------------------------------------
 
 
@@ -724,7 +724,7 @@ class TestSweepCircuitBreaker:
 
 
 # ---------------------------------------------------------------------------
-# A sweep that mostly failed to load must not read as "no flights" (T20)
+# A sweep that mostly failed to load must not read as "no flights"
 # ---------------------------------------------------------------------------
 
 

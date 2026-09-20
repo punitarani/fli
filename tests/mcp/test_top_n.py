@@ -132,9 +132,8 @@ class TestTopNBoundsRejectedByMcpTools:
     ``fli.core.errors.classify_error``, the same path the CLI's
     ``--format json`` output goes through.
 
-    Fix round 1 (reviewer audit of I1's loose-substring pattern): the bound
-    check raising before ``_fetch_flights`` is reached is exactly the
-    behavior under test, not a safe assumption to lean on for test hygiene —
+    The bound check raising before ``_fetch_flights`` is reached is exactly
+    the behavior under test, not a safe assumption to lean on for test hygiene —
     an autouse guard makes a reverted bound check fail loudly here instead
     of silently making a real network call. The message assertions check
     the specific bound wording ("between 1 and 10"), not a bare "top_n"

@@ -407,13 +407,12 @@ def test_dates_over_the_cap_reports_cleanly(runner, mock_console):
 def test_dates_over_the_cap_json(runner, mock_console):
     """The same cap error is a structured JSON error, not a crash.
 
-    T10 fix round 2, maintainer ruling U1: this is a bare ``ValueError``
-    raised by ``SearchDates.search()`` with no mocking involved — it used
-    to hit the CLI's ``except (AttributeError, ValueError)`` block and get
-    hardcoded ``error_type="search_error"``. It's now routed through the
-    shared classifier and reports ``validation_error`` (deliberate
-    behaviour change, see the report's "Behaviour changes" section) plus
-    the new ``retryable`` field.
+    This is a bare ``ValueError`` raised by ``SearchDates.search()`` with
+    no mocking involved — it used to hit the CLI's
+    ``except (AttributeError, ValueError)`` block and get hardcoded
+    ``error_type="search_error"``. It's now routed through the shared
+    classifier and reports ``validation_error`` (a deliberate behaviour
+    change) plus the new ``retryable`` field.
     """
     from_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
     to_date = (datetime.now() + timedelta(days=200)).strftime("%Y-%m-%d")
@@ -452,8 +451,8 @@ def test_dates_json_invalid_airport_code(runner, mock_search_dates, mock_console
         # Released v0.9.0 CLI --format json values — must not move.
         pytest.param(SearchTimeoutError("slow"), "timeout", True, id="timeout"),
         pytest.param(SearchConnectionError("no route"), "connection_error", True, id="connection"),
-        # Fix round 1 (I3): certificate_error is a SearchConnectionError
-        # subclass but, unlike its parent, deterministic — not retryable.
+        # certificate_error is a SearchConnectionError subclass but, unlike
+        # its parent, deterministic — not retryable.
         pytest.param(
             SearchCertificateError("bad cert"), "certificate_error", False, id="certificate"
         ),
@@ -462,10 +461,10 @@ def test_dates_json_invalid_airport_code(runner, mock_search_dates, mock_console
             SearchClientError("generic"), "search_error", False, id="generic-search-error"
         ),
         pytest.param(RuntimeError("bug"), "unexpected_error", False, id="unexpected"),
-        # Gained in T10 fix round 2 (U1): a bare AttributeError used to be
-        # hardcoded to "search_error" by the (AttributeError, ValueError)
-        # block; it isn't a SearchClientError or input-validation failure,
-        # so the shared classifier now calls it unexpected_error.
+        # A bare AttributeError used to be hardcoded to "search_error" by
+        # the (AttributeError, ValueError) block; it isn't a
+        # SearchClientError or input-validation failure, so the shared
+        # classifier now calls it unexpected_error.
         pytest.param(
             AttributeError("'NoneType' object has no attribute 'name'"),
             "unexpected_error",

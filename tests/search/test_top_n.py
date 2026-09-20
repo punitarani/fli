@@ -47,7 +47,7 @@ def _future(days: int) -> str:
 def _result(dep: Airport, arr: Airport, hour: int = 9) -> FlightResult:
     # hour stays well under 24 for every caller below (max 6 + 9 = 15), so a
     # plain ``hour + 3`` arrival never needs to roll over into the next day.
-    # Relative to "now" (fix round 1, I3) — this is leg metadata for a
+    # Relative to "now" — this is leg metadata for a
     # fabricated FlightResult, not a search filter's travel_date, but the
     # file's own rule (never a literal calendar date) still applies to it.
     departure = (datetime.now() + timedelta(days=35)).replace(
@@ -137,16 +137,15 @@ class TestTopNBoundsValidation:
 
 
 class TestTopNTypeValidation:
-    """Fix round 1, C1/I2: non-int top_n (and bool) must raise ValueError, not TypeError.
+    """Non-int top_n (and bool) must raise ValueError, not TypeError.
 
     A bare ``if not 1 <= top_n <= 10:`` comparison against a non-comparable
     type (``"5"``, ``None``) raises ``TypeError`` from Python itself, which
     ``classify_error()`` does NOT map to ``validation_error`` (it only
     matches ``ValidationError | ValueError``) — so it would have surfaced as
     ``unexpected_error`` instead. ``bool`` is an ``int`` subclass in Python
-    (``True == 1``), so it silently passed the old bound check too; the
-    ruling for this fix is to reject it explicitly rather than accept it as
-    1.
+    (``True == 1``), so it silently passed the old bound check too; this
+    rejects it explicitly rather than accepting it as 1.
     """
 
     @pytest.mark.parametrize("bad_top_n", ["5", 5.0, None, True, False])

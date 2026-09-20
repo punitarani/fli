@@ -146,12 +146,11 @@ class TestTopNBoundsRejectedByCli:
     def test_out_of_range_top_n_is_a_clean_error(self, runner, mock_console, bad_top_n):
         result = runner.invoke(app, _round_trip_args("--top-n", bad_top_n))
         assert result.exit_code == 1
-        # Fix round 1 (reviewer I1): assert the specific bound-check wording, not a
-        # bare "top_n" substring — the _guard_against_network fixture's own
+        # Assert the specific bound-check wording, not a bare "top_n"
+        # substring — the _guard_against_network fixture's own
         # AssertionError message ("_fetch_flights should not be reached for a bad
-        # top_n") also contains "top_n", so a loose check here stayed green even
-        # with the production bound check fully reverted (see the round-1 report's
-        # RED->GREEN evidence for this exact test).
+        # top_n") also contains "top_n", so a loose check here would stay green
+        # even with the production bound check fully reverted.
         assert "between 1 and 10" in result.output
 
     @pytest.mark.parametrize("bad_top_n", ["0", "11"])
