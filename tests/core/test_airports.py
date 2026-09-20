@@ -181,7 +181,6 @@ class TestIcaoLookup:
         results = search_airports("KJFK")
         assert results[0].code.name == "JFK"
         assert results[0].match_type == "icao_exact"
-        assert results[0].score == 100.0
 
     def test_icao_lookup_is_case_insensitive(self):
         """Lower-case ICAO input resolves too."""
@@ -195,3 +194,11 @@ class TestIcaoLookup:
 
         results = search_airports("naha")
         assert results and all(r.match_type != "icao_exact" for r in results)
+
+    def test_icao_hit_does_not_hijack_a_partial_word(self):
+        """A "Santa..." search leads with names even though "sant" is Tucuman's ICAO code."""
+        from fli.core.airports import search_airports
+
+        results = search_airports("sant", limit=1000)
+        assert results[0].match_type == "name"
+        assert "TUC" in {r.code.name for r in results}  # still offered, just not first

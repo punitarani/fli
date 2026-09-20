@@ -103,7 +103,7 @@ def resolve_airport(code: str) -> Airport:
     airport_code = code.upper()
 
     if len(airport_code) == 4 and airport_code.isalpha():
-        mapped = _load_icao_mapping().get(airport_code)
+        mapped = icao_to_iata(airport_code)
         if mapped is None:
             raise ParseError(
                 f"Unknown ICAO code: '{code}'. Not found in the ICAO-to-IATA mapping table."
