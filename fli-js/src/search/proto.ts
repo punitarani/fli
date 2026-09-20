@@ -355,6 +355,159 @@ export interface BuildTfsTokenOptions {
   seat?: number;
 }
 
+// `tfs` is the itinerary parameter shared by booking deep links and the
+// public search page. Both builders below write the same message, so the
+// field layout lives here once:
+//
+//   1  = 28 (constant)          8  = passenger kind, repeated
+//   2  = 2 (constant)           9  = cabin class
+//   3  = segment, repeated      14 = 1 (constant)
+//   3.2  = departure date       16 = max-uint64 pin (deep links only)
+//   3.4  = selected leg, rep.   19 = 2 one-way / multi-city, 1 round-trip
+//   3.5  = stop ceiling
+//   3.6  = carrier include, repeated (IATA code or alliance name)
+//   3.7  = carrier exclude, repeated (same values as 3.6)
+//   3.13 = origin  3.14 = destination
+//   3.15 = layover airport include, repeated
+//   3.17 = min layover minutes  3.18 = max layover minutes
+//
+// Reverse-engineered from live browser captures; 1:1 with the Python
+// `fli/search/_proto.py`.
+
+const MAX_U64 = (1n << 64n) - 1n;
+
+/** Optional per-segment restrictions Google reads out of the `tfs` segment. */
+export interface EncodeTfsSegmentOptions {
+  /**
+   * Physical flights pinned for this direction, if any. Supplying them
+   * narrows a search to itineraries that include them — that is how a
+   * round-trip search asks for return options against a chosen outbound.
+   */
+  legs?: readonly LegSpec[];
+  /**
+   * Stop ceiling, zero-based (`0` = non-stop, `1` = one stop or fewer).
+   * `null`/`undefined` leaves the search unconstrained; passing `0` for
+   * "any" would pin it to non-stop instead.
+   */
+  maxStops?: number | null;
+  /**
+   * Only itineraries on these carriers. Google takes airline IATA codes
+   * and alliance names (`"STAR_ALLIANCE"`) in the same list.
+   */
+  carriers?: readonly string[];
+  /** The same values, as an exclude list. */
+  carriersExclude?: readonly string[];
+  /** Only these airports may be used as layover stops. */
+  layoverAirports?: readonly string[];
+  /** Minimum layover wait, in minutes. */
+  minLayover?: number | null;
+  /** Maximum layover wait, in minutes. */
+  maxLayover?: number | null;
+}
+
+/**
+ * Encode one travel direction of a `tfs` itinerary.
+ *
+ * @param origin IATA code (or codes) the direction departs from.
+ * @param dest IATA code (or codes) the direction arrives at.
+ * @param date Departure date in `YYYY-MM-DD` format.
+ * @returns The length-delimited field 3 bytes for this segment.
+ */
+export function encodeTfsSegment(
+  origin: string | readonly string[],
+  dest: string | readonly string[],
+  date: string,
+  options: EncodeTfsSegmentOptions = {},
+): Uint8Array {
+  const {
+    legs = [],
+    maxStops = null,
+    carriers = [],
+    carriersExclude = [],
+    layoverAirports = [],
+    minLayover = null,
+    maxLayover = null,
+  } = options;
+
+  let body = lengthDelim(2, utf8.encode(date));
+  if (maxStops != null) body = concatBytes(body, varintField(5, maxStops));
+  for (const code of carriers) body = concatBytes(body, lengthDelim(6, utf8.encode(code)));
+  for (const code of carriersExclude) body = concatBytes(body, lengthDelim(7, utf8.encode(code)));
+  for (const leg of legs) {
+    body = concatBytes(
+      body,
+      lengthDelim(
+        4,
+        concatBytes(
+          lengthDelim(1, utf8.encode(leg.origin)),
+          lengthDelim(2, utf8.encode(leg.depDate)),
+          lengthDelim(3, utf8.encode(leg.dest)),
+          lengthDelim(5, utf8.encode(leg.airline)),
+          lengthDelim(6, utf8.encode(leg.flightNumber)),
+        ),
+      ),
+    );
+  }
+  for (const code of typeof origin === "string" ? [origin] : origin) {
+    body = concatBytes(
+      body,
+      lengthDelim(13, concatBytes(varintField(1, 1), lengthDelim(2, utf8.encode(code)))),
+    );
+  }
+  for (const code of typeof dest === "string" ? [dest] : dest) {
+    body = concatBytes(
+      body,
+      lengthDelim(14, concatBytes(varintField(1, 1), lengthDelim(2, utf8.encode(code)))),
+    );
+  }
+  for (const code of layoverAirports) body = concatBytes(body, lengthDelim(15, utf8.encode(code)));
+  if (minLayover != null) body = concatBytes(body, varintField(17, minLayover));
+  if (maxLayover != null) body = concatBytes(body, varintField(18, maxLayover));
+  return lengthDelim(3, body);
+}
+
+/** Envelope options for {@link encodeTfsPayload}. */
+export interface EncodeTfsPayloadOptions {
+  /**
+   * `true` for one-way, `false` for round-trip. Controls field 19.
+   * Multi-city is a third value (3) that the search page cannot serve.
+   */
+  isOneWay: boolean;
+  /**
+   * Passenger kind codes, one entry per traveller (1 = adult, 2 = child,
+   * 3 = infant on lap, 4 = infant in own seat). The two infant codes are
+   * the ones to get right: a lap infant prices at ~10% of the adult fare
+   * and an infant in its own seat at ~100%, and transposing them produces
+   * a plausible wrong quote rather than an error.
+   */
+  passengers?: readonly number[];
+  /** Cabin class (1 = economy, 2 = premium, 3 = business, 4 = first). */
+  seat?: number;
+  /**
+   * Emit the field 16 constant that booking deep links carry. The search
+   * page does not need it.
+   */
+  pinMaxU64?: boolean;
+}
+
+/**
+ * Wrap encoded segments in the `tfs` envelope and base64 it.
+ *
+ * @param segments Concatenated output of {@link encodeTfsSegment}.
+ * @returns URL-safe base64 string with padding stripped.
+ */
+export function encodeTfsPayload(segments: Uint8Array, options: EncodeTfsPayloadOptions): string {
+  const { isOneWay, passengers = [1], seat = 1, pinMaxU64 = false } = options;
+  let payload = concatBytes(varintField(1, 28), varintField(2, 2), segments);
+  for (const kind of passengers) payload = concatBytes(payload, varintField(8, kind));
+  payload = concatBytes(payload, varintField(9, seat), varintField(14, 1));
+  if (pinMaxU64) {
+    payload = concatBytes(payload, lengthDelim(16, concatBytes(tag(1, 0), varintBig(MAX_U64))));
+  }
+  payload = concatBytes(payload, varintField(19, isOneWay ? 2 : 1));
+  return toUrlsafeB64(payload);
+}
+
 /**
  * Build the `tfs` query parameter for a Google Flights deep-link URL.
  *
@@ -378,41 +531,13 @@ export function buildTfsToken(segments: LegSpec[][], options: BuildTfsTokenOptio
 
   let segmentProtos: Uint8Array = new Uint8Array(0);
   for (const seg of segments) {
-    let legsProto: Uint8Array = new Uint8Array(0);
-    for (const leg of seg) {
-      const legProto = concatBytes(
-        lengthDelim(1, utf8.encode(leg.origin)),
-        lengthDelim(2, utf8.encode(leg.depDate)),
-        lengthDelim(3, utf8.encode(leg.dest)),
-        lengthDelim(5, utf8.encode(leg.airline)),
-        lengthDelim(6, utf8.encode(leg.flightNumber)),
-      );
-      legsProto = concatBytes(legsProto, lengthDelim(4, legProto));
-    }
-
     const first = seg[0] as LegSpec;
     const last = seg[seg.length - 1] as LegSpec;
-    const segProto = concatBytes(
-      lengthDelim(2, utf8.encode(first.depDate)),
-      legsProto,
-      lengthDelim(13, concatBytes(varintField(1, 1), lengthDelim(2, utf8.encode(first.origin)))),
-      lengthDelim(14, concatBytes(varintField(1, 1), lengthDelim(2, utf8.encode(last.dest)))),
+    segmentProtos = concatBytes(
+      segmentProtos,
+      encodeTfsSegment(first.origin, last.dest, first.depDate, { legs: seg }),
     );
-    segmentProtos = concatBytes(segmentProtos, lengthDelim(3, segProto));
   }
 
-  const MAX_U64 = (1n << 64n) - 1n;
-  const f19 = isOneWay ? 2 : 1;
-
-  const payload = concatBytes(
-    varintField(1, 28),
-    varintField(2, 2),
-    segmentProtos,
-    varintField(8, 1),
-    varintField(9, seat), // 1=economy 2=premium 3=business 4=first
-    varintField(14, 1),
-    lengthDelim(16, concatBytes(tag(1, 0), varintBig(MAX_U64))),
-    varintField(19, f19),
-  );
-  return toUrlsafeB64(payload);
+  return encodeTfsPayload(segmentProtos, { isOneWay, seat, pinMaxU64: true });
 }
