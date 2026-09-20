@@ -45,3 +45,10 @@ class TestAirlineNoAliases:
 
     def test_no_aliases(self):
         assert len(Airline.__members__) == len(list(Airline))
+
+
+def test_w4_is_wizz_air():
+    """IATA reassigned W4 from the defunct LC Péru to Wizz Air (issue #127)."""
+    from fli.models import Airline, display_name
+
+    assert display_name(Airline.W4) == "Wizz Air"

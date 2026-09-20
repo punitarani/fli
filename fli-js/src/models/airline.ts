@@ -752,7 +752,7 @@ export const AIRLINE_NAMES: Record<string, string> = {
   W1: "WorldTicket",
   W2: "Flexflight",
   W3: "Arik Air",
-  W4: "LC Péru",
+  W4: "Wizz Air (W4)",
   W5: "Mahan Airlines",
   W6: "Wizz Air (W6)",
   W7: "Sayakhat Airlines",
