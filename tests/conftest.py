@@ -43,14 +43,25 @@ def pytest_addoption(parser) -> None:
     parser.addoption("--fuzz", action="store_true", help="Run fuzz tests")
     parser.addoption("--mcp", action="store_true", help="Run MCP tests")
     parser.addoption("--all", action="store_true", help="Run all tests")
+    parser.addoption(
+        "--live",
+        action="store_true",
+        help="Run tests marked 'live' that hit the real Google Flights network",
+    )
 
 
 def pytest_runtest_setup(item) -> None:
-    """Skip fuzz tests unless --fuzz or --all is specified."""
+    """Skip fuzz tests unless --fuzz or --all is specified; skip live tests unless --live."""
     fuzz_marker = item.get_closest_marker("fuzz")
     if fuzz_marker is not None:
         if not item.config.getoption("--fuzz") and not item.config.getoption("--all"):
             pytest.skip("need --fuzz or --all option to run this test")
+
+    # --all deliberately does NOT imply --live: CI runs with --all, and live
+    # tests hit the real network (flaky by nature), so they must opt in
+    # separately via --live. See the scheduled live-canary workflow.
+    if item.get_closest_marker("live") is not None and not item.config.getoption("--live"):
+        pytest.skip("need --live option to run this test (hits the real network)")
 
 
 def pytest_collection_modifyitems(config, items) -> None:

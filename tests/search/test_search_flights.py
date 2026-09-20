@@ -187,6 +187,9 @@ INFANT_RESULTS_MISSING = pytest.mark.xfail(
 )
 
 
+# The `search` fixture above is a bare SearchFlights() with no HTTP mocking,
+# so both tests below hit the real Google Flights network.
+@pytest.mark.live
 @pytest.mark.parametrize(
     "search_params_fixture",
     [
@@ -201,6 +204,7 @@ def test_search_functionality(search, search_params_fixture, request):
     assert isinstance(results, list)
 
 
+@pytest.mark.live
 @INFANT_RESULTS_MISSING
 def test_multiple_searches(search, basic_search_params, complex_search_params):
     """Test performing multiple searches with the same Search instance."""

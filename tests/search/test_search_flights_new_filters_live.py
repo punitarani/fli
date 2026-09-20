@@ -28,6 +28,8 @@ from fli.models import (
 )
 from fli.search import SearchFlights
 
+pytestmark = pytest.mark.live
+
 
 def _future(days: int) -> str:
     return (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
