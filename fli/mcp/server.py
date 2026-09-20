@@ -40,6 +40,7 @@ from fli.models import (
     TripType,
 )
 from fli.search import SearchDates, SearchFlights
+from fli.search.dates import MAX_DATES_PER_SEARCH
 
 
 class FlightSearchConfig(BaseSettings):
@@ -96,6 +97,12 @@ mcp = FastMCP(
 # Request/Response Models
 # =============================================================================
 
+# Filters the API surface still accepts but the current transport cannot
+# honour (see "Search transport" in README.md). Spelled out in every
+# parameter description because an LLM caller reads the tool schema, not the
+# README.
+_IGNORED_BY_TRANSPORT = "Currently ignored by the search-page transport (logged as a warning)."
+
 
 class FlightSearchParams(BaseModel):
     """Parameters for searching flights on a specific date."""
@@ -138,13 +145,23 @@ class FlightSearchParams(BaseModel):
     )
     infants_on_lap: int = Field(0, ge=0, description="Number of lap infants (under 2, no seat)")
     exclude_basic_economy: bool = Field(
-        False, description="Exclude basic economy fares from results"
+        False,
+        description=f"Exclude basic economy fares from results. {_IGNORED_BY_TRANSPORT}",
     )
-    emissions: str = Field("ALL", description="Filter by emissions level: ALL or LESS")
+    emissions: str = Field(
+        "ALL",
+        description=f"Filter by emissions level: ALL or LESS. {_IGNORED_BY_TRANSPORT}",
+    )
     checked_bags: int = Field(
-        0, ge=0, le=2, description="Number of checked bags to include in price (0, 1, or 2)"
+        0,
+        ge=0,
+        le=2,
+        description=f"Number of checked bags in price (0-2). {_IGNORED_BY_TRANSPORT}",
     )
-    carry_on: bool = Field(False, description="Include carry-on bag fee in displayed price")
+    carry_on: bool = Field(
+        False,
+        description=f"Include carry-on bag fee in displayed price. {_IGNORED_BY_TRANSPORT}",
+    )
     show_all_results: bool = Field(
         True, description="Return all available results instead of curated ~30"
     )
@@ -201,8 +218,8 @@ class DateSearchParams(BaseModel):
     start_date: str = Field(description="Start of date range in YYYY-MM-DD format")
     end_date: str = Field(
         description=(
-            "End of date range in YYYY-MM-DD format. A range may span at most 93 dates; "
-            "each date costs its own page fetch."
+            "End of date range in YYYY-MM-DD format. A range may span at most "
+            f"{MAX_DATES_PER_SEARCH} dates; each date costs its own page fetch."
         )
     )
     trip_duration: int = Field(
@@ -971,19 +988,23 @@ def search_flights(
     ] = 0,
     exclude_basic_economy: Annotated[
         bool,
-        Field(description="Exclude basic economy fares from results"),
+        Field(description=f"Exclude basic economy fares from results. {_IGNORED_BY_TRANSPORT}"),
     ] = False,
     emissions: Annotated[
         str,
-        Field(description="Filter by emissions level: ALL or LESS"),
+        Field(description=f"Filter by emissions level: ALL or LESS. {_IGNORED_BY_TRANSPORT}"),
     ] = "ALL",
     checked_bags: Annotated[
         int,
-        Field(description="Number of checked bags to include in price (0, 1, or 2)", ge=0, le=2),
+        Field(
+            description=f"Number of checked bags in price (0-2). {_IGNORED_BY_TRANSPORT}",
+            ge=0,
+            le=2,
+        ),
     ] = 0,
     carry_on: Annotated[
         bool,
-        Field(description="Include carry-on bag fee in displayed price"),
+        Field(description=f"Include carry-on bag fee in displayed price. {_IGNORED_BY_TRANSPORT}"),
     ] = False,
     show_all_results: Annotated[
         bool,
@@ -1096,8 +1117,8 @@ def search_dates(
         str,
         Field(
             description=(
-                "End of date range in YYYY-MM-DD format. A range may span at most 93 dates; "
-                "each date costs its own page fetch."
+                "End of date range in YYYY-MM-DD format. A range may span at most "
+                f"{MAX_DATES_PER_SEARCH} dates; each date costs its own page fetch."
             )
         ),
     ],
@@ -1279,7 +1300,7 @@ def get_booking_options(
     ] = None,
     exclude_basic_economy: Annotated[
         bool,
-        Field(description="Exclude basic economy fares from results"),
+        Field(description=f"Exclude basic economy fares from results. {_IGNORED_BY_TRANSPORT}"),
     ] = False,
     currency: Annotated[
         str | None,
@@ -1326,15 +1347,19 @@ def get_booking_options(
     ] = None,
     emissions: Annotated[
         str,
-        Field(description="Filter by emissions level: ALL or LESS"),
+        Field(description=f"Filter by emissions level: ALL or LESS. {_IGNORED_BY_TRANSPORT}"),
     ] = "ALL",
     checked_bags: Annotated[
         int,
-        Field(description="Number of checked bags to include in price (0, 1, or 2)", ge=0, le=2),
+        Field(
+            description=f"Number of checked bags in price (0-2). {_IGNORED_BY_TRANSPORT}",
+            ge=0,
+            le=2,
+        ),
     ] = 0,
     carry_on: Annotated[
         bool,
-        Field(description="Include carry-on bag fee in displayed price"),
+        Field(description=f"Include carry-on bag fee in displayed price. {_IGNORED_BY_TRANSPORT}"),
     ] = False,
 ) -> dict[str, Any]:
     """Get bookable fares (vendor names, prices, and direct booking URLs) for a flight.
