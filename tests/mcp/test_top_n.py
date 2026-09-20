@@ -130,10 +130,23 @@ class TestTopNBoundsRejectedByMcpTools:
     actually exercises the library's own bound-check ``ValueError`` — see
     ``fli/search/flights.py`` — flowing through the shared
     ``fli.core.errors.classify_error``, the same path the CLI's
-    ``--format json`` output goes through. No mocking means no accidental
-    network call either: the bound check raises before ``_fetch_flights``
-    is ever reached.
+    ``--format json`` output goes through.
+
+    Fix round 1 (reviewer audit of I1's loose-substring pattern): the bound
+    check raising before ``_fetch_flights`` is reached is exactly the
+    behavior under test, not a safe assumption to lean on for test hygiene —
+    an autouse guard makes a reverted bound check fail loudly here instead
+    of silently making a real network call. The message assertions check
+    the specific bound wording ("between 1 and 10"), not a bare "top_n"
+    substring the guard's own AssertionError could also satisfy.
     """
+
+    @pytest.fixture(autouse=True)
+    def _guard_against_network(self, monkeypatch):
+        def _unexpected_call(*_args, **_kwargs):
+            raise AssertionError("_fetch_flights should not be reached for a bad top_n")
+
+        monkeypatch.setattr("fli.mcp.server.SearchFlights._fetch_flights", _unexpected_call)
 
     @pytest.mark.parametrize("bad_top_n", [0, 11])
     def test_search_flights_rejects_out_of_range_top_n(self, bad_top_n):
@@ -142,7 +155,7 @@ class TestTopNBoundsRejectedByMcpTools:
         assert result["success"] is False
         assert result["error_type"] == "validation_error"
         assert result["retryable"] is False
-        assert "top_n" in result["error"]
+        assert "between 1 and 10" in result["error"]
 
     @pytest.mark.parametrize("bad_top_n", [0, 11])
     def test_get_booking_options_rejects_out_of_range_top_n(self, bad_top_n):
@@ -151,4 +164,4 @@ class TestTopNBoundsRejectedByMcpTools:
         assert result["success"] is False
         assert result["error_type"] == "validation_error"
         assert result["retryable"] is False
-        assert "top_n" in result["error"]
+        assert "between 1 and 10" in result["error"]

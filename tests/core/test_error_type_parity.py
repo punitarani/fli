@@ -293,8 +293,9 @@ class TestCliCommandAndMcpToolAgreeOnErrorType:
         assert mcp_result["success"] is False
         assert cli_payload["error"]["type"] == mcp_result["error_type"] == "validation_error"
         assert cli_payload["error"]["retryable"] == mcp_result["retryable"] is False
-        assert "top_n" in cli_payload["error"]["message"]
-        assert "top_n" in mcp_result["error"]
+        # Specific bound wording, not a bare "top_n" substring (fix round 1, I1 audit).
+        assert "between 1 and 10" in cli_payload["error"]["message"]
+        assert "between 1 and 10" in mcp_result["error"]
 
     def test_invalid_passenger_mix(self, runner):
         """1 adult + 2 lap infants (each needs its own adult): pydantic ValidationError."""
