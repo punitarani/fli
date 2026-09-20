@@ -650,6 +650,76 @@ class TestDateSearchCapSurfacing:
 class TestLiveSearchAssertionHelper:
     """`assert_live_search` must skip transport failures and fail real ones."""
 
+    @staticmethod
+    def _failure(message: str) -> dict:
+        return {"success": False, "error": f"Search failed: {message}", "flights": []}
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            # Every string below is produced verbatim by the library today.
+            "Search page carried no ds:1 payload — Google may have changed the "
+            "page shape, or served a consent/blocked page instead.",
+            "Google Flights declined the request (error 13) and returned no data.",
+            "Timed out talking to Google Flights (www.google.com).",
+            "Could not reach Google Flights (www.google.com).",
+            "Google Flights returned an error response (HTTP 429).",
+            "Priced 0 of 8 dates — every date in the range failed. Reasons: …",
+        ],
+        ids=["no-payload", "rejected", "timeout", "connection", "http-429", "sweep-total"],
+    )
+    def test_real_transport_messages_skip(self, message):
+        import _pytest.outcomes
+
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        with pytest.raises(_pytest.outcomes.Skipped):
+            assert_live_search(self._failure(message), results_key="flights", trip_type="ONE_WAY")
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            # A pydantic ValidationError always ends with this URL. The old
+            # rule matched the bare substring "http" inside it and skipped.
+            "1 validation error for FlightLeg\narrival_datetime\n  Input should be a "
+            "valid datetime [type=datetime_type]\n  For further information visit "
+            "https://errors.pydantic.dev/2.11/v/datetime_type",
+            "Parsed 0/20 flight rows — Google response shape may have changed "
+            "(sample reasons: ValueError: price field is not numeric)",
+            "Shopping response shape changed — no flights array at inner[2]/[3]: "
+            "list index out of range",
+            "TypeError: 'NoneType' object is not subscriptable",
+        ],
+        ids=["pydantic-url", "zero-rows-parsed", "shape-changed", "type-error"],
+    )
+    def test_parse_and_code_failures_still_fail(self, message):
+        """A decoder regression must never hide behind the transport skip."""
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        with pytest.raises(AssertionError, match="non-transport reason"):
+            assert_live_search(self._failure(message), results_key="flights", trip_type="ONE_WAY")
+
+    def test_parse_wording_wins_over_transport_wording(self):
+        """Mentioning both must fail, not skip — the parse half is the real news."""
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        message = (
+            "Search page carried no ds:1 payload; also 1 validation error for "
+            "FlightLeg, see https://errors.pydantic.dev/2.11/v/datetime_type"
+        )
+        with pytest.raises(AssertionError, match="non-transport reason"):
+            assert_live_search(self._failure(message), results_key="flights", trip_type="ONE_WAY")
+
+    def test_wrong_success_shape_fails(self):
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        with pytest.raises(AssertionError):
+            assert_live_search(
+                {"success": True, "flights": [], "count": 0},  # no trip_type at all
+                results_key="flights",
+                trip_type="ONE_WAY",
+            )
+
     def test_success_path_is_strict(self):
         from tests.mcp.test_mcp_server import assert_live_search
 

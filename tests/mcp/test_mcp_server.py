@@ -28,18 +28,33 @@ def get_future_date(days: int = 30) -> str:
     return (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
 
 
-# Substrings that identify a failure of the transport rather than of this code.
-# Deliberately narrow: the MCP layer wraps every exception as "Search failed:
-# ...", so matching that prefix would mask real bugs.
+# Phrases that only a transport-level failure produces: the page arrived
+# without its payload, Google refused the call, or the request never completed.
+# Each one is a literal string from `fli.search.exceptions` / `_tfs` / the
+# client's error wrapper, not a generic word.
+#
+# Deliberately narrow on both sides. The MCP layer wraps every exception as
+# "Search failed: ...", so matching that prefix would mask real bugs; and a
+# bare "http" marker matched the `https://errors.pydantic.dev/...` URL that
+# every pydantic ValidationError ends with, which would have skipped a decoder
+# regression instead of failing it.
 TRANSPORT_FAILURES = (
-    "ds:1",
-    "declined the request",
-    "timed out",
-    "timeout",
-    "network",
-    "connection",
-    "non-2xx",
-    "http",
+    "no ds:1 payload",  # SearchParseError / the date sweep's _NO_PAYLOAD
+    "declined the request",  # SearchRejectedError (error 13)
+    "timed out talking to google flights",  # SearchTimeoutError
+    "could not reach google flights",  # SearchConnectionError
+    "returned an error response",  # SearchHTTPError (non-2xx status)
+    "every date in the range failed",  # the date sweep's total-failure error
+)
+
+# Phrases that mean we failed to understand a response we did receive. These
+# must fail even though they can co-occur with transport wording.
+PARSE_FAILURES = (
+    "validationerror",
+    "errors.pydantic.dev",
+    "flight rows",  # "Parsed 0/N flight rows …"
+    "shape changed",
+    "shape may have changed",
 )
 
 
@@ -47,7 +62,9 @@ def assert_live_search(result: dict, *, results_key: str, trip_type: str) -> Non
     """Assert a live search result's shape, skipping on transport failures.
 
     The error response shape carries no ``trip_type``/``count``, so asserting
-    those unconditionally turns any transient failure into a red build.
+    those unconditionally turns any transient failure into a red build. A
+    decoder regression, on the other hand, must always fail — so a message that
+    mentions parsing rows is never skipped, whatever else it says.
     """
     assert isinstance(result, dict)
     assert "success" in result
@@ -59,10 +76,13 @@ def assert_live_search(result: dict, *, results_key: str, trip_type: str) -> Non
         assert isinstance(result["error"], str) and result["error"]
         assert result[results_key] == []
         error = result["error"].lower()
-        if any(marker in error for marker in TRANSPORT_FAILURES):
+        parse_failure = any(marker in error for marker in PARSE_FAILURES)
+        transport_failure = any(marker in error for marker in TRANSPORT_FAILURES)
+        if transport_failure and not parse_failure:
             pytest.skip(f"live search unavailable: {result['error']}")
         raise AssertionError(f"search failed for a non-transport reason: {result['error']}")
 
+    assert "trip_type" in result, f"success response is missing trip_type: {sorted(result)}"
     assert result["trip_type"] == trip_type
     assert "count" in result
     assert isinstance(result[results_key], list)
