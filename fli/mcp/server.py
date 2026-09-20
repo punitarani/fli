@@ -12,7 +12,7 @@ from typing import Annotated, Any
 
 from fastmcp import FastMCP
 from mcp.types import Icon
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from fli.core import (
@@ -132,6 +132,11 @@ class FlightSearchParams(BaseModel):
         ge=1,
         description="Number of adult passengers",
     )
+    children: int = Field(0, ge=0, description="Number of children (ages 2-11)")
+    infants_in_seat: int = Field(
+        0, ge=0, description="Number of infants (under 2) occupying their own seat"
+    )
+    infants_on_lap: int = Field(0, ge=0, description="Number of lap infants (under 2, no seat)")
     exclude_basic_economy: bool = Field(
         False, description="Exclude basic economy fares from results"
     )
@@ -218,6 +223,11 @@ class DateSearchParams(BaseModel):
         ge=1,
         description="Number of adult passengers",
     )
+    children: int = Field(0, ge=0, description="Number of children (ages 2-11)")
+    infants_in_seat: int = Field(
+        0, ge=0, description="Number of infants (under 2) occupying their own seat"
+    )
+    infants_on_lap: int = Field(0, ge=0, description="Number of lap infants (under 2, no seat)")
     currency: str | None = Field(
         None,
         description=(
@@ -262,6 +272,20 @@ class DateSearchParams(BaseModel):
 # =============================================================================
 # Result Serialization
 # =============================================================================
+
+
+def _format_validation_error(exc: ValidationError) -> str:
+    """Flatten a pydantic ValidationError into one actionable message.
+
+    The underlying validators already say exactly what is wrong ("Travel date
+    cannot be in the past"); callers only ever saw "Invalid parameter value",
+    which gives an agent nothing to correct.
+    """
+    problems = []
+    for error in exc.errors():
+        location = ".".join(str(part) for part in error["loc"]) or "input"
+        problems.append(f"{location}: {error['msg']}")
+    return f"Invalid parameter value - {'; '.join(problems)}"
 
 
 def _airline_code(airline: Any) -> str:
@@ -581,7 +605,12 @@ def _build_flight_filters(
 
     filters = FlightSearchFilters(
         trip_type=trip_type,
-        passenger_info=PassengerInfo(adults=params.passengers),
+        passenger_info=PassengerInfo(
+            adults=params.passengers,
+            children=params.children,
+            infants_in_seat=params.infants_in_seat,
+            infants_on_lap=params.infants_on_lap,
+        ),
         flight_segments=segments,
         stops=max_stops,
         seat_type=cabin_class,
@@ -644,6 +673,7 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
                     currency=params.currency,
                     language=params.language,
                     country=params.country,
+                    seat_type=filters.seat_type,
                 ),
             )
             for f in flights
@@ -662,11 +692,10 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
 
     except ParseError as e:
         return {"success": False, "error": str(e), "flights": []}
+    except ValidationError as e:
+        return {"success": False, "error": _format_validation_error(e), "flights": []}
     except Exception as e:
-        error_msg = str(e)
-        if "validation error" in error_msg.lower():
-            return {"success": False, "error": "Invalid parameter value", "flights": []}
-        return {"success": False, "error": f"Search failed: {error_msg}", "flights": []}
+        return {"success": False, "error": f"Search failed: {e}", "flights": []}
 
 
 def _execute_booking_options(
@@ -732,6 +761,7 @@ def _execute_booking_options(
             currency=params.currency,
             language=params.language,
             country=params.country,
+            seat_type=filters.seat_type,
         )
         serialized = [_serialize_booking_option(o) for o in options]
         result = {
@@ -757,11 +787,10 @@ def _execute_booking_options(
 
     except ParseError as e:
         return {"success": False, "error": str(e), "options": []}
+    except ValidationError as e:
+        return {"success": False, "error": _format_validation_error(e), "options": []}
     except Exception as e:
-        error_msg = str(e)
-        if "validation error" in error_msg.lower():
-            return {"success": False, "error": "Invalid parameter value", "options": []}
-        return {"success": False, "error": f"Booking lookup failed: {error_msg}", "options": []}
+        return {"success": False, "error": f"Booking lookup failed: {e}", "options": []}
 
 
 def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
@@ -803,7 +832,12 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
         # Create search filters
         filters = DateSearchFilters(
             trip_type=trip_type,
-            passenger_info=PassengerInfo(adults=params.passengers),
+            passenger_info=PassengerInfo(
+                adults=params.passengers,
+                children=params.children,
+                infants_in_seat=params.infants_in_seat,
+                infants_on_lap=params.infants_on_lap,
+            ),
             flight_segments=segments,
             stops=max_stops,
             seat_type=cabin_class,
@@ -857,6 +891,8 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
 
     except ParseError as e:
         return {"success": False, "error": str(e), "dates": []}
+    except ValidationError as e:
+        return {"success": False, "error": _format_validation_error(e), "dates": []}
     except Exception as e:
         return {"success": False, "error": f"Search failed: {str(e)}", "dates": []}
 
@@ -920,6 +956,18 @@ def search_flights(
         int | None,
         Field(description="Number of adult passengers", ge=1),
     ] = None,
+    children: Annotated[
+        int,
+        Field(description="Number of children (ages 2-11)", ge=0),
+    ] = 0,
+    infants_in_seat: Annotated[
+        int,
+        Field(description="Number of infants (under 2) occupying their own seat", ge=0),
+    ] = 0,
+    infants_on_lap: Annotated[
+        int,
+        Field(description="Number of lap infants (under 2, no seat)", ge=0),
+    ] = 0,
     exclude_basic_economy: Annotated[
         bool,
         Field(description="Exclude basic economy fares from results"),
@@ -995,6 +1043,9 @@ def search_flights(
         max_stops=max_stops,
         sort_by=sort_by,
         passengers=passengers or CONFIG.default_passengers,
+        children=children,
+        infants_in_seat=infants_in_seat,
+        infants_on_lap=infants_on_lap,
         exclude_basic_economy=exclude_basic_economy,
         emissions=emissions,
         checked_bags=checked_bags,
@@ -1073,6 +1124,18 @@ def search_dates(
         int | None,
         Field(description="Number of adult passengers", ge=1),
     ] = None,
+    children: Annotated[
+        int,
+        Field(description="Number of children (ages 2-11)", ge=0),
+    ] = 0,
+    infants_in_seat: Annotated[
+        int,
+        Field(description="Number of infants (under 2) occupying their own seat", ge=0),
+    ] = 0,
+    infants_on_lap: Annotated[
+        int,
+        Field(description="Number of lap infants (under 2, no seat)", ge=0),
+    ] = 0,
     currency: Annotated[
         str | None,
         Field(description="ISO 4217 currency code (USD, EUR, GBP, JPY...) for prices."),
@@ -1125,6 +1188,9 @@ def search_dates(
         departure_window=effective_departure_window,
         sort_by_price=sort_by_price,
         passengers=passengers or CONFIG.default_passengers,
+        children=children,
+        infants_in_seat=infants_in_seat,
+        infants_on_lap=infants_on_lap,
         currency=currency,
         language=language,
         country=country,
@@ -1186,6 +1252,18 @@ def get_booking_options(
         int | None,
         Field(description="Number of adult passengers", ge=1),
     ] = None,
+    children: Annotated[
+        int,
+        Field(description="Number of children (ages 2-11)", ge=0),
+    ] = 0,
+    infants_in_seat: Annotated[
+        int,
+        Field(description="Number of infants (under 2) occupying their own seat", ge=0),
+    ] = 0,
+    infants_on_lap: Annotated[
+        int,
+        Field(description="Number of lap infants (under 2, no seat)", ge=0),
+    ] = 0,
     airlines: Annotated[
         list[str] | None,
         Field(description="Filter by airline IATA codes (e.g., ['BA', 'AA'])"),
@@ -1276,6 +1354,9 @@ def get_booking_options(
         max_stops=max_stops,
         sort_by=sort_by,
         passengers=passengers or CONFIG.default_passengers,
+        children=children,
+        infants_in_seat=infants_in_seat,
+        infants_on_lap=infants_on_lap,
         airlines=airlines,
         exclude_basic_economy=exclude_basic_economy,
         emissions=emissions,

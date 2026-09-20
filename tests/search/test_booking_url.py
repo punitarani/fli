@@ -9,7 +9,7 @@ import urllib.parse
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
-from fli.models import Airline, Airport, FlightLeg, FlightResult
+from fli.models import Airline, Airport, FlightLeg, FlightResult, SeatType
 from fli.search.flights import SearchFlights
 
 # ---------------------------------------------------------------------------
@@ -231,3 +231,33 @@ class TestBuildFlightBookingUrl:
         client = _make_client()
         result = client.build_flight_booking_url(_one_way())
         assert isinstance(result, str)
+
+    def test_seat_type_defaults_to_economy(self):
+        """Omitted seat_type still encodes field 9 as economy (1)."""
+        import base64
+
+        client = _make_client()
+        url = client.build_flight_booking_url(_one_way())
+        tfs = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["tfs"][0]
+        pad = "=" * ((4 - len(tfs) % 4) % 4)
+        raw = base64.urlsafe_b64decode(tfs + pad)
+        assert b"\x48\x01" in raw
+        assert b"\x48\x03" not in raw
+
+    def test_seat_type_business_changes_tfs_field_9(self):
+        """Passing SeatType.BUSINESS encodes field 9 as 3, not the economy default."""
+        import base64
+
+        client = _make_client()
+        economy_url = client.build_flight_booking_url(_one_way())
+        business_url = client.build_flight_booking_url(_one_way(), seat_type=SeatType.BUSINESS)
+        assert economy_url != business_url
+
+        def _raw(url: str) -> bytes:
+            tfs = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["tfs"][0]
+            pad = "=" * ((4 - len(tfs) % 4) % 4)
+            return base64.urlsafe_b64decode(tfs + pad)
+
+        business = _raw(business_url)
+        assert b"\x40\x01\x48\x03\x70\x01" in business
+        assert b"\x40\x01\x48\x01\x70\x01" not in business
