@@ -1,6 +1,8 @@
 """Tests for the wire-format parser shared by all FlightsFrontendService responses."""
 
 import json
+import logging
+import time
 
 import pytest
 
@@ -216,6 +218,69 @@ class TestNonAsciiFraming:
         )
         body = f")]}}'\n\n999999\n{outer_json}\n1\n{outer_json}\n"
         assert list(iter_wrb_chunks(body)) == [[1, "café"], [1, "café"]]
+
+
+class TestGrammarDelimitingRobustness:
+    """The JSON grammar — not the announced length — has to find every edge."""
+
+    def test_payload_strings_may_contain_framing_characters(self):
+        # Brackets, quotes and backslashes inside a string must not be
+        # mistaken for structure: json.dumps escapes them, and the reader
+        # relies on the decoder rather than scanning for "[" itself.
+        payload = [
+            'a "quoted" [bracket] value',
+            'back\\slash and \\" escaped quote',
+            "accented é with a ] and a newline\nin the middle",
+        ]
+        body = _google_framed(payload, [2, "beta"])
+        assert list(iter_wrb_chunks(body)) == [payload, [2, "beta"]]
+
+    def test_chunk_survives_a_boundary_that_falls_mid_string(self):
+        # The announced length cuts each chunk in half, in the middle of a
+        # string that itself contains "[". A length-slicing reader hands
+        # json.loads a truncated document and loses the rest of the body.
+        payload = [1, "x[" * 40]
+        inner_json = json.dumps(payload, separators=(",", ":"))
+        outer_json = json.dumps([["wrb.fr", None, inner_json]], separators=(",", ":"))
+        half = len(outer_json) // 2
+        body = f")]}}'\n\n{half}\n{outer_json}\n{half}\n{outer_json}\n"
+        assert list(iter_wrb_chunks(body)) == [payload, payload]
+
+    def test_garbage_between_chunks_is_skipped(self):
+        good_1 = json.dumps([_payload_row([1, "alpha"])], separators=(",", ":"))
+        good_2 = json.dumps([_payload_row([2, "beta"])], separators=(",", ":"))
+        body = (
+            f")]}}'\n\n{len(good_1) + 2}\n{good_1}\n"
+            "<<not json at all>>\n"
+            f"{len(good_2) + 2}\n{good_2}\n"
+        )
+        assert list(iter_wrb_chunks(body)) == [[1, "alpha"], [2, "beta"]]
+
+    def test_truncated_final_chunk_is_skipped_with_one_concise_warning(self, caplog):
+        # A transfer cut short must not hang, and must not raise out of the
+        # generator — the chunks that did arrive are still delivered.
+        good = json.dumps([_payload_row([1, "alpha"])], separators=(",", ":"))
+        truncated = json.dumps([_payload_row([2, "beta"])], separators=(",", ":"))[:-12]
+        body = f")]}}'\n\n{len(good) + 2}\n{good}\n{len(truncated) + 2}\n{truncated}"
+        with caplog.at_level(logging.WARNING, logger="fli.search._wire"):
+            assert list(iter_wrb_chunks(body)) == [[1, "alpha"]]
+        warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert len(warnings) == 1
+        assert "malformed wrb.fr chunk" in warnings[0].getMessage()
+        # Tracebacks belong at debug level, not in the operator's log.
+        assert warnings[0].exc_info is None
+
+    def test_multi_megabyte_body_is_read_in_linear_time(self):
+        # Guards against a quadratic reader (repeated slicing / re-scanning):
+        # ~5 MB parses in well under a second, a quadratic one takes minutes.
+        payload = [["CDG", "Aéroport de Paris-Charles de Gaulle", index] for index in range(45_000)]
+        body = _google_framed(payload, payload)
+        assert len(body) > 5_000_000
+        started = time.perf_counter()
+        chunks = list(iter_wrb_chunks(body))
+        elapsed = time.perf_counter() - started
+        assert chunks == [payload, payload]
+        assert elapsed < 10, f"5 MB body took {elapsed:.2f}s — reader is not linear"
 
 
 class TestErrorEnvelope:
