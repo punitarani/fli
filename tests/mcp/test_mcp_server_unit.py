@@ -637,3 +637,53 @@ class TestDateSearchCapSurfacing:
         start = datetime.strptime(start_s.strip(), "%Y-%m-%d")
         end = datetime.strptime(end_s.strip(), "%Y-%m-%d")
         assert (end - start).days + 1 <= MAX_DATES_PER_SEARCH
+
+
+class TestLiveSearchAssertionHelper:
+    """`assert_live_search` must skip transport failures and fail real ones."""
+
+    def test_success_path_is_strict(self):
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        assert_live_search(
+            {"success": True, "flights": [], "trip_type": "ONE_WAY", "count": 0},
+            results_key="flights",
+            trip_type="ONE_WAY",
+        )
+        with pytest.raises(AssertionError):
+            assert_live_search(
+                {"success": True, "flights": [], "trip_type": "ROUND_TRIP", "count": 0},
+                results_key="flights",
+                trip_type="ONE_WAY",
+            )
+
+    def test_transport_failure_is_a_skip(self):
+        import _pytest.outcomes
+
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        with pytest.raises(_pytest.outcomes.Skipped):
+            assert_live_search(
+                {
+                    "success": False,
+                    "error": "Search failed: Search page carried no ds:1 payload",
+                    "flights": [],
+                },
+                results_key="flights",
+                trip_type="ONE_WAY",
+            )
+
+    def test_other_failures_still_fail(self):
+        """A genuine bug must not hide behind the skip."""
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        with pytest.raises(AssertionError, match="non-transport reason"):
+            assert_live_search(
+                {
+                    "success": False,
+                    "error": "Search failed: TypeError: 'NoneType' is not subscriptable",
+                    "flights": [],
+                },
+                results_key="flights",
+                trip_type="ONE_WAY",
+            )
