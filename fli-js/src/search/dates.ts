@@ -549,19 +549,24 @@ export class SearchDates {
       return outcome({ failure: `${name}: ${detail}`, error: err });
     }
 
+    // `!flight.price` and not `== null`: a zero price is Google's way of
+    // saying it has no fare for the row, the same reading the Python sweep
+    // takes with `if flight.price`.
     let cheapest: FlightResult | null = null;
+    let cheapestPrice = Number.POSITIVE_INFINITY;
     for (const flight of flights) {
-      if (flight.price == null || !flight.price) continue;
-      if (cheapest == null || flight.price < (cheapest.price ?? Number.POSITIVE_INFINITY)) {
+      if (!flight.price) continue;
+      if (flight.price < cheapestPrice) {
         cheapest = flight;
+        cheapestPrice = flight.price;
       }
     }
-    if (cheapest == null || cheapest.price == null) return outcome();
+    if (cheapest == null) return outcome();
 
     return outcome({
       price: {
         date: dates as [Date] | [Date, Date],
-        price: cheapest.price,
+        price: cheapestPrice,
         // Python reports the requested currency here and nothing when
         // none was asked for; the row's own currency is a strictly better
         // fallback than null, and matches what this field meant before
