@@ -19,6 +19,7 @@ from fli.cli.utils import (
 )
 from fli.core import (
     build_flight_segments,
+    classify_error,
     format_validation_error,
     google_flights_url,
     parse_airlines,
@@ -259,6 +260,7 @@ def _search_flights_core(
                     search_type="flights",
                     message=str(e),
                     query=query,
+                    **classify_error(e).as_fields(),
                 )
             )
             raise typer.Exit(1) from e
@@ -273,6 +275,7 @@ def _search_flights_core(
                     search_type="flights",
                     message=message,
                     query=query,
+                    **classify_error(e).as_fields(),
                 )
             )
             raise typer.Exit(1) from e
@@ -280,13 +283,24 @@ def _search_flights_core(
         typer.echo(f"Error: {message}")
         raise typer.Exit(1) from e
     except (AttributeError, ValueError) as e:
+        # Historically this caught a bare AttributeError from an unknown
+        # airport/airline code; fli.core.parsers now converts those to
+        # ParseError before they ever reach here (see the except above), so
+        # in practice this block only sees: a bare ValueError (e.g. the
+        # 93-date search-range cap, or any other library call that raises
+        # ValueError directly) -> classify_error's validation_error bucket;
+        # or a genuine AttributeError from an unrelated bug elsewhere in the
+        # call stack -> classify_error's unexpected_error bucket, since it
+        # isn't a recognized search-client or input-validation failure.
+        # T10 fix round 2, maintainer ruling U1: previously hardcoded
+        # "search_error" for both — see the report's "Behaviour changes".
         if output_format == OutputFormat.JSON:
             emit_json(
                 build_json_error_response(
                     search_type="flights",
                     message=str(e),
-                    error_type="search_error",
                     query=query,
+                    **classify_error(e).as_fields(),
                 )
             )
             raise typer.Exit(1) from e
@@ -295,27 +309,31 @@ def _search_flights_core(
         raise typer.Exit(1) from e
     except SearchClientError as e:
         if output_format == OutputFormat.JSON:
-            message, error_type, log_path = json_error_payload(e, command="flights")
+            payload_info = json_error_payload(e, command="flights")
             payload = build_json_error_response(
                 search_type="flights",
-                message=message,
-                error_type=error_type,
+                message=payload_info.message,
+                error_type=payload_info.error_type,
+                retryable=payload_info.retryable,
+                http_status=payload_info.http_status,
                 query=query,
             )
-            payload["error"]["log_path"] = str(log_path)
+            payload["error"]["log_path"] = str(payload_info.log_path)
             emit_json(payload)
             raise typer.Exit(1) from e
         raise report_cli_error(e, command="flights") from e
     except Exception as e:  # noqa: BLE001 — fall back to clean reporting
         if output_format == OutputFormat.JSON:
-            message, error_type, log_path = json_error_payload(e, command="flights")
+            payload_info = json_error_payload(e, command="flights")
             payload = build_json_error_response(
                 search_type="flights",
-                message=message,
-                error_type=error_type,
+                message=payload_info.message,
+                error_type=payload_info.error_type,
+                retryable=payload_info.retryable,
+                http_status=payload_info.http_status,
                 query=query,
             )
-            payload["error"]["log_path"] = str(log_path)
+            payload["error"]["log_path"] = str(payload_info.log_path)
             emit_json(payload)
             raise typer.Exit(1) from e
         raise report_cli_error(e, command="flights") from e

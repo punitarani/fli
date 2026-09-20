@@ -367,9 +367,17 @@ def build_json_error_response(
     search_type: str,
     message: str,
     error_type: str = "validation_error",
+    retryable: bool = False,
+    http_status: int | None = None,
     query: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build a JSON error payload for CLI commands."""
+    """Build a JSON error payload for CLI commands.
+
+    ``retryable`` and (when known) ``http_status`` mirror the MCP tools'
+    error responses — both come from the same
+    :func:`fli.core.errors.classify_error`, typically passed straight
+    through via ``**classify_error(exc).as_fields()`` at the call site.
+    """
     payload = {
         "success": False,
         "data_source": "google_flights",
@@ -377,8 +385,11 @@ def build_json_error_response(
         "error": {
             "type": error_type,
             "message": message,
+            "retryable": retryable,
         },
     }
+    if http_status is not None:
+        payload["error"]["http_status"] = http_status
     if query is not None:
         payload["query"] = query
     return payload

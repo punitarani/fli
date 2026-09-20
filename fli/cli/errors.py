@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import sys
 import traceback
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -98,14 +99,33 @@ def report_cli_error(
     return typer.Exit(exit_code)
 
 
-def json_error_payload(exc: BaseException, *, command: str | None = None) -> tuple[str, str, Path]:
-    """Return ``(message, error_type, log_path)`` for JSON-mode error output.
+@dataclass(frozen=True)
+class JsonErrorPayload:
+    """Everything a CLI ``--format json`` error path needs, from one classification.
 
-    ``error_type`` comes from the shared :func:`fli.core.errors.classify_error`
-    classifier — the same one ``fli.mcp.server`` uses for MCP tool error
-    responses — so a CLI ``--format json`` error and an MCP error for the
-    same exception always agree on the same ``error_type`` string. See that
-    module's docstring for the full vocabulary table and retry guidance.
+    A named structure (rather than a positional tuple) on purpose: T10 fix
+    round 2 added ``retryable``/``http_status`` alongside the original
+    ``message``/``error_type``/``log_path`` triple, and a wider tuple would
+    have made every call site's unpacking order a silent trap. Use
+    attribute access (``payload.error_type``, ...) at call sites.
+    """
+
+    message: str
+    error_type: str
+    retryable: bool
+    http_status: int | None
+    log_path: Path
+
+
+def json_error_payload(exc: BaseException, *, command: str | None = None) -> JsonErrorPayload:
+    """Return the classified JSON-mode error payload for ``exc``.
+
+    ``error_type`` (and, since T10 fix round 2, ``retryable``/``http_status``)
+    come from the shared :func:`fli.core.errors.classify_error` classifier —
+    the same one ``fli.mcp.server`` uses for MCP tool error responses — so a
+    CLI ``--format json`` error and an MCP error for the same exception
+    always agree. See that module's docstring for the full vocabulary table
+    and retry guidance.
 
     The message formatting is unchanged from before this classifier existed:
     ``str(exc)`` for any :class:`SearchClientError`, and
@@ -113,6 +133,12 @@ def json_error_payload(exc: BaseException, *, command: str | None = None) -> tup
     ever hand-rolled here, and it has moved to the shared classifier.
     """
     log_path = _write_log(exc, command=command)
-    error_type = classify_error(exc).error_type
+    classification = classify_error(exc)
     message = str(exc) if isinstance(exc, SearchClientError) else f"{exc.__class__.__name__}: {exc}"
-    return message, error_type, log_path
+    return JsonErrorPayload(
+        message=message,
+        error_type=classification.error_type,
+        retryable=classification.retryable,
+        http_status=classification.http_status,
+        log_path=log_path,
+    )

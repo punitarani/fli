@@ -10,6 +10,12 @@ from fli.cli.main import app
 from fli.models import Airline
 from fli.models.google_flights.base import TripType
 from fli.search import DatePrice
+from fli.search.exceptions import (
+    SearchClientError,
+    SearchConnectionError,
+    SearchHTTPError,
+    SearchTimeoutError,
+)
 
 
 @pytest.fixture
@@ -398,7 +404,16 @@ def test_dates_over_the_cap_reports_cleanly(runner, mock_console):
 
 
 def test_dates_over_the_cap_json(runner, mock_console):
-    """The same cap error is a structured JSON error, not a crash."""
+    """The same cap error is a structured JSON error, not a crash.
+
+    T10 fix round 2, maintainer ruling U1: this is a bare ``ValueError``
+    raised by ``SearchDates.search()`` with no mocking involved — it used
+    to hit the CLI's ``except (AttributeError, ValueError)`` block and get
+    hardcoded ``error_type="search_error"``. It's now routed through the
+    shared classifier and reports ``validation_error`` (deliberate
+    behaviour change, see the report's "Behaviour changes" section) plus
+    the new ``retryable`` field.
+    """
     from_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
     to_date = (datetime.now() + timedelta(days=200)).strftime("%Y-%m-%d")
 
@@ -411,3 +426,58 @@ def test_dates_over_the_cap_json(runner, mock_console):
     payload = json.loads(result.stdout)
     assert payload["success"] is False
     assert "93-date limit" in payload["error"]["message"]
+    assert payload["error"]["type"] == "validation_error"
+    assert payload["error"]["retryable"] is False
+
+
+def test_dates_json_invalid_airport_code(runner, mock_search_dates, mock_console):
+    """An unresolvable airport code reports validation_error, not a crash."""
+    result = runner.invoke(
+        app,
+        ["dates", "ZZZZ", "LAX", "--format", "json"],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert payload["error"]["type"] == "validation_error"
+    assert payload["error"]["retryable"] is False
+    mock_search_dates.search.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "exc, expected_type, expected_retryable",
+    [
+        # Released v0.9.0 CLI --format json values — must not move.
+        pytest.param(SearchTimeoutError("slow"), "timeout", True, id="timeout"),
+        pytest.param(SearchConnectionError("no route"), "connection_error", True, id="connection"),
+        pytest.param(SearchHTTPError("bad gw", status_code=502), "http_error", True, id="http-5xx"),
+        pytest.param(
+            SearchClientError("generic"), "search_error", False, id="generic-search-error"
+        ),
+        pytest.param(RuntimeError("bug"), "unexpected_error", False, id="unexpected"),
+        # Gained in T10 fix round 2 (U1): a bare AttributeError used to be
+        # hardcoded to "search_error" by the (AttributeError, ValueError)
+        # block; it isn't a SearchClientError or input-validation failure,
+        # so the shared classifier now calls it unexpected_error.
+        pytest.param(
+            AttributeError("'NoneType' object has no attribute 'name'"),
+            "unexpected_error",
+            False,
+            id="bare-attribute-error",
+        ),
+    ],
+)
+def test_dates_json_error_type_matches_shared_classifier(
+    runner, mock_search_dates, mock_console, exc, expected_type, expected_retryable
+):
+    """Dates --format json's error_type/retryable match fli.core.errors.classify_error."""
+    mock_search_dates.search.side_effect = exc
+
+    result = runner.invoke(app, ["dates", "JFK", "LAX", "--format", "json"])
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert payload["error"]["type"] == expected_type
+    assert payload["error"]["retryable"] is expected_retryable

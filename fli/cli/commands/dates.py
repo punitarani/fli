@@ -21,6 +21,7 @@ from fli.cli.utils import (
 )
 from fli.core import (
     build_date_search_segments,
+    classify_error,
     format_validation_error,
     parse_airlines,
     parse_alliances,
@@ -508,6 +509,7 @@ def dates(
                             )
                         ],
                     },
+                    **classify_error(e).as_fields(),
                 )
             )
             raise typer.Exit(1) from e
@@ -515,13 +517,15 @@ def dates(
         raise typer.Exit(1) from e
     except SearchClientError as e:
         if output_format == OutputFormat.JSON:
-            message, error_type, log_path = json_error_payload(e, command="dates")
+            payload_info = json_error_payload(e, command="dates")
             payload = build_json_error_response(
                 search_type="dates",
-                message=message,
-                error_type=error_type,
+                message=payload_info.message,
+                error_type=payload_info.error_type,
+                retryable=payload_info.retryable,
+                http_status=payload_info.http_status,
             )
-            payload["error"]["log_path"] = str(log_path)
+            payload["error"]["log_path"] = str(payload_info.log_path)
             emit_json(payload)
             raise typer.Exit(1) from e
         raise report_cli_error(e, command="dates") from e
@@ -533,6 +537,7 @@ def dates(
                     search_type="dates",
                     message=message,
                     query=query,
+                    **classify_error(e).as_fields(),
                 )
             )
             raise typer.Exit(1) from e
@@ -542,12 +547,22 @@ def dates(
     except (AttributeError, ValueError) as e:
         if "module 'fli.search' has no attribute 'SearchDates'" in str(e):
             raise
+        # Historically this caught a bare AttributeError from an unknown
+        # airport/airline code; fli.core.parsers now converts those to
+        # ParseError before they ever reach here (see the except above), so
+        # in practice this block only sees: a bare ValueError (e.g. the
+        # 93-date search-range cap raised by SearchDates.search()) ->
+        # classify_error's validation_error bucket; or a genuine
+        # AttributeError from an unrelated bug elsewhere in the call stack
+        # -> classify_error's unexpected_error bucket, since it isn't a
+        # recognized search-client or input-validation failure. T10 fix
+        # round 2, maintainer ruling U1: previously hardcoded
+        # "search_error" for both — see the report's "Behaviour changes".
         if output_format == OutputFormat.JSON:
             emit_json(
                 build_json_error_response(
                     search_type="dates",
                     message=str(e),
-                    error_type="search_error",
                     query={
                         "origin": origin,
                         "destination": destination,
@@ -577,6 +592,7 @@ def dates(
                             )
                         ],
                     },
+                    **classify_error(e).as_fields(),
                 )
             )
             raise typer.Exit(1) from e
@@ -584,13 +600,15 @@ def dates(
         raise typer.Exit(1) from e
     except Exception as e:  # noqa: BLE001 — fall back to clean reporting
         if output_format == OutputFormat.JSON:
-            message, error_type, log_path = json_error_payload(e, command="dates")
+            payload_info = json_error_payload(e, command="dates")
             payload = build_json_error_response(
                 search_type="dates",
-                message=message,
-                error_type=error_type,
+                message=payload_info.message,
+                error_type=payload_info.error_type,
+                retryable=payload_info.retryable,
+                http_status=payload_info.http_status,
             )
-            payload["error"]["log_path"] = str(log_path)
+            payload["error"]["log_path"] = str(payload_info.log_path)
             emit_json(payload)
             raise typer.Exit(1) from e
         raise report_cli_error(e, command="dates") from e
