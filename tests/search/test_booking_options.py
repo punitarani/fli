@@ -309,6 +309,7 @@ class TestGetBookingOptionsRejectionEnvelope:
     def test_rejection_reaches_the_cli_and_mcp_friendly_messages(self, monkeypatch, tmp_path):
         """The typed error stays classified, not an "unexpected error"."""
         from fli.cli.errors import _friendly_message, json_error_payload
+        from fli.core.errors import classify_error
         from fli.mcp.server import _search_error_message
         from fli.search import SearchRejectedError
 
@@ -321,8 +322,17 @@ class TestGetBookingOptionsRejectionEnvelope:
         exc = SearchRejectedError(13, detail="req-abc123")
         assert "declined the request" in _friendly_message(exc)
         assert "Unexpected error" not in _friendly_message(exc)
-        assert json_error_payload(exc, command="flights")[1] == "rejected"
         assert "declined the request" in _search_error_message(exc)
+
+        # Both surfaces classify it through the shared classifier, so they
+        # have to agree — a rejection is deterministic and never retryable.
+        payload = json_error_payload(exc, command="flights")
+        assert payload.error_type == "rejected_error"
+        assert payload.retryable is False
+        mcp_fields = classify_error(exc).as_fields()
+        assert mcp_fields["error_type"] == "rejected_error"
+        assert mcp_fields["retryable"] is False
+
         assert list(log_dir.iterdir()), "the log file should have landed under tmp_path"
 
     def test_genuinely_empty_response_still_returns_no_options(self):
