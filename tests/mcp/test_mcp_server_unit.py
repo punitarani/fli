@@ -814,3 +814,23 @@ class TestSearchErrorMessage:
                 results_key="flights",
                 trip_type="ONE_WAY",
             )
+
+
+class TestTrippedSweepErrorIsRecognised:
+    """The breaker's error text must reach the live tests as a transport failure."""
+
+    def test_both_sweep_failure_wordings_skip(self):
+        import _pytest.outcomes
+
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        for message in (
+            "Priced 0 of 30 dates — every date in the range failed. Reasons: …",
+            "Priced 0 of 30 dates — no date in the range could be priced. Reasons: …",
+        ):
+            with pytest.raises(_pytest.outcomes.Skipped):
+                assert_live_search(
+                    {"success": False, "error": f"Search failed: {message}", "dates": []},
+                    results_key="dates",
+                    trip_type="ONE_WAY",
+                )

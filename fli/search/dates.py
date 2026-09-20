@@ -301,41 +301,57 @@ class SearchDates:
         class (and hint) a single unreadable page raises there. Anything else
         raises the more general :class:`SearchClientError`.
 
-        A sweep that tripped the breaker *and* still has prices to return is the
-        other half of the same problem: the answer is real but incomplete, and
-        handing it back unannounced is the same silent-truncation failure in a
-        quieter costume. One warning, naming the count.
+        A sweep that tripped the circuit breaker must never end quietly either.
+        With prices to show, the answer is real but incomplete, so it comes with
+        one warning naming the count. With none at all the sweep is simply
+        blocked — and the tripped breaker is the evidence for that, not the
+        exact mix of what each attempted date happened to do.
 
         Args:
             outcomes: One entry per date in the range, in date order.
             total: Dates the sweep set out to price, so the error can say how
                 many were abandoned when the circuit breaker stopped it.
             skipped: Dates the breaker abandoned without requesting them.
+                Non-zero exactly when the breaker tripped.
 
         """
         results = [o.price for o in outcomes if o.price is not None]
         attempted = [o for o in outcomes if o.attempted]
         failed = [o for o in attempted if o.failure]
-        if attempted and len(failed) == len(attempted):
+        # The breaker only ever trips on payload-less pages, so a non-zero skip
+        # count *is* the blocked-page diagnosis, whatever else failed alongside.
+        tripped = skipped > 0
+        everything_failed = bool(attempted) and len(failed) == len(attempted)
+
+        if not results and (everything_failed or tripped):
             reasons: list[str] = []
             for outcome in failed:
                 if outcome.failure not in reasons and len(reasons) < 3:
                     reasons.append(outcome.failure)
             cause = next((o.error for o in failed if o.error is not None), None)
-            only_missing_payload = all(o.failure == _NO_PAYLOAD for o in failed)
-            error_type = SearchParseError if only_missing_payload else SearchClientError
+            blocked = tripped or (bool(failed) and all(o.failure == _NO_PAYLOAD for o in failed))
+            error_type = SearchParseError if blocked else SearchClientError
 
-            message = (
-                f"Priced 0 of {len(attempted)} dates — every date in the range failed. "
-                f"Reasons: {'; '.join(reasons)}"
-            )
-            if len(attempted) < total:
-                message += (
-                    f". Gave up after {len(attempted)} of {total} dates: a sweep that has "
-                    "not loaded a single page is failing for the same reason on every date, "
-                    "and each one costs several requests"
+            if everything_failed:
+                message = (
+                    f"Priced 0 of {total} dates — every date in the range failed. "
+                    f"Reasons: {'; '.join(reasons)}"
                 )
-            if only_missing_payload:
+            else:
+                # Some attempted date loaded and simply had no flights, which is
+                # not a failure on its own — but with nothing priced anywhere and
+                # the breaker tripped, the sweep still has no usable answer.
+                message = (
+                    f"Priced 0 of {total} dates — no date in the range could be priced. "
+                    f"Reasons: {'; '.join(reasons) or 'no flights on the dates that loaded'}"
+                )
+            if tripped:
+                message += (
+                    f". Gave up after {len(attempted)} of {total} dates ({skipped} skipped): "
+                    "a sweep that has not loaded a single page is failing for the same "
+                    "reason on every date, and each one costs several requests"
+                )
+            if blocked:
                 message += (
                     ". If you are on an EU/EEA IP, Google's consent interstitial serves no "
                     "results — the client sends a pre-accepted SOCS cookie by default, so "
@@ -343,7 +359,7 @@ class SearchDates:
                 )
             raise error_type(message) from cause
 
-        if skipped and results:
+        if tripped:
             # Exactly one line, whatever the sweep's size: the caller is about
             # to act on a partial answer and has no other way to know it.
             logger.warning(

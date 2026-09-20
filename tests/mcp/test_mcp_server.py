@@ -45,6 +45,7 @@ TRANSPORT_FAILURES = (
     "could not reach google flights",  # SearchConnectionError
     "returned an error response",  # SearchHTTPError (non-2xx status)
     "every date in the range failed",  # the date sweep's total-failure error
+    "no date in the range could be priced",  # same, when the breaker tripped
 )
 
 # Phrases that mean we failed to understand a response we did receive. These

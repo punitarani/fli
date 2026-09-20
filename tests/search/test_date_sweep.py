@@ -632,6 +632,68 @@ class TestSweepCircuitBreaker:
                 dates_module.SearchDates._collect(outcomes, 30, skipped=25)
         assert not [r for r in caplog.records if "skipped" in r.getMessage()]
 
+    def test_tripped_sweep_with_no_prices_never_ends_quietly(self, caplog):
+        """Tripped + a date that loaded but had no flights + nothing priced.
+
+        The truncation warning was guarded on there being prices, and the
+        "everything failed" error needs *every* attempted date to have failed —
+        so a single loaded-but-empty date fell between the two and the sweep
+        returned ``None`` with 24 dates abandoned and not a word about it.
+        With no prices at all this is a blocked sweep, so it raises.
+        """
+        outcomes = [
+            dates_module._DateOutcome(),  # page loaded fine, route has no flights
+            *[dates_module._DateOutcome(failure=dates_module._NO_PAYLOAD)] * 5,
+            *[dates_module._DateOutcome(attempted=False)] * 24,
+        ]
+        with caplog.at_level(logging.WARNING, logger="fli.search.dates"):
+            with pytest.raises(SearchParseError) as excinfo:
+                dates_module.SearchDates._collect(outcomes, 30, skipped=24)
+        message = str(excinfo.value)
+        assert "24 skipped" in message, message
+        assert "FLI_SOCS_COOKIE" in message, message
+        assert "consent/blocked page" in message, message
+
+    def test_tripped_breaker_always_gives_the_blocked_page_error(self):
+        """Blank pages interleaved with connection errors is still a blocked sweep.
+
+        The hint used to be all-or-nothing: one connection error alongside the
+        blank pages downgraded the error to `SearchClientError` and dropped the
+        `FLI_SOCS_COOKIE` pointer — even though the breaker only ever trips on
+        blank pages, so a trip means the blocked page is the dominant cause.
+        """
+        outcomes = [
+            *[dates_module._DateOutcome(failure=dates_module._NO_PAYLOAD)] * 5,
+            *[
+                dates_module._DateOutcome(
+                    failure="SearchConnectionError: connection refused",
+                    error=SearchConnectionError("connection refused"),
+                )
+            ]
+            * 4,
+            *[dates_module._DateOutcome(attempted=False)] * 21,
+        ]
+        with pytest.raises(SearchParseError) as excinfo:
+            dates_module.SearchDates._collect(outcomes, 30, skipped=21)
+        message = str(excinfo.value)
+        assert "FLI_SOCS_COOKIE" in message, message
+        # Both causes are still reported, not just the dominant one.
+        assert "ds:1" in message and "connection refused" in message, message
+
+    def test_untripped_mixed_failures_keep_the_general_error(self):
+        """Without a trip the error type still follows what actually failed."""
+        outcomes = [
+            dates_module._DateOutcome(failure=dates_module._NO_PAYLOAD),
+            dates_module._DateOutcome(
+                failure="SearchConnectionError: connection refused",
+                error=SearchConnectionError("connection refused"),
+            ),
+        ]
+        with pytest.raises(SearchClientError) as excinfo:
+            dates_module.SearchDates._collect(outcomes, 2)
+        assert not isinstance(excinfo.value, SearchParseError)
+        assert "FLI_SOCS_COOKIE" not in str(excinfo.value)
+
     def test_untripped_sweep_does_not_warn_about_truncation(self, no_backoff, caplog):
         """A healthy sweep prices every date, so there is nothing to announce."""
         client = StubClient(_page([_row(150.0)]))

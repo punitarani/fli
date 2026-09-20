@@ -190,7 +190,9 @@ What that means in practice:
   across 10 workers is several hundred MB of pages and parsed JSON at peak.
   A sweep that never manages to load a single page — the shape a blocked or
   consent-gated client produces — gives up after a handful of dates rather than
-  paying the retry budget on all of them. Measured with the real backoff: **42
+  paying the retry budget on all of them. Only pages served without results
+  count towards that: a timeout or a dropped connection says nothing about the
+  dates not yet tried, so those never abandon a sweep. Measured with the real backoff: **42
   page fetches** (bounded at 45, so up to ~135 HTTP requests once the client's
   own retries multiply in) and about 4 seconds, the same whether the range is 30
   days or 93. Unbroken, a 93-date range would have cost 279 fetches and up to
