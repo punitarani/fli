@@ -287,6 +287,40 @@ you can retry with a valid identifier.
     specific flight's booking page directly, or fall back to the top-level
     `booking_url` for the search page.
 
+## Error Responses
+
+Every tool's failure response (`success: false`) also carries `error_type` (a
+stable string) and `retryable` (a bool), alongside the existing free-text
+`error` message — so a caller can decide what to do next without
+string-matching `error`. `http_error` responses additionally carry
+`http_status` when the upstream status code is known. Classification is by
+exception **type**, never by message text, so `error_type` will not change
+out from under you even if wording on `error` does.
+
+| `error_type` | `retryable` | Meaning / what to do |
+|---|---|---|
+| `validation_error` | `false` | Bad input — unknown airport code, an invalid passenger mix, a date range over the 93-date cap, etc. Fix the request; retrying unchanged will fail again. |
+| `unsupported_error` | `false` | The request is well-formed but this transport can't serve it (e.g. multi-city). Change the request. |
+| `blocked_error` | `false` | Google served a page fli couldn't read — usually a regional consent/blocked interstitial. Not retryable as-is; set `FLI_SOCS_COOKIE` (EU/EEA) and retry. |
+| `rejected_error` | `false` | Google refused the RPC outright (e.g. `get_booking_options`'s `GetBookingResults` call today). Deterministic; retrying the same request will not help. |
+| `timeout_error` | `true` | The request to Google Flights timed out. Safe to retry. |
+| `connection_error` | `true` | A network/DNS issue prevented reaching Google Flights. Safe to retry. |
+| `http_error` | `true` iff `http_status` is 429 or 5xx | Non-2xx HTTP response from Google; check `http_status`. |
+| `search_error` | `false` | Any other typed search-client failure not covered above. |
+| `unexpected_error` | `false` | An unclassified exception — most likely a bug, worth reporting. |
+
+**Example error response:**
+
+```json
+{
+  "success": false,
+  "error": "Search failed: Timed out talking to Google Flights (www.google.com). ...",
+  "flights": [],
+  "error_type": "timeout_error",
+  "retryable": true
+}
+```
+
 ## Available Prompts
 
 The MCP server also provides prompt templates to help guide searches:

@@ -1132,6 +1132,11 @@ def search_flights(
 
     Returns a list of available flights with prices, durations, and leg details.
     Supports one-way and round-trip searches with various filtering options.
+
+    On failure (`success: false`), the response also carries `error_type`
+    (e.g. `validation_error`, `timeout_error`, `blocked_error`) and a
+    `retryable` bool — classify the failure from `error_type` instead of
+    parsing the `error` message text.
     """
     effective_departure_window = departure_window or CONFIG.default_departure_window
     params = FlightSearchParams(
@@ -1283,6 +1288,11 @@ def search_dates(
 
     Returns a list of dates with their prices, useful for flexible travel planning.
     Supports both one-way and round-trip searches.
+
+    On failure (`success: false`), the response also carries `error_type`
+    (e.g. `validation_error`, `timeout_error`, `blocked_error`) and a
+    `retryable` bool — classify the failure from `error_type` instead of
+    parsing the `error` message text.
     """
     effective_departure_window = departure_window or CONFIG.default_departure_window
     params = DateSearchParams(
@@ -1456,6 +1466,12 @@ def get_booking_options(
     used for ``search_flights`` so the re-run search reproduces the same result
     set — otherwise, when ``flight_numbers`` is omitted, the priced "top
     result" may differ from the one the user saw.
+
+    On failure (``success: false``, including "no flight matched
+    flight_numbers"), the response also carries ``error_type`` (e.g.
+    ``validation_error``, ``rejected_error``) and a ``retryable`` bool —
+    classify the failure from ``error_type`` instead of parsing the
+    ``error`` message text.
     """
     effective_departure_window = departure_window or CONFIG.default_departure_window
     params = FlightSearchParams(
@@ -1542,6 +1558,11 @@ def find_airports(
     Supports city names (e.g., "new york" returns JFK, LGA, EWR),
     airport names (e.g., "heathrow" returns LHR), IATA codes, and 4-letter
     ICAO codes (e.g., "KJFK" returns JFK).
+
+    On failure (``success: false``), the response also carries ``error_type``
+    (currently always ``unexpected_error`` for this tool, since airport
+    lookup is local and has no known-transient failure modes) and a
+    ``retryable`` bool.
     """
     return _find_airports_impl(query, limit=limit)
 
