@@ -5,6 +5,7 @@ from typing import Annotated, Any
 import typer
 from pydantic import ValidationError
 
+from fli.cli.console import console
 from fli.cli.enums import OutputFormat
 from fli.cli.errors import json_error_payload, report_cli_error
 from fli.cli.utils import (
@@ -40,6 +41,7 @@ from fli.models import (
     TripType,
 )
 from fli.search import SearchClientError, SearchFlights
+from fli.search.flights import SPARSE_PASSENGER_MIX_WARNING
 
 
 def _search_flights_core(
@@ -224,6 +226,14 @@ def _search_flights_core(
         )
 
         if not results:
+            # Same condition the library warns on: an empty result for a
+            # party with children or infants often reflects Google's
+            # client-side pricing gap, not a route with no service.
+            sparse_note = (
+                SPARSE_PASSENGER_MIX_WARNING
+                if children + infants_in_seat + infants_on_lap > 0
+                else None
+            )
             if output_format == OutputFormat.JSON:
                 emit_json(
                     build_json_success_response(
@@ -233,11 +243,14 @@ def _search_flights_core(
                         results_key="flights",
                         results=[],
                         booking_url=booking_url,
+                        note=sparse_note,
                     )
                 )
                 return
 
             typer.echo("No flights found.")
+            if sparse_note:
+                console.print(sparse_note, style="dim", soft_wrap=True)
             raise typer.Exit(1)
 
         # Build per-flight booking deep-links (tfs; never raises).

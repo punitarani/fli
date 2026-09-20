@@ -346,8 +346,14 @@ def build_json_success_response(
     results_key: str,
     results: list[dict[str, Any]],
     booking_url: str | None = None,
+    note: str | None = None,
 ) -> dict[str, Any]:
-    """Build a JSON success payload for CLI commands."""
+    """Build a JSON success payload for CLI commands.
+
+    ``note`` is an optional explanatory string (e.g. the sparse-passenger-mix
+    hint on an empty result) — additive, like ``booking_url``, so callers that
+    don't pass it see no shape change.
+    """
     payload: dict[str, Any] = {
         "success": True,
         "data_source": "google_flights",
@@ -359,6 +365,8 @@ def build_json_success_response(
     }
     if booking_url:
         payload["booking_url"] = booking_url
+    if note:
+        payload["note"] = note
     return payload
 
 
