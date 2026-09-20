@@ -62,6 +62,7 @@ def _search_flights_core(
     exclude_alliance: list[str] | None = None,
     min_layover: int | None = None,
     max_layover: int | None = None,
+    passengers: int = 1,
 ) -> None:
     """Core flight search functionality."""
     query: dict[str, Any] = {
@@ -74,6 +75,7 @@ def _search_flights_core(
         "cabin_class": cabin_class.upper(),
         "max_stops": max_stops.upper(),
         "sort_by": sort_by.upper(),
+        "passengers": passengers,
     }
 
     try:
@@ -158,7 +160,7 @@ def _search_flights_core(
         # Create search filters
         filters = FlightSearchFilters(
             trip_type=trip_type,
-            passenger_info=PassengerInfo(adults=1),
+            passenger_info=PassengerInfo(adults=passengers),
             flight_segments=segments,
             stops=stops,
             seat_type=seat_type,
@@ -466,6 +468,15 @@ def flights(
             min=1,
         ),
     ] = None,
+    passengers: Annotated[
+        int,
+        typer.Option(
+            "--passengers",
+            "-p",
+            help="Number of adult passengers",
+            min=1,
+        ),
+    ] = 1,
 ):
     """Search for flights on a specific date.
 
@@ -479,6 +490,7 @@ def flights(
         fli flights JFK FRA 2026-10-25 --alliance ONEWORLD
         fli flights JFK LAX 2026-10-25 --exclude-airlines DL
         fli flights BUF ATH 2026-10-25 --min-layover 120
+        fli flights JFK LHR 2026-10-25 --passengers 2
 
     """
     _search_flights_core(
@@ -506,4 +518,5 @@ def flights(
         exclude_alliance=exclude_alliance,
         min_layover=min_layover,
         max_layover=max_layover,
+        passengers=passengers,
     )

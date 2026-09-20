@@ -41,6 +41,44 @@ def test_flights_with_time_filter(runner, mock_search_flights, mock_console):
     mock_search_flights.search.assert_called_once()
 
 
+def test_flights_with_passengers(runner, mock_search_flights, mock_console):
+    """Test flights search passes adult passenger count into filters."""
+    result = runner.invoke(
+        app,
+        [
+            "flights",
+            "JFK",
+            "LAX",
+            datetime.now().strftime("%Y-%m-%d"),
+            "--passengers",
+            "2",
+        ],
+    )
+    assert result.exit_code == 0
+    args, _ = mock_search_flights.search.call_args
+    assert args[0].passenger_info.adults == 2
+
+
+def test_flights_json_query_echoes_passengers(runner, mock_search_flights, mock_console):
+    """JSON query echo includes requested adult passenger count."""
+    result = runner.invoke(
+        app,
+        [
+            "flights",
+            "JFK",
+            "LAX",
+            datetime.now().strftime("%Y-%m-%d"),
+            "--passengers",
+            "3",
+            "--format",
+            "json",
+        ],
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["query"]["passengers"] == 3
+
+
 def test_flights_with_airlines(runner, mock_search_flights, mock_console):
     """Repeated -a flags resolve to the matching Airline enums on the filter."""
     result = runner.invoke(
