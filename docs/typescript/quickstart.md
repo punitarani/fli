@@ -239,8 +239,10 @@ What that means in practice:
   economy 23 rows for one adult, 16 with an infant; SFO→NRT business 9
   rows for one or two adults, 0 with a child). Extra adults cost nothing.
   An empty result for such a search does not mean the route has no
-  flights; `search()` logs a warning, and an adults-only search shows the
-  schedule.
+  flights — and neither does it mean this is why: `search()` only warns
+  when the fetched page itself came back with zero rows, not when the
+  caller's own airline/price/duration/window filter removed rows Google
+  did return. An adults-only search shows the schedule.
 * **Date searches cost one page fetch per date**, capped at 93 dates. A
   sweep that never loads a single page stops once five dates have come
   back payload-less and throws, rather than paying the retry budget on
