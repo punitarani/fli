@@ -354,8 +354,23 @@ class TestRoundTripDurationFallback:
         assert results and all(len(r.date) == 2 for r in results)
         # Outbound and return are 7 days apart in the fixture's segments.
         assert all((r.date[1] - r.date[0]).days == 7 for r in results)
-        tfs = urls[0].split("tfs=")[1].split("&")[0]
-        decoded = base64.urlsafe_b64decode(tfs + "=" * (-len(tfs) % 4)).decode("latin-1")
+
+        # The date sweep prices every candidate date on the shared thread
+        # pool (see fli/search/_concurrency.py), so `urls` fills in whatever
+        # order the fetches happen to complete in — NOT the order `results`
+        # ends up in (which is sorted after the fact). `urls[0]` is
+        # therefore not guaranteed to be the request that produced
+        # `results[0]`; decode every recorded URL and look up the one whose
+        # `tfs` token actually encodes the result under test instead.
+        def _decode_tfs(url: str) -> str:
+            tfs = url.split("tfs=")[1].split("&")[0]
+            return base64.urlsafe_b64decode(tfs + "=" * (-len(tfs) % 4)).decode("latin-1")
+
+        decoded_urls = [_decode_tfs(u) for u in urls]
         for r in results[:1]:
-            assert r.date[0].strftime("%Y-%m-%d") in decoded
-            assert r.date[1].strftime("%Y-%m-%d") in decoded
+            outbound_str = r.date[0].strftime("%Y-%m-%d")
+            return_str = r.date[1].strftime("%Y-%m-%d")
+            assert any(outbound_str in d and return_str in d for d in decoded_urls), (
+                f"no fetched URL encoded both {outbound_str} and {return_str} "
+                f"(checked {len(decoded_urls)} URLs)"
+            )
