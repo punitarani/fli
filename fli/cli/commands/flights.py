@@ -295,8 +295,14 @@ def _search_flights_core(
 
 
 def flights(
-    origin: Annotated[str, typer.Argument(help="Departure airport IATA code (e.g., JFK)")],
-    destination: Annotated[str, typer.Argument(help="Arrival airport IATA code (e.g., LHR)")],
+    origin: Annotated[
+        str,
+        typer.Argument(help="Departure airport code, or a comma-separated list (e.g., JFK,LGA)"),
+    ],
+    destination: Annotated[
+        str,
+        typer.Argument(help="Arrival airport code, or a comma-separated list (e.g., LHR,LGW)"),
+    ],
     departure_date: Annotated[str, typer.Argument(help="Travel date (YYYY-MM-DD)")],
     return_date: Annotated[
         str | None,
@@ -483,6 +489,7 @@ def flights(
     Example:
         fli flights JFK LHR 2026-10-25 --time 6-20 --airlines BA,KL --stops NON_STOP
         fli flights JFK LHR 2026-10-25 --format json
+        fli flights JFK,LGA LHR,LGW 2026-10-25
         fli flights JFK LHR 2026-10-25 --exclude-basic
         fli flights JFK LAX 2026-10-25 --bags 1 --carry-on
         fli flights JFK LAX 2026-10-25 --emissions LESS
