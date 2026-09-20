@@ -61,6 +61,27 @@ def _scrub_ca_bundle_env(monkeypatch):
     monkeypatch.delenv("REQUESTS_CA_BUNDLE", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_cli_error_log_dir(monkeypatch, tmp_path):
+    """Redirect ``fli.cli.errors._LOG_DIR`` under ``tmp_path`` for every test.
+
+    ``_LOG_DIR`` is ``Path.home() / ".fli" / "logs"`` — a module-level
+    constant, read once at import time. Any test that exercises
+    ``report_cli_error`` / ``json_error_payload``, directly or indirectly
+    (a CLI command hitting an error path, a search helper whose error
+    surfaces through the CLI reporter), calls ``_write_log()``, which
+    creates that directory and drops a full traceback file into it. Left
+    unpatched, running the suite writes real files into the developer's
+    actual ``~/.fli/logs/`` on every run — tests must never touch that
+    directory. Autouse, suite-wide, so no test file has to remember to opt
+    in; a test whose assertions depend on the exact redirected path (e.g.
+    to check the directory is never created for a control-flow exit) can
+    still set its own ``monkeypatch.setattr("fli.cli.errors._LOG_DIR", ...)``
+    — defined closer to the test, it runs after this one and wins.
+    """
+    monkeypatch.setattr("fli.cli.errors._LOG_DIR", tmp_path / "fli-logs")
+
+
 def pytest_addoption(parser) -> None:
     """Add options to pytest."""
     parser.addoption("--fuzz", action="store_true", help="Run fuzz tests")
