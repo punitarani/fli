@@ -160,6 +160,14 @@ class _DateOutcome(NamedTuple):
         error: The exception behind ``failure``, kept for chaining.
         attempted: ``False`` for dates skipped before any request (past
             dates), so they don't count towards the "everything failed" check.
+        rows_before_filters: How many rows the page decoded to *before*
+            ``apply_client_side_filters`` ran, or ``None`` when the page
+            never loaded (``failure`` is set). Zero here means Google itself
+            inlined nothing for the date; a positive count that still left
+            ``price`` unset means the caller's own airline/price/duration/
+            window filter removed every row — a different cause, so the two
+            must not be conflated when deciding whether to blame a sparse
+            passenger mix.
 
     """  # noqa: D413
 
@@ -167,6 +175,7 @@ class _DateOutcome(NamedTuple):
     failure: str | None = None
     error: BaseException | None = None
     attempted: bool = True
+    rows_before_filters: int | None = None
 
 
 def _reasons(failed: list[_DateOutcome]) -> list[str]:
@@ -227,6 +236,29 @@ class SearchDates:
     def __init__(self):
         """Initialize the search client for date-based searches."""
         self.client = get_client()
+        # Set at the start of every search() call — see the
+        # sparse_passenger_mix property.
+        self._sparse_passenger_mix: bool = False
+
+    @property
+    def sparse_passenger_mix(self) -> bool:
+        """Whether the sparse-passenger-mix warning fired on the most recent search().
+
+        ``True`` exactly when the empty sweep this instance last returned (or
+        raised out of) was consistent with Google's client-side pricing gap
+        for children/infants rather than the caller's own filters — see
+        ``_warn_if_sparse_passenger_mix``. Reset to ``False`` at the start of
+        every :meth:`search` call, including ones that raise, so a stale
+        ``True`` from an earlier call never leaks into a later one.
+
+        Reflects only the *last completed* :meth:`search` call on this
+        instance and is not meant for instances shared across concurrent
+        searches — two overlapping :meth:`search` calls on one
+        ``SearchDates`` would race on this attribute. Not currently read by
+        the MCP server or CLI (unlike ``SearchFlights.sparse_passenger_mix``);
+        exposed here for symmetry with the warning this class already logs.
+        """
+        return self._sparse_passenger_mix
 
     def search(
         self,
@@ -261,6 +293,10 @@ class SearchDates:
             priced by a single flat parallel map.
 
         """
+        # Reset before any code below can raise, so a search that raises
+        # never leaves a stale True from an earlier call on this instance.
+        self._sparse_passenger_mix = False
+
         dropped = unsupported_filters(filters)
         if dropped:
             logger.warning(
@@ -313,7 +349,9 @@ class SearchDates:
             tasks,
         )
         result = self._collect(outcomes, len(tasks), skipped=health.skipped)
-        self._warn_if_sparse_passenger_mix(outcomes, result, filters.passenger_info)
+        self._sparse_passenger_mix = self._warn_if_sparse_passenger_mix(
+            outcomes, result, filters.passenger_info
+        )
         return result
 
     @staticmethod
@@ -321,28 +359,44 @@ class SearchDates:
         outcomes: list[_DateOutcome],
         result: list[DatePrice] | None,
         passenger_info: PassengerInfo,
-    ) -> None:
+    ) -> bool:
         """Warn once when an empty sweep may be Google's pricing gap, not a dead range.
 
         ``_collect`` already turns "every attempted date failed" or a tripped
         breaker into a raise, and a minority of load failures into its own
         summary warning (see its docstring) — so this only has something to
-        add when nothing priced *and* not one attempted date failed to load:
-        every page that loaded simply had no flights. For a party with
-        children or infants that is the shape Google's client-side pricing
-        produces, not evidence the route has no service.
+        add when nothing priced *and* not one attempted date failed to load.
+
+        That alone is not enough, though: a date whose page loaded and
+        decoded rows that the caller's own airline/price/duration/window
+        filter then removed looks identical to one Google itself served
+        nothing for, unless the pre-filter row count is checked too. Only
+        when at least one loaded date's page decoded to *zero* rows before
+        filtering is the emptiness actually Google's doing — see
+        ``_DateOutcome.rows_before_filters``. For a party with children or
+        infants that is the shape Google's client-side pricing produces, not
+        evidence the route has no service.
 
         Internal — underscore-prefixed rather than private, mirroring
         :meth:`_collect`, so tests can drive it with a fixed set of outcomes
         instead of racing a real sweep's per-date failure logging into the
         state they want to assert.
+
+        Returns:
+            Whether the warning fired — the caller mirrors this onto
+            :attr:`SearchDates.sparse_passenger_mix`.
+
         """
         if result is not None:
-            return
+            return False
         if any(o.failure for o in outcomes if o.attempted):
-            return
-        if _has_children_or_infants(passenger_info):
-            logger.warning(SPARSE_PASSENGER_MIX_WARNING)
+            return False
+        if not any(o.rows_before_filters == 0 for o in outcomes if o.attempted and not o.failure):
+            return False
+        if not _has_children_or_infants(passenger_info):
+            return False
+        logger.warning(SPARSE_PASSENGER_MIX_WARNING)
+        return True
 
     def _days_in(self, filters: DateSearchFilters) -> list[datetime]:
         """List every date in one chunk's ``from_date``..``to_date`` range."""
@@ -631,7 +685,14 @@ class SearchDates:
             # walk attacker-shaped data from the wire, and letting one odd row
             # raise out of here would sink the whole sweep, which is the class
             # of bug this method exists to avoid.
-            flights = apply_client_side_filters(_flights_in(payload), filters)
+            #
+            # ``rows_before_filters`` is captured ahead of the filter call
+            # deliberately: it is what tells a genuinely empty Google page
+            # (0 rows decoded) apart from a page Google filled that the
+            # caller's own airline/price/duration/window filter then emptied
+            # — see ``_DateOutcome`` and ``_warn_if_sparse_passenger_mix``.
+            raw_flights = _flights_in(payload)
+            flights = apply_client_side_filters(raw_flights, filters)
             prices = [flight.price for flight in flights if flight.price]
         except Exception as exc:  # noqa: BLE001 — one bad date must not sink the sweep
             # One concise line per bad date. A 93-date sweep against a blocked
@@ -647,14 +708,15 @@ class SearchDates:
             return _DateOutcome(failure=f"{type(exc).__name__}: {exc}", error=exc)
 
         if not prices:
-            return _DateOutcome()
+            return _DateOutcome(rows_before_filters=len(raw_flights))
 
         return _DateOutcome(
             price=DatePrice(
                 date=tuple(dates),
                 price=min(prices),
                 currency=currency,
-            )
+            ),
+            rows_before_filters=len(raw_flights),
         )
 
     @staticmethod

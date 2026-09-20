@@ -7,6 +7,13 @@ or ``SearchDates.search`` result for such a party used to be indistinguishable
 from a route with no service at all; these tests pin the one warning each
 call logs to explain the difference, and confirm it stays silent whenever it
 would not apply.
+
+A result can also come back empty because the *caller's own* client-side
+filter (airline, price cap, max duration, departure window) removed every
+row Google did inline — that is not evidence of the passenger-mix pricing
+gap, so a second family of tests below pins that the warning (and the
+``sparse_passenger_mix`` attribute both classes expose) only fires when at
+least one fetched page decoded to zero rows *before* filtering.
 """
 
 from __future__ import annotations
@@ -18,6 +25,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from fli.models import (
+    Airline,
     Airport,
     DateSearchFilters,
     FlightSearchFilters,
@@ -26,6 +34,7 @@ from fli.models import (
 )
 from fli.models.google_flights.base import TripType
 from fli.search import dates as dates_module
+from fli.search.exceptions import SearchParseError
 from fli.search.flights import SPARSE_PASSENGER_MIX_WARNING, SearchFlights
 from tests.search._pages import as_search_page
 from tests.search.test_parse_flights_data import _leg, _row
@@ -35,7 +44,7 @@ def _future(days: int) -> str:
     return (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
 
 
-def _one_way_filters(passenger_info: PassengerInfo) -> FlightSearchFilters:
+def _one_way_filters(passenger_info: PassengerInfo, **overrides) -> FlightSearchFilters:
     return FlightSearchFilters(
         passenger_info=passenger_info,
         flight_segments=[
@@ -45,10 +54,11 @@ def _one_way_filters(passenger_info: PassengerInfo) -> FlightSearchFilters:
                 travel_date=_future(45),
             )
         ],
+        **overrides,
     )
 
 
-def _round_trip_filters(passenger_info: PassengerInfo) -> FlightSearchFilters:
+def _round_trip_filters(passenger_info: PassengerInfo, **overrides) -> FlightSearchFilters:
     return FlightSearchFilters(
         trip_type=TripType.ROUND_TRIP,
         passenger_info=passenger_info,
@@ -64,6 +74,7 @@ def _round_trip_filters(passenger_info: PassengerInfo) -> FlightSearchFilters:
                 travel_date=_future(52),
             ),
         ],
+        **overrides,
     )
 
 
@@ -77,9 +88,9 @@ def _page(rows: list) -> str:
     return as_search_page(payload)
 
 
-def _row_page() -> str:
+def _row_page(airline_code: str = "DL") -> str:
     """Build a search page carrying exactly one parseable flight row."""
-    return _page([_row(legs=[_leg(dep_iata="JFK", arr_iata="LAX")])])
+    return _page([_row(legs=[_leg(dep_iata="JFK", arr_iata="LAX", airline_code=airline_code)])])
 
 
 def _empty_page() -> str:
@@ -115,6 +126,7 @@ class TestSparsePassengerMixWarningOneWay:
         warnings = _warnings(caplog)
         assert len(warnings) == 1, f"expected exactly one warning, got {len(warnings)}"
         assert warnings[0].getMessage() == SPARSE_PASSENGER_MIX_WARNING
+        assert sf.sparse_passenger_mix is True
 
     def test_empty_with_lap_infant_warns_exactly_once(self, monkeypatch, caplog):
         sf = _client_serving(monkeypatch, [_empty_page()])
@@ -142,6 +154,7 @@ class TestSparsePassengerMixWarningOneWay:
             result = sf.search(filters)
         assert result is None
         assert _warnings(caplog) == []
+        assert sf.sparse_passenger_mix is False
 
     def test_rows_with_child_does_not_warn(self, monkeypatch, caplog):
         sf = _client_serving(monkeypatch, [_row_page()])
@@ -150,6 +163,7 @@ class TestSparsePassengerMixWarningOneWay:
             result = sf.search(filters)
         assert result is not None
         assert _warnings(caplog) == []
+        assert sf.sparse_passenger_mix is False
 
 
 class TestSparsePassengerMixWarningRoundTrip:
@@ -163,6 +177,7 @@ class TestSparsePassengerMixWarningRoundTrip:
         warnings = _warnings(caplog)
         assert len(warnings) == 1, f"expected exactly one warning, got {len(warnings)}"
         assert warnings[0].getMessage() == SPARSE_PASSENGER_MIX_WARNING
+        assert sf.sparse_passenger_mix is True
 
     def test_empty_return_leg_with_child_warns_exactly_once(self, monkeypatch, caplog):
         """Outbound has rows but every expansion fetch for the return comes back empty.
@@ -178,6 +193,7 @@ class TestSparsePassengerMixWarningRoundTrip:
         warnings = _warnings(caplog)
         assert len(warnings) == 1, f"expected exactly one warning, got {len(warnings)}"
         assert warnings[0].getMessage() == SPARSE_PASSENGER_MIX_WARNING
+        assert sf.sparse_passenger_mix is True
 
     def test_empty_round_trip_adults_only_does_not_warn(self, monkeypatch, caplog):
         sf = _client_serving(monkeypatch, [_row_page(), _empty_page()])
@@ -194,6 +210,99 @@ class TestSparsePassengerMixWarningRoundTrip:
             result = sf.search(filters)
         assert result
         assert _warnings(caplog) == []
+
+
+class TestSparsePassengerMixMisattribution:
+    """The warning must blame Google's page, not the caller's own filter.
+
+    Every row here is on airline DL; filtering for AA removes it entirely —
+    Google *did* inline something, so the sparse-mix diagnosis does not
+    apply even though the final result is empty and the party has a child.
+    """
+
+    def test_one_way_rows_filtered_out_by_airline_does_not_warn(self, monkeypatch, caplog):
+        sf = _client_serving(monkeypatch, [_row_page(airline_code="DL")])
+        filters = _one_way_filters(PassengerInfo(adults=1, children=1), airlines=[Airline.AA])
+        with caplog.at_level(logging.WARNING, logger="fli.search.flights"):
+            result = sf.search(filters)
+        assert result is None
+        assert _warnings(caplog) == []
+        assert sf.sparse_passenger_mix is False
+
+    def test_round_trip_outbound_rows_filtered_out_does_not_warn(self, monkeypatch, caplog):
+        """Outbound page has a row (Google inlined it); the airline filter removes it.
+
+        Never even reaches the return-leg fetch, since the outbound leg's
+        post-filter result is already empty.
+        """
+        sf = _client_serving(monkeypatch, [_row_page(airline_code="DL")])
+        filters = _round_trip_filters(PassengerInfo(adults=1, children=1), airlines=[Airline.AA])
+        with caplog.at_level(logging.WARNING, logger="fli.search.flights"):
+            result = sf.search(filters)
+        assert result is None
+        assert _warnings(caplog) == []
+        assert sf.sparse_passenger_mix is False
+
+    def test_round_trip_outbound_survives_return_leg_filtered_out_does_not_warn(
+        self, monkeypatch, caplog
+    ):
+        """Outbound row matches the filter; the return-leg row does not.
+
+        The return-leg page still carried a row (Google inlined it) — the
+        caller's own filter removed it, not Google. Distinguishes this from
+        ``test_empty_return_leg_with_child_warns_exactly_once``, where the
+        return-leg *page itself* has zero rows.
+        """
+        sf = _client_serving(
+            monkeypatch, [_row_page(airline_code="AA"), _row_page(airline_code="DL")]
+        )
+        filters = _round_trip_filters(PassengerInfo(adults=1, children=1), airlines=[Airline.AA])
+        with caplog.at_level(logging.WARNING, logger="fli.search.flights"):
+            result = sf.search(filters)
+        assert not result
+        assert _warnings(caplog) == []
+        assert sf.sparse_passenger_mix is False
+
+
+class TestSparsePassengerMixAttributeLifecycle:
+    def test_resets_to_false_after_a_non_sparse_search_on_the_same_instance(
+        self, monkeypatch, caplog
+    ):
+        sf = _client_serving(monkeypatch, [_empty_page()])
+        filters = _one_way_filters(PassengerInfo(adults=1, children=1))
+        with caplog.at_level(logging.WARNING, logger="fli.search.flights"):
+            sf.search(filters)
+        assert sf.sparse_passenger_mix is True
+
+        monkeypatch.setattr(
+            sf.client,
+            "get",
+            lambda url, **kwargs: type(
+                "R", (), {"text": _row_page(), "raise_for_status": lambda self: None}
+            )(),
+        )
+        result = sf.search(_one_way_filters(PassengerInfo(adults=1, children=1)))
+        assert result is not None
+        assert sf.sparse_passenger_mix is False
+
+    def test_resets_to_false_before_a_search_that_raises(self, monkeypatch, caplog):
+        sf = _client_serving(monkeypatch, [_empty_page()])
+        filters = _one_way_filters(PassengerInfo(adults=1, children=1))
+        with caplog.at_level(logging.WARNING, logger="fli.search.flights"):
+            sf.search(filters)
+        assert sf.sparse_passenger_mix is True
+
+        blank = "<html>no data callback here</html>"
+        monkeypatch.setattr(
+            sf.client,
+            "get",
+            lambda url, **kwargs: type(
+                "R", (), {"text": blank, "raise_for_status": lambda self: None}
+            )(),
+        )
+        with pytest.raises(SearchParseError):
+            sf.search(_one_way_filters(PassengerInfo(adults=1, children=1)))
+        assert sf.sparse_passenger_mix is False
 
 
 @pytest.mark.parametrize(
@@ -223,6 +332,70 @@ def test_has_children_or_infants_true(info):
     assert _has_children_or_infants(info) is True
 
 
+class TestSparseWarningRaceLoop:
+    """Confirm the exactly-once guarantee under real thread-pool concurrency.
+
+    Round-trip: 3 outbound rows spin up 3 parallel expansion workers, every
+    return-leg fetch is empty. 200 iterations, checking the warning fires
+    exactly once every time and never zero or twice.
+    """
+
+    def _three_row_page(self) -> str:
+        rows = [
+            _row(
+                legs=[_leg(dep_iata="JFK", arr_iata="LAX")],
+                price=100 + i,
+                booking_token=f"TOK{i}",
+            )
+            for i in range(3)
+        ]
+        return _page(rows)
+
+    def _one_run(self) -> tuple[int, object]:
+        sf = SearchFlights()
+        calls: list[int] = []
+        lock = threading.Lock()
+
+        def _fake_get(url, **kwargs):  # noqa: ANN001
+            with lock:
+                n = len(calls)
+                calls.append(n)
+            body = self._three_row_page() if n == 0 else _empty_page()
+            return type("R", (), {"text": body, "raise_for_status": lambda self: None})()
+
+        sf.client.get = _fake_get
+        filters = _round_trip_filters(PassengerInfo(adults=1, children=1))
+
+        logger = logging.getLogger("fli.search.flights")
+        records: list[logging.LogRecord] = []
+
+        class _Handler(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                records.append(record)
+
+        handler = _Handler()
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+        try:
+            result = sf.search(filters, top_n=5)
+        finally:
+            logger.removeHandler(handler)
+
+        sparse = [r for r in records if r.getMessage() == SPARSE_PASSENGER_MIX_WARNING]
+        return len(sparse), result
+
+    def test_two_hundred_iterations_always_warn_exactly_once(self):
+        counts: dict[int, int] = {}
+        bad_runs = []
+        for i in range(200):
+            n, result = self._one_run()
+            counts[n] = counts.get(n, 0) + 1
+            if n != 1 or result:
+                bad_runs.append((i, n, result))
+        assert not bad_runs, f"warning-count distribution: {counts}; bad runs: {bad_runs[:5]}"
+        assert counts == {1: 200}
+
+
 # ---------------------------------------------------------------------------
 # fli.search.dates.SearchDates
 # ---------------------------------------------------------------------------
@@ -230,7 +403,7 @@ def test_has_children_or_infants_true(info):
 FIRST_DAY = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=30)
 
 
-def _date_filters(days: int, passenger_info: PassengerInfo) -> DateSearchFilters:
+def _date_filters(days: int, passenger_info: PassengerInfo, **overrides) -> DateSearchFilters:
     """One-way date filters spanning ``days`` dates starting at FIRST_DAY."""
     return DateSearchFilters(
         trip_type=TripType.ONE_WAY,
@@ -244,6 +417,7 @@ def _date_filters(days: int, passenger_info: PassengerInfo) -> DateSearchFilters
         ],
         from_date=FIRST_DAY.strftime("%Y-%m-%d"),
         to_date=(FIRST_DAY + timedelta(days=days - 1)).strftime("%Y-%m-%d"),
+        **overrides,
     )
 
 
@@ -288,45 +462,72 @@ class TestSparsePassengerMixWarningDatesUnit:
     """
 
     def test_no_result_no_failures_with_child_warns_once(self, caplog):
-        outcomes = [dates_module._DateOutcome() for _ in range(3)]
+        outcomes = [dates_module._DateOutcome(rows_before_filters=0) for _ in range(3)]
         with caplog.at_level(logging.WARNING, logger="fli.search.dates"):
-            dates_module.SearchDates._warn_if_sparse_passenger_mix(
+            warned = dates_module.SearchDates._warn_if_sparse_passenger_mix(
                 outcomes, None, PassengerInfo(adults=1, children=1)
             )
         warnings = _date_warnings(caplog)
         assert len(warnings) == 1, f"expected exactly one warning, got {len(warnings)}"
         assert warnings[0].getMessage() == dates_module.SPARSE_PASSENGER_MIX_WARNING
+        assert warned is True
 
     def test_no_result_no_failures_adults_only_does_not_warn(self, caplog):
-        outcomes = [dates_module._DateOutcome() for _ in range(3)]
+        outcomes = [dates_module._DateOutcome(rows_before_filters=0) for _ in range(3)]
         with caplog.at_level(logging.WARNING, logger="fli.search.dates"):
-            dates_module.SearchDates._warn_if_sparse_passenger_mix(
+            warned = dates_module.SearchDates._warn_if_sparse_passenger_mix(
                 outcomes, None, PassengerInfo(adults=2)
             )
         assert _date_warnings(caplog) == []
+        assert warned is False
 
     def test_no_result_with_a_failure_and_child_does_not_warn(self, caplog):
         """A failed date means ``_collect`` already explains the gap — see its docstring."""
         outcomes = [
-            dates_module._DateOutcome(),
-            dates_module._DateOutcome(),
-            dates_module._DateOutcome(),
+            dates_module._DateOutcome(rows_before_filters=0),
+            dates_module._DateOutcome(rows_before_filters=0),
+            dates_module._DateOutcome(rows_before_filters=0),
             dates_module._DateOutcome(failure="SearchConnectionError: transient"),
         ]
         with caplog.at_level(logging.WARNING, logger="fli.search.dates"):
-            dates_module.SearchDates._warn_if_sparse_passenger_mix(
+            warned = dates_module.SearchDates._warn_if_sparse_passenger_mix(
                 outcomes, None, PassengerInfo(adults=1, children=1)
             )
         assert _date_warnings(caplog) == []
+        assert warned is False
 
     def test_a_result_with_child_does_not_warn(self, caplog):
         priced = dates_module.DatePrice(date=(FIRST_DAY,), price=150.0, currency="USD")
-        outcomes = [dates_module._DateOutcome(price=priced)]
+        outcomes = [dates_module._DateOutcome(price=priced, rows_before_filters=1)]
         with caplog.at_level(logging.WARNING, logger="fli.search.dates"):
-            dates_module.SearchDates._warn_if_sparse_passenger_mix(
+            warned = dates_module.SearchDates._warn_if_sparse_passenger_mix(
                 outcomes, [priced], PassengerInfo(adults=1, children=1)
             )
         assert _date_warnings(caplog) == []
+        assert warned is False
+
+    def test_no_result_rows_filtered_out_every_date_does_not_warn(self, caplog):
+        """Every date's page carried rows; the caller's own filter emptied all of them."""
+        outcomes = [dates_module._DateOutcome(rows_before_filters=2) for _ in range(3)]
+        with caplog.at_level(logging.WARNING, logger="fli.search.dates"):
+            warned = dates_module.SearchDates._warn_if_sparse_passenger_mix(
+                outcomes, None, PassengerInfo(adults=1, children=1)
+            )
+        assert _date_warnings(caplog) == []
+        assert warned is False
+
+    def test_no_result_mixed_zero_and_filtered_rows_still_warns(self, caplog):
+        """At least one date's page was genuinely empty — still the pricing gap."""
+        outcomes = [
+            dates_module._DateOutcome(rows_before_filters=2),
+            dates_module._DateOutcome(rows_before_filters=0),
+        ]
+        with caplog.at_level(logging.WARNING, logger="fli.search.dates"):
+            warned = dates_module.SearchDates._warn_if_sparse_passenger_mix(
+                outcomes, None, PassengerInfo(adults=1, children=1)
+            )
+        assert len(_date_warnings(caplog)) == 1
+        assert warned is True
 
     def test_one_failed_plus_three_empty_with_child_warns_exactly_once_total(self, caplog):
         """1 failed + 3 empty + child: exactly ONE warning overall, and it is #249's.
@@ -338,9 +539,9 @@ class TestSparsePassengerMixWarningDatesUnit:
         ``_price_one_date``'s own per-date failure warning and muddy the count).
         """
         outcomes = [
-            dates_module._DateOutcome(),
-            dates_module._DateOutcome(),
-            dates_module._DateOutcome(),
+            dates_module._DateOutcome(rows_before_filters=0),
+            dates_module._DateOutcome(rows_before_filters=0),
+            dates_module._DateOutcome(rows_before_filters=0),
             dates_module._DateOutcome(failure="SearchConnectionError: transient"),
         ]
         with caplog.at_level(logging.WARNING, logger="fli.search.dates"):
@@ -362,25 +563,54 @@ class TestSparsePassengerMixWarningDatesIntegration:
     def test_empty_sweep_with_child_warns_exactly_once(self, caplog):
         client = _CountingDateClient(_empty_page())
         filters = _date_filters(3, PassengerInfo(adults=1, children=1))
+        search = _search_dates_with(client)
         with caplog.at_level(logging.WARNING, logger="fli.search.dates"):
-            result = _search_dates_with(client).search(filters)
+            result = search.search(filters)
         assert result is None
         warnings = _date_warnings(caplog)
         assert len(warnings) == 1, f"expected exactly one warning, got {len(warnings)}"
         assert warnings[0].getMessage() == dates_module.SPARSE_PASSENGER_MIX_WARNING
+        assert search.sparse_passenger_mix is True
 
     def test_empty_sweep_adults_only_does_not_warn(self, caplog):
         client = _CountingDateClient(_empty_page())
         filters = _date_filters(3, PassengerInfo(adults=2))
+        search = _search_dates_with(client)
         with caplog.at_level(logging.WARNING, logger="fli.search.dates"):
-            result = _search_dates_with(client).search(filters)
+            result = search.search(filters)
         assert result is None
         assert _date_warnings(caplog) == []
+        assert search.sparse_passenger_mix is False
 
     def test_sweep_with_results_and_child_does_not_warn(self, caplog):
         client = _CountingDateClient(_row_page())
         filters = _date_filters(3, PassengerInfo(adults=1, children=1))
+        search = _search_dates_with(client)
         with caplog.at_level(logging.WARNING, logger="fli.search.dates"):
-            result = _search_dates_with(client).search(filters)
+            result = search.search(filters)
         assert result is not None
         assert _date_warnings(caplog) == []
+        assert search.sparse_passenger_mix is False
+
+    def test_sweep_rows_filtered_out_by_airline_every_date_does_not_warn(self, caplog):
+        """Every date's page carried a DL row; an AA-only filter empties every date."""
+        client = _CountingDateClient(_row_page(airline_code="DL"))
+        filters = _date_filters(3, PassengerInfo(adults=1, children=1), airlines=[Airline.AA])
+        search = _search_dates_with(client)
+        with caplog.at_level(logging.WARNING, logger="fli.search.dates"):
+            result = search.search(filters)
+        assert result is None
+        assert _date_warnings(caplog) == []
+        assert search.sparse_passenger_mix is False
+
+    def test_attribute_resets_after_a_non_sparse_sweep_on_the_same_instance(self, caplog):
+        client = _CountingDateClient(_empty_page())
+        search = _search_dates_with(client)
+        with caplog.at_level(logging.WARNING, logger="fli.search.dates"):
+            search.search(_date_filters(3, PassengerInfo(adults=1, children=1)))
+        assert search.sparse_passenger_mix is True
+
+        search.client = _CountingDateClient(_row_page())
+        result = search.search(_date_filters(3, PassengerInfo(adults=1, children=1)))
+        assert result is not None
+        assert search.sparse_passenger_mix is False
