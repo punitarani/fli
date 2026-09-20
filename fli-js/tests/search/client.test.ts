@@ -32,7 +32,13 @@ describe("Client", () => {
     originalEnv = process.env.FLI_TIMEOUT;
   });
   afterEach(() => {
-    process.env.FLI_TIMEOUT = originalEnv;
+    // Assigning `undefined` to process.env stores the string "undefined"
+    // (Node semantics, adopted by Bun 1.4), which poisons later tests.
+    if (originalEnv === undefined) {
+      delete process.env.FLI_TIMEOUT;
+    } else {
+      process.env.FLI_TIMEOUT = originalEnv;
+    }
   });
 
   test("POST with body sends the expected request", async () => {
