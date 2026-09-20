@@ -197,7 +197,13 @@ What that means in practice:
   own retries multiply in) and about 4 seconds, the same whether the range is 30
   days or 93. Unbroken, a 93-date range would have cost 279 fetches and up to
   837 requests. The bound is `(5 + worker count) x 3`, so raising
-  `configure_concurrency` raises it proportionally.
+  `configure_concurrency` raises it proportionally. That breaker disarms for
+  good the moment any page loads, even an empty one, so it cannot catch a
+  sweep that is mostly timeouts around one lucky date — `SearchDates.search`
+  raises that case too, whenever nothing priced and at least half the
+  attempted dates never loaded. A minority of failures alongside real
+  results, or alongside a confirmed-empty range (`None`), still returns
+  normally but logs one warning naming the counts.
 * **A page occasionally arrives without results.** Roughly one request in sixty
   returns HTTP 200 with no `ds:1` blob; the client retries that case up to twice
   (0.5s then 1.5s) before raising `SearchParseError`. A healthy search never

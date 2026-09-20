@@ -157,6 +157,13 @@ Consequences to keep in mind when changing search code:
   the bound scales with `configure_concurrency`.
   When it trips but prices still come back, `_collect` emits exactly one
   warning naming the skipped count: a truncated answer must never be silent.
+- The breaker alone can't catch "1 loaded, 29 timeouts" — one loaded page,
+  even empty, disarms it for good. So `_collect` also raises when 0 priced
+  and at least half the attempted dates never loaded (`failed >= loaded`),
+  without the `FLI_SOCS_COOKIE` hint (a page did load, so it isn't a consent
+  wall). A minority of load failures with 0 results still returns `None`;
+  a minority alongside partial results still returns those results; both
+  log exactly one summary warning naming the counts.
 - ~1 page in 60 arrives HTTP 200 with no `ds:1` blob. `fetch_payload` in
   `fli/search/_tfs.py` is the single fetch path for both flights and dates and
   retries exactly that case (`PAGE_FETCH_ATTEMPTS`, `PAGE_RETRY_BACKOFF`);
