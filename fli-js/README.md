@@ -128,11 +128,14 @@ What that means in practice:
   grid, so a range is priced date by date; one `SearchDates.search` covers at
   most 93 dates (`MAX_DATES_PER_SEARCH`) and a wider range throws `RangeError`.
   A sweep that never manages to load a single page — the shape a blocked or
-  consent-gated client produces — gives up after five dates rather than paying
-  the retry budget on all of them, and throws. Only pages served without
-  results count towards that: a timeout or a dropped connection says nothing
-  about the dates not yet tried, so those never abandon a sweep. A sweep cut
-  short that still found prices returns them with one warning saying so.
+  consent-gated client produces — stops once five dates have come back
+  payload-less rather than paying the retry budget on all of them, and throws.
+  Up to ten dates are in flight at once, so around fourteen are attempted
+  before the rest are abandoned (measured: 42 page fetches, whether the range
+  is 30, 61 or 93 days). Only pages served without results count towards that:
+  a timeout or a dropped connection says nothing about the dates not yet tried,
+  so those never abandon a sweep. A sweep cut short that still found prices
+  returns them with one warning saying so.
 - **A page occasionally arrives without results.** Roughly one request in sixty
   returns HTTP 200 with no `ds:1` blob; the client retries that case up to twice
   (0.5s then 1.5s) before throwing `SearchParseError`. A healthy search never

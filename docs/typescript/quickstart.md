@@ -234,9 +234,12 @@ What that means in practice:
   the old RPC returned — and a client-side filter cannot back-fill the
   list the way Google's server-side one did.
 * **Date searches cost one page fetch per date**, capped at 93 dates. A
-  sweep that never loads a single page gives up after five dates and
-  throws rather than paying the retry budget on all of them; one that was
-  cut short but found prices returns them with a warning.
+  sweep that never loads a single page stops once five dates have come
+  back payload-less and throws, rather than paying the retry budget on
+  all of them. Ten dates are in flight at once, so around fourteen are
+  attempted first — about 42 page fetches, whether the range is 30, 61 or
+  93 days. One that was cut short but found prices returns them with a
+  warning.
 * **A page occasionally arrives without results.** Roughly one request in
   sixty returns HTTP 200 with no `ds:1` blob; the client retries that case
   up to twice (0.5s then 1.5s) before throwing `SearchParseError`.
