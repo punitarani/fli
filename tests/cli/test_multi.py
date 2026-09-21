@@ -1,6 +1,7 @@
 """Tests for the multi-city CLI command."""
 
 from datetime import datetime, timedelta
+from unittest.mock import MagicMock
 
 import pytest
 from typer.testing import CliRunner
@@ -201,9 +202,16 @@ class TestMultiCityCommand:
         _, kwargs = mock_search_flights.build_flight_booking_url.call_args
         assert kwargs["seat_type"] == SeatType.BUSINESS
 
-    def test_builds_booking_url_per_result(self, runner, mock_search_flights, mock_console):
-        """Each result gets a booking deep-link, like the flights command already does."""
+    def test_builds_booking_url_per_result(
+        self, runner, mock_search_flights, mock_console, monkeypatch
+    ):
+        """Each result gets a booking deep-link, and it reaches display_flight_results."""
         mock_search_flights.search.return_value = _make_multi_city_results()
+        mock_search_flights.build_flight_booking_url.return_value = (
+            "https://www.google.com/travel/flights/booking?tfs=fake"
+        )
+        mock_display = MagicMock()
+        monkeypatch.setattr("fli.cli.commands.multi.display_flight_results", mock_display)
         date1 = _future_date(30)
         date2 = _future_date(34)
         date3 = _future_date(37)
@@ -225,6 +233,12 @@ class TestMultiCityCommand:
         args, _ = mock_search_flights.build_flight_booking_url.call_args
         assert isinstance(args[0], tuple)
         assert len(args[0]) == 3
+
+        mock_display.assert_called_once()
+        _, display_kwargs = mock_display.call_args
+        assert display_kwargs["booking_urls"] == [
+            "https://www.google.com/travel/flights/booking?tfs=fake"
+        ]
 
     def test_booking_url_reflects_passenger_mix(self, runner, mock_search_flights, mock_console):
         """The booking deep-link must be priced for the searched passenger mix, not a lone adult."""
