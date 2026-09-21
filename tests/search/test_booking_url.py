@@ -62,6 +62,28 @@ def _round_trip(price=200.0) -> tuple[FlightResult, FlightResult]:
     return (outbound, inbound)
 
 
+def _multi_city_three() -> tuple[FlightResult, FlightResult, FlightResult]:
+    leg1 = FlightResult(
+        price=None,
+        duration=420,
+        stops=0,
+        legs=[_make_leg(Airline.AA, "178", Airport.JFK, Airport.LHR, "2026-10-01")],
+    )
+    leg2 = FlightResult(
+        price=None,
+        duration=100,
+        stops=0,
+        legs=[_make_leg(Airline.AA, "1681", Airport.LHR, Airport.CDG, "2026-10-05")],
+    )
+    leg3 = FlightResult(
+        price=250.0,
+        duration=480,
+        stops=0,
+        legs=[_make_leg(Airline.AA, "1408", Airport.CDG, Airport.JFK, "2026-10-10")],
+    )
+    return (leg1, leg2, leg3)
+
+
 def _connection(price=150.0) -> FlightResult:
     dt1 = datetime.fromisoformat("2026-09-01T08:00:00").replace(tzinfo=timezone.utc)
     dt2 = datetime.fromisoformat("2026-09-01T12:00:00").replace(tzinfo=timezone.utc)
@@ -116,6 +138,27 @@ class TestBuildFlightBookingUrl:
         client = _make_client()
         url = client.build_flight_booking_url(_round_trip())
         assert "tfs=" in url
+
+    def test_multi_city_three_segments_falls_back_to_generic_url(self):
+        """3+ segments have no verified field-19 encoding, so use the generic URL.
+
+        A round-trip-tagged tfs token with 3 segments was confirmed (issue #212)
+        to decode on the booking page with one segment dropped and another
+        rewritten, so this is not the len()==1 guess this used to be.
+        """
+        client = _make_client()
+        url = client.build_flight_booking_url(_multi_city_three())
+        assert url == "https://www.google.com/travel/flights"
+        assert "tfs=" not in url
+
+    def test_multi_city_falls_back_with_locale_params(self):
+        client = _make_client()
+        url = client.build_flight_booking_url(
+            _multi_city_three(), currency="EUR", language="en-GB", country="GB"
+        )
+        assert url.startswith("https://www.google.com/travel/flights")
+        assert "tfs=" not in url
+        assert "curr=EUR" in url
 
     def test_tfs_no_padding_or_standard_b64(self):
         client = _make_client()
