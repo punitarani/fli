@@ -59,3 +59,12 @@ def test_jx_is_starlux():
     from fli.models import Airline, display_name
 
     assert display_name(Airline.JX) == "STARLUX Airlines"
+
+
+def test_h4_is_hisky_europe():
+    """Google returns H4 for HiSky Europe (e.g. Brussels-Bucharest); unknown codes drop the row."""
+    from fli.models import Airline, display_name
+    from fli.search._decoders import _safe_airline
+
+    assert display_name(Airline.H4) == "HiSky Europe"
+    assert _safe_airline("H4") is Airline.H4
