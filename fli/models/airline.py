@@ -259,6 +259,7 @@ AIRLINE_NAMES: dict[str, str] = {
     "H1": "Hahn Air Systems",
     "H2": "Sky Airline",
     "H3": "Harbour Air",
+    "H4": "HiSky Europe",
     "H6": "Bulgarian Air Charter",
     "H7": "Eagle Air",
     "H8": "Chilejet",
