@@ -15,7 +15,7 @@ addressed by a ``tfs`` protobuf parameter instead of the ``f.req`` JSON
 struct, which is what this module builds.
 
 Scope note: ``tfs`` carries trip type, segments, stop limit, cabin,
-passengers, alliances and layover restrictions. Filters with no known
+passengers, carry-on bags, alliances and layover restrictions. Filters with no known
 ``tfs`` field (airline include/exclude, price cap, duration, departure
 window) are applied to the decoded results instead — see
 :func:`apply_client_side_filters`. Anything that can be
@@ -71,6 +71,9 @@ _DS_DATA = re.compile(r"data:(.*?), sideChannel", re.S)
 
 # Filters with no ``tfs`` encoding and no reliable post-hoc equivalent —
 # the decoded rows don't carry the data needed to apply them locally.
+# ``bags`` is only partly here: carry-on is encoded (field 13), checked bags
+# are not, so :func:`unsupported_filters` reports ``bags`` only when checked
+# bags are requested.
 _UNSUPPORTED = (
     "emissions",
     "bags",
@@ -156,11 +159,14 @@ def build_tfs(filters: Any, *, travel_dates: list[str] | None = None) -> str:
             max_layover=getattr(layovers, "max_duration", None),
         )
 
+    bags = getattr(filters, "bags", None)
+
     return encode_tfs_payload(
         segments,
         is_one_way=filters.trip_type == TripType.ONE_WAY,
         passengers=passengers,
         seat=filters.seat_type.value,
+        carry_on_bags=int(bool(getattr(bags, "carry_on", False))),
     )
 
 
@@ -252,6 +258,9 @@ def unsupported_filters(filters: Any) -> list[str]:
             continue
         # Enum defaults (EmissionsFilter.ALL) are "unset" for our purposes.
         if getattr(value, "name", None) == "ALL":
+            continue
+        # Carry-on rides in the tfs; only checked bags are still dropped.
+        if attr == "bags" and not getattr(value, "checked_bags", 0):
             continue
         named.append(attr)
     return named

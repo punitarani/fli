@@ -490,7 +490,7 @@ def flights(
         bool,
         typer.Option(
             "--carry-on",
-            help="Include carry-on bag fee in price. [currently ignored by the search transport]",
+            help="Include carry-on bag fee in price.",
         ),
     ] = False,
     all_results: Annotated[

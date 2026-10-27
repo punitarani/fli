@@ -175,10 +175,11 @@ blob keyed `ds:1`.
 
 What that means in practice:
 
-* **Three filters are not supported.** `emissions`, `bags` and
-  `exclude_basic_economy` have no `tfs` field and cannot be reconstructed from
-  the decoded rows, so they are dropped with a warning. Stops, cabin,
-  passengers, alliances and layover bounds ride in the request; airline
+* **Three filters are not supported.** `emissions`, checked bags
+  (`checked_bags` / `--bags`) and `exclude_basic_economy` have no known `tfs`
+  field and cannot be reconstructed from the decoded rows, so they are dropped
+  with a warning. Stops, cabin, passengers, carry-on bags (`carry_on` /
+  `--carry-on`), alliances and layover bounds ride in the request; airline
   include/exclude, price cap, max duration and departure windows are applied to
   the results after fetching.
 * **Multi-city raises `SearchUnsupportedError`.** Google loads those results

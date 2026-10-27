@@ -245,7 +245,7 @@ find out where (and at what price) a specific flight can be booked.
 | `top_n` | int | No | 5 | Round-trip only: outbound options the re-run search expands into return-flight combinations (1-10) |
 | `emissions` | string | No | ALL | ALL or LESS. **Currently ignored by the search transport** (logged as a warning). |
 | `checked_bags` | int | No | 0 | Checked bags included in price (0–2). **Currently ignored by the search transport** (logged as a warning). |
-| `carry_on` | bool | No | false | Include carry-on bag fee in price. **Currently ignored by the search transport** (logged as a warning). |
+| `carry_on` | bool | No | false | Include carry-on bag fee in price, where Google knows it (e.g. Ryanair, Vueling). For some carriers (e.g. easyJet, Wizz Air) Google adds no fee, so their prices remain base fares. |
 | `currency` | string | No | null | ISO 4217 currency code (`curr=`) |
 | `language` | string | No | null | BCP-47 language code (`hl=`) |
 | `country` | string | No | null | ISO 3166-1 alpha-2 country (`gl=`) |
