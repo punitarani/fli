@@ -242,8 +242,9 @@ What that means in practice:
   Google refuses (429, 403, a rejected or empty page) is retried once through
   a hosted Google Flights search, billed to that Apify account at about
   $0.02-0.03 a search. The rows come back as normal `FlightResult`s. Round
-  trips, multi-city and premium cabins never fall back, and if the hosted
-  search fails too you get Google's original error. Unset, nothing changes.
+  trips, multi-city, premium cabins, alliance or layover filters, infants and
+  adult-free parties never fall back, and if the hosted search fails too you
+  get Google's original error. Unset, nothing changes.
 
 ## CLI Usage
 

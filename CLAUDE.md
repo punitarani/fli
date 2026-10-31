@@ -194,7 +194,8 @@ Consequences to keep in mind when changing search code:
   not retry it, since a fixed bundle either verifies or it doesn't.
 - `FLI_APIFY_TOKEN` turns on `fli/search/_apify.py`: when `SearchFlights.search`
   gets a refusal (`is_blocked`: HTTP 403/429, `SearchRejectedError`,
-  `SearchParseError`) on a one-way economy search, it retries once through a
+  `SearchParseError`) on a one-way economy search that `can_fall_back`
+  accepts (no alliances, layover restrictions or infants), it retries once through a
   hosted Apify Actor and runs the rows through `apply_client_side_filters` and
   the sort. Anything else, or a failed fallback, re-raises the original error.
   Tests: `tests/search/test_apify_fallback.py` (offline, `_post_json` stubbed).

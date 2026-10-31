@@ -7,8 +7,10 @@ import pytest
 from fli.models import (
     Airline,
     Airport,
+    Alliance,
     FlightSearchFilters,
     FlightSegment,
+    LayoverRestrictions,
     MaxStops,
     PassengerInfo,
     SeatType,
@@ -123,7 +125,7 @@ ITEMS = [
 
 def _filters(**overrides) -> FlightSearchFilters:
     fields = {
-        "passenger_info": PassengerInfo(adults=2, infants_on_lap=1),
+        "passenger_info": PassengerInfo(adults=2, children=1),
         "flight_segments": [
             FlightSegment(
                 departure_airport=[[Airport.JFK, 0]],
@@ -195,7 +197,8 @@ def test_blocked_one_way_search_falls_back(monkeypatch, blocked, hosted):
     assert call["body"]["departure_id"] == "JFK"
     assert call["body"]["arrival_id"] == "LHR"
     assert call["body"]["adults"] == 2
-    assert call["body"]["infants"] == 1
+    assert call["body"]["children"] == 1
+    assert "infants" not in call["body"]
     assert call["body"]["max_stops"] == 1
 
 
@@ -209,6 +212,12 @@ def test_client_side_filters_still_apply(monkeypatch, blocked, hosted):
     "overrides",
     [
         {"seat_type": SeatType.BUSINESS},
+        {"alliances": [Alliance.ONEWORLD]},
+        {"alliances_exclude": [Alliance.SKYTEAM]},
+        {"layover_restrictions": LayoverRestrictions(min_duration=60)},
+        {"passenger_info": PassengerInfo(adults=1, infants_on_lap=1)},
+        {"passenger_info": PassengerInfo(adults=1, infants_in_seat=1)},
+        {"passenger_info": PassengerInfo(adults=0, children=1)},
         {
             "trip_type": TripType.ROUND_TRIP,
             "flight_segments": [
@@ -240,6 +249,22 @@ def test_a_failed_fallback_raises_the_original_error(monkeypatch, blocked):
         raise ValueError("not JSON")
 
     monkeypatch.setattr(_apify, "_post_json", _fail)
+    with pytest.raises(SearchHTTPError):
+        SearchFlights().search(_filters())
+
+
+@pytest.mark.parametrize(
+    "items",
+    [
+        [],
+        [ITEMS[0] | {"best_flights": [], "other_flights": ITEMS[0]["other_flights"][1:]}],
+        [1, "x", {"best_flights": "x"}, {"other_flights": [{"flights": []}, 5]}],
+    ],
+)
+def test_nothing_readable_raises_the_original_error(monkeypatch, blocked, items):
+    """Unreadable or malformed hosted output never turns into "no flights"."""
+    monkeypatch.setenv(_apify.TOKEN_ENV_VAR, "apify_api_test")
+    monkeypatch.setattr(_apify, "_post_json", lambda url, token, body: items)
     with pytest.raises(SearchHTTPError):
         SearchFlights().search(_filters())
 

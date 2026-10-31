@@ -14,8 +14,10 @@ through the same client-side filters and sort as a direct search.
 
 With the variable unset nothing changes. Round trips, multi-city and premium
 cabins never fall back: the Actor's input has no cabin field, and a round
-trip would need a second hosted call per outbound. If the fallback itself
-fails, the original error is raised, so existing error handling still sees
+trip would need a second hosted call per outbound. Neither do searches with
+alliances, layover restrictions, infants or no adult (see
+:func:`can_fall_back`). If the fallback fails or returns nothing fli can
+read, the original error is raised, so existing error handling still sees
 the error it expects.
 """
 
@@ -78,11 +80,25 @@ def is_blocked(exc: BaseException) -> bool:
 
 
 def can_fall_back(filters: FlightSearchFilters) -> bool:
-    """Whether the hosted Actor can answer ``filters`` faithfully."""
+    """Whether the hosted Actor can answer ``filters`` faithfully.
+
+    It cannot when the search needs something the Actor's input has no field
+    for and ``apply_client_side_filters`` does not check afterwards: a premium
+    cabin, alliances, layover restrictions, or a party it would price
+    differently (no adult, or any infant, since the Actor takes a single
+    infant count that does not say seat or lap).
+    """
+    passengers = filters.passenger_info
     return (
         filters.trip_type == TripType.ONE_WAY
         and len(filters.flight_segments) == 1
         and filters.seat_type == SeatType.ECONOMY
+        and not filters.alliances
+        and not filters.alliances_exclude
+        and filters.layover_restrictions is None
+        and passengers.adults >= 1
+        and passengers.infants_in_seat == 0
+        and passengers.infants_on_lap == 0
     )
 
 
@@ -109,9 +125,8 @@ def actor_input(
         "departure_id": _codes(segment.departure_airport),
         "arrival_id": _codes(segment.arrival_airport),
         "outbound_date": segment.travel_date,
-        "adults": max(passengers.adults, 1),
+        "adults": passengers.adults,
         "children": passengers.children,
-        "infants": passengers.infants_in_seat + passengers.infants_on_lap,
         "currency": (currency or "USD").upper(),
         "exclude_basic": filters.exclude_basic_economy,
         "max_pages": 1,
@@ -166,6 +181,8 @@ def _leg(raw: dict[str, Any]) -> FlightLeg:
 
 
 def _result(raw: dict[str, Any], currency: str) -> FlightResult:
+    if not raw.get("flights"):
+        raise ValueError("row has no flights")
     legs = [_leg(leg) for leg in raw["flights"]]
     layovers = [
         Layover(
@@ -196,15 +213,19 @@ def parse_items(items: list[dict[str, Any]], currency: str) -> list[FlightResult
     """Turn the Actor's dataset items into :class:`FlightResult` rows.
 
     A row with an airport or airline fli doesn't know is skipped, as the
-    direct decoder does.
+    direct decoder does, and so is anything that is not shaped like a row.
     """
     flights: list[FlightResult] = []
     for item in items:
-        for raw in (item.get("best_flights") or []) + (item.get("other_flights") or []):
-            try:
-                flights.append(_result(raw, currency))
-            except (AttributeError, KeyError, TypeError, ValueError) as e:
-                logger.debug("Skipping hosted flight row: %s: %s", type(e).__name__, e)
+        if not isinstance(item, dict):
+            continue
+        for group in ("best_flights", "other_flights"):
+            rows = item.get(group)
+            for raw in rows if isinstance(rows, list) else []:
+                try:
+                    flights.append(_result(raw, currency))
+                except (AttributeError, IndexError, KeyError, TypeError, ValueError) as e:
+                    logger.debug("Skipping hosted flight row: %s: %s", type(e).__name__, e)
     return flights
 
 
@@ -229,4 +250,7 @@ def search_one_way(
         raise SearchClientError(f"Hosted fallback failed: {e}") from e
     if not isinstance(items, list):
         raise SearchClientError("Hosted fallback returned an unexpected response.")
-    return parse_items(items, body["currency"])
+    flights = parse_items(items, body["currency"])
+    if not flights:
+        raise SearchClientError("Hosted fallback returned no flights fli could read.")
+    return flights
