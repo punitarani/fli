@@ -307,10 +307,11 @@ describe("FlightSearchFilters.format() snapshots (parity with Python)", () => {
           travel_date: TD,
         }),
       ],
-      bags: { checked_bags: 1, carry_on: true },
+      bags: { checked_bags: 2, carry_on: true },
     });
     const out = filters.format() as unknown[];
-    expect((out[1] as unknown[])[10]).toEqual([1, 1]);
+    // [carry_on, checked_bags]
+    expect((out[1] as unknown[])[10]).toEqual([1, 2]);
   });
 
   test("Test 7: show_all_results = false", () => {

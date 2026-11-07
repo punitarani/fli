@@ -233,7 +233,7 @@ export class DateSearchFilters {
     }
 
     const bagsFilter: [number, number] | null = this.bags
-      ? [this.bags.checked_bags, this.bags.carry_on ? 1 : 0]
+      ? [this.bags.carry_on ? 1 : 0, this.bags.checked_bags]
       : null;
 
     const base: unknown[] = [
