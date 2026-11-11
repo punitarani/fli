@@ -173,6 +173,14 @@ def test_price_record_without_fare_omitted():
     assert prices["/m/0491y"]["destination_airport"] == "XXX"
 
 
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), -5.0])
+def test_non_finite_or_negative_fare_omitted(bad):
+    chunk = _price_chunk([_price_record("/m/0491y", 18), _price_record("/m/04v3q", bad)])
+    prices = parse_explore_prices_chunk(chunk, default_currency="USD")
+    assert set(prices) == {"/m/0491y"}
+    assert prices["/m/0491y"]["price"] == 18
+
+
 # ---------------------------------------------------------------------------
 # End-to-end parse through SearchExplore (stubbed client)
 # ---------------------------------------------------------------------------
