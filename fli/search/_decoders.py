@@ -13,6 +13,7 @@ booking-option row).
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime
 from typing import Any
 
@@ -721,14 +722,13 @@ def parse_explore_prices_chunk(
 
     Records without a numeric fare (Google keeps a placeholder row when no
     itinerary satisfies the filters) are omitted, so destinations they refer
-    to surface as unpriced after the merge. Every field is checked here
-    because :func:`merge_explore_payloads` applies them with ``model_copy``,
-    which skips :class:`ExploreDestination`'s own validation.
+    to surface as unpriced after the merge, as are records whose fare is
+    negative or not finite.
     """
     prices: dict[str, dict[str, Any]] = {}
     for record in _explore_price_records(chunk):
         price = _as_float(_get_path(record, 1, 0, 1))
-        if price is None or price < 0:
+        if price is None or not math.isfinite(price) or price < 0:
             continue
         token = as_str(_get_path(record, 1, 1))
         summary = safe_get(record, 6)
@@ -748,6 +748,20 @@ def parse_explore_prices_chunk(
     return prices
 
 
+def _apply_explore_price(dest: ExploreDestination, fields: dict[str, Any]) -> ExploreDestination:
+    """Merge price fields onto a destination through the model's own validation.
+
+    ``model_copy(update=...)`` would skip validation, so a bad field from
+    Google would slip past :class:`ExploreDestination`'s constraints. A record
+    that fails validation leaves the destination unpriced instead.
+    """
+    try:
+        return ExploreDestination.model_validate({**dest.model_dump(), **fields})
+    except ValueError:
+        logger.warning("Skipping malformed explore price record for %s", dest.mid, exc_info=True)
+        return dest
+
+
 def merge_explore_payloads(
     meta: dict[str, Any],
     destinations: list[ExploreDestination],
@@ -759,7 +773,7 @@ def merge_explore_payloads(
     ``price=None`` — a typical response prices only ~75% of destinations.
     """
     merged = [
-        dest.model_copy(update=prices[dest.mid]) if dest.mid in prices else dest
+        _apply_explore_price(dest, prices[dest.mid]) if dest.mid in prices else dest
         for dest in destinations
     ]
     return ExploreResult(

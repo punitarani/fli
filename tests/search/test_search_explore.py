@@ -12,10 +12,12 @@ from typing import Any
 
 import pytest
 
+from fli.models import ExploreDestination
 from fli.search import explore as explore_module
 from fli.search._decoders import (
     is_explore_destinations_chunk,
     is_explore_prices_chunk,
+    merge_explore_payloads,
     parse_explore_destinations_chunk,
     parse_explore_prices_chunk,
 )
@@ -155,6 +157,13 @@ def test_negative_price_record_omitted():
     assert parse_explore_prices_chunk(chunk, default_currency="USD") == {}
 
 
+def test_merge_rejects_invalid_price_fields():
+    """The merge runs the model's own validation, so a bad field leaves the destination unpriced."""
+    dest = ExploreDestination(mid="/m/0491y", name="Somewhere")
+    merged = merge_explore_payloads({}, [dest], {"/m/0491y": {"price": 10.0, "stops": -1}})
+    assert merged.destinations[0].price is None
+
+
 def test_price_record_without_fare_omitted():
     chunk = _price_chunk([_price_record("/m/0491y", 18), _price_record("/m/04v3q", None)])
     prices = parse_explore_prices_chunk(chunk, default_currency="USD")
@@ -162,6 +171,14 @@ def test_price_record_without_fare_omitted():
     assert prices["/m/0491y"]["price"] == 18
     assert prices["/m/0491y"]["currency"] == "USD"  # fake token -> fallback
     assert prices["/m/0491y"]["destination_airport"] == "XXX"
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), -5.0])
+def test_non_finite_or_negative_fare_omitted(bad):
+    chunk = _price_chunk([_price_record("/m/0491y", 18), _price_record("/m/04v3q", bad)])
+    prices = parse_explore_prices_chunk(chunk, default_currency="USD")
+    assert set(prices) == {"/m/0491y"}
+    assert prices["/m/0491y"]["price"] == 18
 
 
 # ---------------------------------------------------------------------------
