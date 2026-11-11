@@ -31,6 +31,7 @@ from fli.core import (
     parse_emissions,
     parse_max_stops,
     parse_sort_by,
+    resolve_airport,
     resolve_airports,
     search_airports,
 )
@@ -51,6 +52,7 @@ from fli.models import (
 )
 from fli.search import SearchDates, SearchExplore, SearchFlights
 from fli.search.dates import MAX_DATES_PER_SEARCH
+from fli.search.exceptions import SearchParseError
 from fli.search.flights import SPARSE_PASSENGER_MIX_WARNING
 
 
@@ -1208,8 +1210,7 @@ def _execute_explore_search(params: ExploreSearchParams) -> dict[str, Any]:
             max_nights = params.trip_max_nights if params.trip_max_nights is not None else 23
             if min_nights > max_nights:
                 raise ParseError(
-                    f"trip_min_nights ({min_nights}) cannot exceed "
-                    f"trip_max_nights ({max_nights})"
+                    f"trip_min_nights ({min_nights}) cannot exceed trip_max_nights ({max_nights})"
                 )
             trip_length_window = [4, 23, min_nights, max_nights]
 
@@ -1238,19 +1239,7 @@ def _execute_explore_search(params: ExploreSearchParams) -> dict[str, Any]:
         )
 
         if result is None:
-            # A valid explore request always returns destinations, so an
-            # unparseable response means the request failed (e.g. Google's
-            # HTTP-200 error envelope) — report it as such rather than as an
-            # empty result set.
-            return {
-                "success": False,
-                "error": (
-                    "Explore search returned no parseable response from Google. "
-                    "This usually indicates a rejected request rather than zero "
-                    "matching destinations; check the filters and try again."
-                ),
-                "destinations": [],
-            }
+            raise SearchParseError("Explore search returned no parseable response from Google.")
 
         destinations = list(result.destinations)
         if params.sort_by_price:
@@ -1292,9 +1281,26 @@ def _execute_explore_search(params: ExploreSearchParams) -> dict[str, Any]:
         }
 
     except ParseError as e:
-        return {"success": False, "error": str(e), "destinations": []}
+        return {
+            "success": False,
+            "error": str(e),
+            "destinations": [],
+            **classify_error(e).as_fields(),
+        }
+    except ValidationError as e:
+        return {
+            "success": False,
+            "error": format_validation_error(e),
+            "destinations": [],
+            **classify_error(e).as_fields(),
+        }
     except Exception as e:
-        return {"success": False, "error": f"Search failed: {str(e)}", "destinations": []}
+        return {
+            "success": False,
+            "error": _search_error_message(e),
+            "destinations": [],
+            **classify_error(e).as_fields(),
+        }
 
 
 # =============================================================================

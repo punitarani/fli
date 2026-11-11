@@ -276,3 +276,21 @@ def test_bags_order_is_carry_on_first():
         bags=BagsFilter(carry_on=False, checked_bags=2),
     )
     assert filters.format()[3][10] == [0, 2]
+
+
+@pytest.mark.parametrize(
+    "window", [[], [4, 23], [4, 23, 7, 7, 0], [3, 23, 7, 7], [4, 23, -1, 7], [4, 23, 14, 7]]
+)
+def test_invalid_trip_window_rejected(window):
+    with pytest.raises(ValidationError, match="trip_length_window"):
+        ExploreSearchFilters(
+            origin=Airport.LHR, departure_date=DEPARTURE_DATE, trip_length_window=window
+        )
+
+
+@pytest.mark.parametrize("window", [None, [4, 23, 0, 23], [4, 23, 7, 7]])
+def test_valid_one_way_trip_window(window):
+    filters = ExploreSearchFilters(
+        origin=Airport.LHR, departure_date=DEPARTURE_DATE, trip_length_window=window
+    )
+    assert filters.format()[3][13][0][2] == window

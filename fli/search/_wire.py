@@ -13,8 +13,8 @@ The Service returns JSONP-flavoured responses of the form::
 the legacy parsers in this package could get away with `lstrip(")]}'")`.
 `GetBookingResults` emits two chunks, so we need a proper multi-chunk reader.
 Since the flight/date searches moved to the public page transport
-(:mod:`fli.search._tfs`), `SearchFlights.get_booking_options` is the only
-live consumer of this module.
+(:mod:`fli.search._tfs`), `SearchFlights.get_booking_options` and `SearchExplore.search` consume
+this module.
 
 Important quirk: the length headers are **not** a dependable frame
 delimiter. They count the chunk plus its two surrounding newlines, but in

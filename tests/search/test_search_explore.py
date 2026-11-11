@@ -18,6 +18,7 @@ from fli.search._decoders import (
     parse_explore_destinations_chunk,
     parse_explore_prices_chunk,
 )
+from fli.search.exceptions import SearchParseError, SearchRejectedError
 from fli.search.explore import SearchExplore
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -227,16 +228,18 @@ def test_records_accumulate_across_many_chunks():
     assert [d.price for d in result.destinations] == [18, 132, None]
 
 
-def test_unparseable_body_returns_none():
-    result, _ = _search_with_body(")]}'\n\nnot json at all")
-    assert result is None
+@pytest.mark.parametrize("body", [")]}'\n\nnot json at all", _body([None] * 9)])
+def test_unparseable_body_raises(body):
+    with pytest.raises(SearchParseError, match="no parseable destination"):
+        _search_with_body(body)
 
 
-def test_error_13_body_returns_none():
+def test_error_13_body_raises():
     """The opaque error envelope Google sends for bad requests."""
     body = ")]}'\n\n" + json.dumps([["wrb.fr", None, None, None, None, [13]]])
-    result, _ = _search_with_body(body)
-    assert result is None
+    with pytest.raises(SearchRejectedError) as exc:
+        _search_with_body(body)
+    assert exc.value.code == 13
 
 
 # ---------------------------------------------------------------------------

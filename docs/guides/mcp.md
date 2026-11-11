@@ -283,6 +283,17 @@ itinerary matching the filters for them. Follow up with
 `departure_date` for bookable itineraries; each priced destination also
 carries a ready-made `flights_url` deep link.
 
+Explore still uses the `GetExploreDestinations` RPC. Google has intermittently
+rejected these requests with error 13; the public `/travel/explore` page
+currently embeds configuration, but no destination results to use as a
+fallback. A rejection or malformed response returns `success: false` with
+`error_type` and `retryable`, following the other search tools. Destinations
+without a fare remain successful results with `price: null`.
+
+For round trips, `flights_url` includes a return date only when
+`trip_min_nights == trip_max_nights`. Otherwise it links to the outbound
+search because Explore does not reveal the quoted fare's return date.
+
 ### `get_booking_options`
 
 Get bookable fares — vendor names, prices, and **direct booking URLs** — for a

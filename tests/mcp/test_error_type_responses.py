@@ -21,9 +21,11 @@ import pytest
 
 from fli.mcp.server import (
     DateSearchParams,
+    ExploreSearchParams,
     FlightSearchParams,
     _execute_booking_options,
     _execute_date_search,
+    _execute_explore_search,
     _execute_flight_search,
     _find_airports_impl,
 )
@@ -275,3 +277,25 @@ class TestFindAirportsErrorType:
         result = _find_airports_impl("new york")
         assert result["success"] is True
         assert "error_type" not in result
+
+
+class TestSearchExploreErrorType:
+    @pytest.mark.parametrize("exc,expected_type,expected_retryable", _SEARCH_CLIENT_ERROR_CASES)
+    def test_search_error_types(self, monkeypatch, exc, expected_type, expected_retryable):
+        monkeypatch.setattr("fli.mcp.server.SearchExplore.search", _raiser(exc))
+        result = _execute_explore_search(
+            ExploreSearchParams(origin="LHR", departure_date=_FUTURE_DATE)
+        )
+        assert result["success"] is False
+        assert result["error_type"] == expected_type
+        assert result["retryable"] is expected_retryable
+        assert result["destinations"] == []
+
+    def test_model_validation_error(self):
+        result = _execute_explore_search(
+            ExploreSearchParams(origin="LHR", departure_date="bad-date")
+        )
+        assert result["success"] is False
+        assert result["error_type"] == "validation_error"
+        assert result["retryable"] is False
+        assert "departure_date" in result["error"]

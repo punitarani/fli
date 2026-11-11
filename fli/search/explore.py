@@ -4,25 +4,18 @@ Explore answers "where can I fly cheaply?" — one request returns dozens of
 destinations (each with its cheapest found fare) for an origin and a broad
 destination such as :attr:`fli.models.ExploreRegion.ANYWHERE` or a continent.
 
-Request recipe (probed live via ``scripts/probe_explore.py``, 2026-08):
-unlike the sibling endpoints, ``GetExploreDestinations`` enforces a
-same-origin check — at least one of ``x-same-domain`` / ``origin`` /
-``referer`` must be present or every request fails with an opaque ``wrb.fr``
-error ``[13]``. Nothing else from the browser's ceremony is needed: no
-cookies, no ``at`` XSRF token, no ``f.sid``/``bl``/``soc-*``/``rt=c`` query
-params, and the ``curr=``/``hl=``/``gl=`` locale params work as on every
-other endpoint. Escalation ladder should this break in future:
+The RPC has intermittently returned Google's payload-less error-13 envelope
+since 2026-09. Live checks on 2026-11-11 returned priced destinations for
+LHR to Anywhere and JFK to Europe with the request below. Unlike the flight
+search page, the public Explore page currently embeds only configuration
+and locale data, not destination or fare records, so it is not a replacement
+transport. Rejections propagate as SearchRejectedError; missing destination
+records raise SearchParseError instead of masquerading as an empty search.
 
-1. current shape (``x-same-domain: 1`` + ``origin`` headers)
-2. add ``referer: https://www.google.com/travel/explore``
-3. add ``soc-app=162&soc-platform=1&soc-device=1&rt=c`` query params
-4. currency via ``x-goog-ext-259736195-jspb: [hl, gl, curr, 1, null,
-   [tz_minutes], null, null, 1, []]`` if ``curr=`` stops working
-5. priming ``GET /travel/explore`` to harvest cookies + the ``SNlM0e``
-   (``at``) token from ``WIZ_global_data``
+Same-origin signals (``x-same-domain`` / ``origin``) are required. Locale
+parameters (``curr``, ``hl``, ``gl``) use the shared URL builder and the
+shared client supplies the regional consent cookie.
 """
-
-import logging
 
 from fli.models import ExploreResult, ExploreSearchFilters
 from fli.search._decoders import (
@@ -35,8 +28,7 @@ from fli.search._decoders import (
 from fli.search._urls import with_locale_params
 from fli.search._wire import iter_wrb_chunks
 from fli.search.client import get_client
-
-logger = logging.getLogger(__name__)
+from fli.search.exceptions import SearchParseError
 
 
 class SearchExplore:
@@ -60,7 +52,7 @@ class SearchExplore:
         currency: str | None = None,
         language: str | None = None,
         country: str | None = None,
-    ) -> ExploreResult | None:
+    ) -> ExploreResult:
         """Search destinations and prices for an Explore query.
 
         Args:
@@ -71,8 +63,11 @@ class SearchExplore:
 
         Returns:
             An :class:`ExploreResult` with one entry per destination (price fields
-            are None for destinations Google returned without a fare), or None if
-            the response could not be parsed.
+            are None for destinations Google returned without a fare).
+
+        Raises:
+            SearchRejectedError: Google rejected the RPC (including error 13).
+            SearchParseError: The response contained no usable destination records.
 
         """
         encoded_filters = filters.encode()
@@ -104,7 +99,9 @@ class SearchExplore:
                 prices.update(parse_explore_prices_chunk(chunk, default_currency=currency))
 
         if not destinations:
-            logger.warning("Explore search returned no parseable destination chunks")
-            return None
+            raise SearchParseError(
+                "Explore search returned no parseable destination records. Google may "
+                "have changed the response shape or served a blocked/consent response."
+            )
 
         return merge_explore_payloads(meta, destinations, prices)

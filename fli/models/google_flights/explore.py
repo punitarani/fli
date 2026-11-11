@@ -46,6 +46,7 @@ from fli.models.google_flights.base import (
     PriceLimit,
     SeatType,
     TripType,
+    utc_today,
 )
 
 
@@ -67,8 +68,8 @@ class ExploreRegion(Enum):
     ``ANYWHERE`` (``/m/02j71`` = Earth) and the continent mids come from
     Google's place autocomplete (``H028ib``); ``EUROPE`` and
     ``SOUTHERN_EUROPE`` were additionally confirmed in live Explore requests
-    in the HAR capture. All values are verified live by
-    ``scripts/probe_explore.py`` before release.
+    in the HAR capture. All values were verified against the live endpoint
+    in August 2026.
     """
 
     ANYWHERE = "/m/02j71"
@@ -160,9 +161,20 @@ class ExploreSearchFilters(BaseModel):
     def validate_departure_date(cls, v: str) -> str:
         """Ensure the departure date is well-formed and not in the past."""
         parsed = datetime.strptime(v, "%Y-%m-%d").date()
-        if parsed < datetime.now().date():
+        if parsed < utc_today():
             raise ValueError("Departure date cannot be in the past")
         return v
+
+    @field_validator("trip_length_window")
+    @classmethod
+    def validate_trip_length_window(cls, value: list[int] | None) -> list[int] | None:
+        """Validate the captured window shape before sending a request to Google."""
+        if value is not None:
+            if len(value) != 4 or value[:2] != [4, 23]:
+                raise ValueError("trip_length_window must be [4, 23, min_nights, max_nights]")
+            if value[2] < 0 or value[3] < 0 or value[2] > value[3]:
+                raise ValueError("trip_length_window requires 0 <= min_nights <= max_nights")
+        return value
 
     @model_validator(mode="after")
     def validate_origin_destination(self) -> "ExploreSearchFilters":
@@ -210,7 +222,7 @@ class ExploreSearchFilters(BaseModel):
         formatted_slice = [
             [[_place_token(self.origin)]],  # 0: origin [[[mid_or_code, type]]]
             [[_place_token(self.destination)]],  # 1: destination [[[mid, type]]]
-            self.trip_length_window,  # 2: trip-length window (semantics unconfirmed)
+            self.trip_length_window,  # 2: trip-length window [4, 23, min, max]
             self.stops.value,  # 3: stops (0=any, 1=nonstop, ...)
             airlines_filters,  # 4: airline / alliance INCLUDE list
             exclude_filters,  # 5: airline / alliance EXCLUDE list

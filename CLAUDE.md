@@ -51,7 +51,7 @@ uv run mkdocs build         # Build static docs
 - Test structure mirrors source code: `tests/cli/`, `tests/models/`, `tests/search/`, `tests/mcp/`
 - Fuzzing tests are available but gated behind `--fuzz` flag
 - `live`-marked tests make real network calls to Google Flights (the fuzz case in
-  `test_search_flights_fuzz.py`, all of `test_search_flights_new_filters_live.py`, the four
+  `test_search_flights_fuzz.py`, all of `test_search_flights_new_filters_live.py` and `test_search_explore_live.py`, the four
   search tests in `tests/mcp/test_mcp_server.py::TestMCPServer`, and a handful of
   historically-unmocked cases in `test_search_flights.py` / `test_search_dates.py`). They're
   skipped by default and **`--all` does not enable them** — `ci.yml` runs `pytest tests/ --all`,
@@ -279,6 +279,12 @@ of destinations with their cheapest fares.
 found no fare), airline, stops, duration, `destination_airport`, dates,
 coordinates, an image URL, and a `flights_url` deep link. Chain a result's
 `destination_airport` into `search_flights` for bookable itineraries.
+
+Explore retains its RPC transport: the public Explore page embeds configuration
+but no destination results. The RPC worked in live checks on 2026-11-11, but
+has intermittently returned error 13. `SearchExplore.search` raises
+`SearchRejectedError` for rejections and `SearchParseError` for unreadable
+responses; MCP classifies both using the shared error contract.
 
 ### `get_booking_options`
 **Currently unavailable:** it calls `GetBookingResults`, which is gated behind

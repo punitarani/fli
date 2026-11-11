@@ -16,6 +16,8 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from fli.models import ExplorePlace, ExploreSearchFilters
 from fli.search import SearchExplore
 
+pytestmark = pytest.mark.live
+
 LONDON = ExplorePlace(mid="/m/04jpl", type_code=4)
 SOUTHERN_EUROPE = ExplorePlace(mid="/m/0250wj", type_code=6)
 
