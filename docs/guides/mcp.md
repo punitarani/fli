@@ -235,6 +235,7 @@ destination like `ANYWHERE` or a continent.
 | `alliance` | list | No | null | Restrict to ONEWORLD / SKYTEAM / STAR_ALLIANCE |
 | `exclude_alliance` | list | No | null | Alliance(s) to **exclude** |
 | `max_flight_duration` | int | No | null | Maximum flight duration in minutes |
+| `passengers` | int | No | 1 | Number of adult passengers |
 | `currency` | string | No | null | ISO 4217 currency code (`curr=`) |
 | `language` | string | No | null | BCP-47 language code (`hl=`) |
 | `country` | string | No | null | ISO 3166-1 alpha-2 country (`gl=`) |

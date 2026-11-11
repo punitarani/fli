@@ -182,7 +182,7 @@ def test_price_record_without_fare_omitted():
 def _no_retry_sleep(monkeypatch):
     """Record Explore's error-13 backoff instead of sleeping through it."""
     sleeps: list[float] = []
-    monkeypatch.setattr(explore_module.time, "sleep", sleeps.append)
+    monkeypatch.setattr(explore_module, "_sleep", sleeps.append)
     return sleeps
 
 
