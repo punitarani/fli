@@ -1129,8 +1129,11 @@ def _parse_explore_origin(value: str) -> Airport | ExplorePlace:
     return resolve_airport(cleaned)
 
 
-def _parse_explore_destination(value: str) -> ExploreRegion | ExplorePlace | Airport:
-    """Resolve an explore destination: region name, knowledge-graph mid, or IATA code."""
+def _parse_explore_destination(value: str) -> ExploreRegion | ExplorePlace:
+    """Resolve an explore destination: a region name or a knowledge-graph mid.
+
+    An airport code raises ``ParseError`` pointing at ``search_flights``.
+    """
     cleaned = value.strip()
     if cleaned.startswith(KG_MID_PREFIXES):
         # Sent as a region (type 6). Region, continent and country mids work;

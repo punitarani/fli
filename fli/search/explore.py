@@ -30,8 +30,6 @@ import time
 
 from fli.models import ExplorePlace, ExploreResult, ExploreSearchFilters
 from fli.search._decoders import (
-    is_explore_destinations_chunk,
-    is_explore_prices_chunk,
     merge_explore_payloads,
     parse_explore_destinations_chunk,
     parse_explore_prices_chunk,
@@ -47,6 +45,10 @@ logger = logging.getLogger(__name__)
 # Refusals cluster, so the pauses grow; the worst case adds ~6 s to a search.
 EXPLORE_ATTEMPTS = 4
 EXPLORE_RETRY_BACKOFF = (1.0, 2.0, 3.0)
+
+# Indirection so tests can observe the backoff without sleeping and without
+# patching the global ``time`` module (same pattern as ``_tfs._sleep``).
+_sleep = time.sleep
 
 _INTERMITTENT_HINT = (
     "Explore refuses a share of requests intermittently (about 40% in live checks "
@@ -115,7 +117,7 @@ class SearchExplore:
                     EXPLORE_ATTEMPTS,
                     delay,
                 )
-                time.sleep(delay)
+                _sleep(delay)
         raise AssertionError("unreachable")  # pragma: no cover
 
     def _search_once(
@@ -141,15 +143,16 @@ class SearchExplore:
         meta: dict = {}
         destinations: list = []
         prices: dict = {}
+        # Each parser returns nothing for a chunk of the other kind, so one
+        # pass per chunk classifies and decodes at once.
         for chunk in iter_wrb_chunks(response.text):
-            if is_explore_destinations_chunk(chunk):
-                chunk_meta, chunk_destinations = parse_explore_destinations_chunk(chunk)
+            chunk_meta, chunk_destinations = parse_explore_destinations_chunk(chunk)
+            if chunk_destinations:
                 for key, value in chunk_meta.items():
                     if meta.get(key) is None:
                         meta[key] = value
                 destinations.extend(chunk_destinations)
-            if is_explore_prices_chunk(chunk):
-                prices.update(parse_explore_prices_chunk(chunk, default_currency=currency))
+            prices.update(parse_explore_prices_chunk(chunk, default_currency=currency))
 
         if not destinations:
             message = (
