@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from fli.models import ExplorePlace, ExploreSearchFilters
+from fli.models.google_flights.explore import KG_MID_PREFIXES
 from fli.search import SearchExplore
 from fli.search.exceptions import SearchRejectedError
 
@@ -34,7 +35,7 @@ def _filters() -> ExploreSearchFilters:
     )
 
 
-def _search_with_retry(client: SearchExplore, filters: ExploreSearchFilters, **kw):
+def _search(client: SearchExplore, filters: ExploreSearchFilters, **kw):
     """Run one Explore search, xfailing only on Google's intermittent refusal.
 
     Google refuses a share of Explore requests with error 13 (about 40% in
@@ -58,14 +59,14 @@ def client():
 
 
 def test_explore_returns_many_priced_destinations(client):
-    result = _search_with_retry(client, _filters(), currency="USD")
+    result = _search(client, _filters(), currency="USD")
 
     assert result.origin_name
     assert len(result.destinations) >= 20
     priced = [d for d in result.destinations if d.price is not None]
     assert len(priced) >= 1
     for d in result.destinations:
-        assert d.mid.startswith(("/m/", "/g/"))
+        assert d.mid.startswith(KG_MID_PREFIXES)
         assert d.name
     for d in priced:
         assert d.price > 0
@@ -74,8 +75,8 @@ def test_explore_returns_many_priced_destinations(client):
 
 
 def test_currency_param_changes_prices(client):
-    usd = _search_with_retry(client, _filters(), currency="USD")
-    gbp = _search_with_retry(client, _filters(), currency="GBP")
+    usd = _search(client, _filters(), currency="USD")
+    gbp = _search(client, _filters(), currency="GBP")
 
     usd_prices = {d.mid: d.price for d in usd.destinations if d.price is not None}
     gbp_prices = {d.mid: d.price for d in gbp.destinations if d.price is not None}

@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from fli.mcp.server import (
+    CONFIG,
     ExploreSearchParams,
     _parse_explore_destination,
     _parse_explore_origin,
@@ -163,7 +164,7 @@ class TestExecuteExploreSearch:
         result = _search_explore_from_params(params)
         malta = result["destinations"][0]
         assert malta["name"] == "Malta"
-        assert malta["currency"] == "USD"
+        assert malta["currency"] == CONFIG.default_currency
         assert result["destinations"][2]["currency"] is None  # unpriced stays null
 
     def test_malformed_google_date_keeps_round_trip_result(self, mock_search):
