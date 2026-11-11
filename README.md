@@ -269,6 +269,16 @@ What that means in practice:
   client does not retry it, since a fixed bundle either verifies or it doesn't.
   Read once per worker thread on its first request; changing the value
   doesn't affect a thread's already-created session.
+* **`FLI_APIFY_TOKEN` (optional hosted fallback).** Google rate-limits whole
+  IP ranges (cloud hosts, VPN exits, shared office NAT) with HTTP 429, and no
+  request change gets around that (#203). Set `FLI_APIFY_TOKEN` to an
+  [Apify](https://apify.com) API token and a one-way economy search that
+  Google refuses (429, 403, a rejected or empty page) is retried once through
+  a hosted Google Flights search, billed to that Apify account at about
+  $0.02-0.03 a search. The rows come back as normal `FlightResult`s. Round
+  trips, multi-city, premium cabins, alliance or layover filters, infants and
+  adult-free parties never fall back, and if the hosted search fails too you
+  get Google's original error. Unset, nothing changes.
 
 ## CLI Usage
 

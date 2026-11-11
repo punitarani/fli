@@ -24,6 +24,7 @@ from fli.models import (
     SeatType,
 )
 from fli.models.google_flights.base import SortBy, TripType
+from fli.search import _apify
 from fli.search._concurrency import parallel_map
 from fli.search._decoders import (
     _try_parse_booking_row,  # noqa: F401 — back-compat re-export for tests
@@ -41,7 +42,7 @@ from fli.search._urls import with_locale_params
 from fli.search._urls import with_locale_params as _with_locale_params  # noqa: F401
 from fli.search._wire import iter_wrb_chunks
 from fli.search.client import get_client
-from fli.search.exceptions import SearchParseError
+from fli.search.exceptions import SearchClientError, SearchParseError
 
 logger = logging.getLogger(__name__)
 
@@ -266,14 +267,19 @@ class SearchFlights:
         # Per-search, lock-guarded — never instance state, which the round
         # trip's parallel expansion workers (below) would trample mid-flight.
         tracker = _RowCountTracker()
-        flights = self._fetch_flights(
-            filters,
-            currency=currency,
-            language=language,
-            country=country,
-            capture_session=True,
-            tracker=tracker,
-        )
+        try:
+            flights = self._fetch_flights(
+                filters,
+                currency=currency,
+                language=language,
+                country=country,
+                capture_session=True,
+                tracker=tracker,
+            )
+        except SearchClientError as exc:
+            # Opt-in: FLI_APIFY_TOKEN retries a blocked one-way search
+            # through a hosted fetch. See fli/search/_apify.py.
+            return self._hosted_fallback(exc, filters, currency, language, country)
         if flights is None:
             self._warn_if_sparse_passenger_mix(filters, tracker)
             return None
@@ -291,6 +297,36 @@ class SearchFlights:
         if not combos:
             self._warn_if_sparse_passenger_mix(filters, tracker)
         return combos
+
+    @staticmethod
+    def _hosted_fallback(
+        exc: SearchClientError,
+        filters: FlightSearchFilters,
+        currency: str | None,
+        language: str | None,
+        country: str | None,
+    ) -> list[FlightResult] | None:
+        """Retry a blocked search through ``fli.search._apify``, or re-raise ``exc``.
+
+        Re-raises ``exc`` unchanged when ``FLI_APIFY_TOKEN`` is unset, when
+        the error is not Google refusing the request, when the search is not
+        one-way economy, or when the hosted search fails too.
+        """
+        token = _apify.fallback_token()
+        if not (token and _apify.is_blocked(exc) and _apify.can_fall_back(filters)):
+            raise exc
+        logger.warning("Google refused the search (%s); retrying through the hosted fallback.", exc)
+        try:
+            flights = _apify.search_one_way(
+                filters, token, currency=currency, language=language, country=country
+            )
+        except SearchClientError as fallback_exc:
+            logger.warning("%s", fallback_exc)
+        else:
+            flights = apply_client_side_filters(flights, filters)
+            flights.sort(key=_sort_key(filters.sort_by))
+            return flights or None
+        raise exc
 
     def _warn_if_sparse_passenger_mix(
         self, filters: FlightSearchFilters, tracker: _RowCountTracker
