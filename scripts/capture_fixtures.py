@@ -39,7 +39,9 @@ from fli.models import (
 )
 from fli.search import SearchExplore, SearchFlights
 from fli.search._urls import with_locale_params
+from fli.search._wire import iter_wrb_chunks
 from fli.search.client import get_client
+from fli.search.exceptions import SearchRejectedError
 
 
 def _future(days: int) -> str:
@@ -187,6 +189,15 @@ def main() -> int:
             allow_redirects=True,
             **({"headers": headers} if headers else {}),
         )
+        try:
+            # Drain the reader only to surface a leading error envelope.
+            for _ in iter_wrb_chunks(r.content):
+                pass
+        except SearchRejectedError as exc:
+            # Explore refuses ~40% of requests with error 13; writing that
+            # envelope would replace a good fixture with a refusal.
+            print(f"!! {name}: rejected with error {exc.code}; fixture left unchanged")
+            continue
         path = out_dir / f"{name}.bin"
         path.write_bytes(r.content)
         print(f"  {name}: {len(r.content)} bytes -> {path}")

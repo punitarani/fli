@@ -150,6 +150,36 @@ class TestExecuteExploreSearch:
         assert result["count"] == 1
         assert result["destinations"][0]["name"] == "Malta"
 
+    def test_server_max_results_caps_caller_limit(self, mock_search, monkeypatch):
+        """FLI_MCP_MAX_RESULTS is a ceiling; a larger caller limit must not lift it."""
+        monkeypatch.setattr("fli.mcp.server.CONFIG.max_results", 1)
+        params = ExploreSearchParams(origin="JFK", departure_date=DEPARTURE_DATE, limit=3)
+        result = _search_explore_from_params(params)
+        assert result["count"] == 1
+
+    def test_priced_destination_without_currency_falls_back(self, mock_search):
+        mock_search.return_value.search.return_value.destinations[2].currency = None
+        params = ExploreSearchParams(origin="JFK", departure_date=DEPARTURE_DATE)
+        result = _search_explore_from_params(params)
+        malta = result["destinations"][0]
+        assert malta["name"] == "Malta"
+        assert malta["currency"] == "USD"
+        assert result["destinations"][2]["currency"] is None  # unpriced stays null
+
+    def test_malformed_google_date_keeps_round_trip_result(self, mock_search):
+        """A bad date from Google drops the link's return date, not the search."""
+        mock_search.return_value.search.return_value.destinations[2].departure_date = "soon"
+        params = ExploreSearchParams(
+            origin="JFK",
+            departure_date=DEPARTURE_DATE,
+            round_trip=True,
+            trip_min_nights=7,
+        )
+        result = _search_explore_from_params(params)
+        assert result["success"] is True
+        malta = result["destinations"][0]
+        assert "through" not in malta["flights_url"]
+
     def test_round_trip_builds_pinned_window(self, mock_search):
         params = ExploreSearchParams(
             origin="JFK",

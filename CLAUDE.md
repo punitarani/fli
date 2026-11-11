@@ -273,8 +273,10 @@ of destinations with their cheapest fares.
 - `round_trip` / `trip_min_nights` / `trip_max_nights` - Round trips need a fixed
   trip length (min == max, 1-23 nights): for a range, Google quotes one-way prices
   for many destinations (measured 2026-11-11), so a range is rejected.
-- `max_price`, `cabin_class`, `max_stops`, `airlines`, `exclude_airlines`,
-  `alliance`, `exclude_alliance`, `max_flight_duration` - Same semantics as `search_flights`
+- `cabin_class`, `max_stops`, `airlines`, `exclude_airlines`, `alliance`,
+  `exclude_alliance` - Same semantics as `search_flights`
+- `max_price` / `max_flight_duration` - Fare cap and maximum flight duration in minutes
+  (Explore-only; encoded into the RPC request, not applied client-side)
 - `currency` / `language` / `country` - Same locale knobs as `search_flights`
 - `sort_by_price` (default true), `limit`
 

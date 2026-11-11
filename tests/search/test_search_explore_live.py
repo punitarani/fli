@@ -11,25 +11,12 @@ in pre-commit CI.
 from datetime import datetime, timedelta
 
 import pytest
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from fli.models import ExplorePlace, ExploreSearchFilters
 from fli.search import SearchExplore
 from fli.search.exceptions import SearchRejectedError
 
-# Google refuses a share of Explore requests with error 13 (about 40% in live
-# checks on 2026-11-11, in clusters). SearchExplore already retries that a few
-# times; a run that is refused on every attempt is reported as xfail rather
-# than a failure, so the daily canary only goes red when Explore breaks in
-# some other way (bad parse, wrong prices, a new error code).
-pytestmark = [
-    pytest.mark.live,
-    pytest.mark.xfail(
-        raises=SearchRejectedError,
-        strict=False,
-        reason="Google intermittently refuses Explore with error 13",
-    ),
-]
+pytestmark = pytest.mark.live
 
 LONDON = ExplorePlace(mid="/m/04jpl", type_code=4)
 SOUTHERN_EUROPE = ExplorePlace(mid="/m/0250wj", type_code=6)
@@ -47,17 +34,22 @@ def _filters() -> ExploreSearchFilters:
     )
 
 
-@retry(
-    retry=retry_if_exception_type(ValueError),
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10),
-    reraise=True,
-)
 def _search_with_retry(client: SearchExplore, filters: ExploreSearchFilters, **kw):
-    result = client.search(filters, **kw)
-    if result is None or not result.destinations:
-        raise ValueError("Empty explore result, retrying...")
-    return result
+    """Run one Explore search, xfailing only on Google's intermittent refusal.
+
+    Google refuses a share of Explore requests with error 13 (about 40% in
+    live checks on 2026-11-11, in clusters). SearchExplore already retries
+    that and raises ``retryable=True`` once every attempt is refused; only
+    that case is reported as xfail, so the daily canary still goes red when
+    Explore breaks in any other way (a bad parse, wrong prices, error 3 from
+    a request shape Google no longer accepts, or any other code).
+    """
+    try:
+        return client.search(filters, **kw)
+    except SearchRejectedError as exc:
+        if exc.retryable:
+            pytest.xfail(f"Google refused every Explore attempt with error {exc.code}")
+        raise
 
 
 @pytest.fixture

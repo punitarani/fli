@@ -29,6 +29,7 @@ from fli.models import (
     Layover,
     SeatType,
 )
+from fli.models.google_flights.explore import KG_MID_PREFIXES
 from fli.search._helpers import as_bool, as_int, as_non_negative_int, as_str, safe_get
 
 logger = logging.getLogger(__name__)
@@ -629,8 +630,6 @@ def _extract_fare_name(row: list) -> str | None:
 # accumulate, then left-join prices onto destinations on the knowledge-graph
 # mid at record[0].
 
-_KG_PREFIXES = ("/m/", "/g/")
-
 
 def _get_path(node: Any, *path: int) -> Any:
     """Chain :func:`safe_get` over a positional path."""
@@ -640,7 +639,7 @@ def _get_path(node: Any, *path: int) -> Any:
 
 
 def _is_mid(v: Any) -> bool:
-    return isinstance(v, str) and v.startswith(_KG_PREFIXES)
+    return isinstance(v, str) and v.startswith(KG_MID_PREFIXES)
 
 
 def _as_float(v: Any) -> float | None:
@@ -722,12 +721,14 @@ def parse_explore_prices_chunk(
 
     Records without a numeric fare (Google keeps a placeholder row when no
     itinerary satisfies the filters) are omitted, so destinations they refer
-    to surface as unpriced after the merge.
+    to surface as unpriced after the merge. Every field is checked here
+    because :func:`merge_explore_payloads` applies them with ``model_copy``,
+    which skips :class:`ExploreDestination`'s own validation.
     """
     prices: dict[str, dict[str, Any]] = {}
     for record in _explore_price_records(chunk):
         price = _as_float(_get_path(record, 1, 0, 1))
-        if price is None:
+        if price is None or price < 0:
             continue
         token = as_str(_get_path(record, 1, 1))
         summary = safe_get(record, 6)

@@ -254,6 +254,15 @@ def test_past_departure_date_rejected():
         ExploreSearchFilters(origin=Airport.JFK, departure_date=past)
 
 
+def test_utc_yesterday_departure_accepted():
+    """Same anchor as every other date check: still today somewhere west of UTC."""
+    from fli.models.google_flights.base import utc_today
+
+    yesterday_utc = (utc_today() - timedelta(days=1)).strftime("%Y-%m-%d")
+    filters = ExploreSearchFilters(origin=Airport.SFO, departure_date=yesterday_utc)
+    assert filters.departure_date == yesterday_utc
+
+
 def test_bad_mid_rejected():
     with pytest.raises(ValidationError, match="knowledge-graph"):
         ExplorePlace(mid="LON")
@@ -279,7 +288,8 @@ def test_bags_order_is_carry_on_first():
 
 
 @pytest.mark.parametrize(
-    "window", [[], [4, 23], [4, 23, 7, 7, 0], [3, 23, 7, 7], [4, 23, -1, 7], [4, 23, 14, 7]]
+    "window",
+    [[], [4, 23], [4, 23, 7, 7, 0], [3, 23, 7, 7], [4, 23, -1, 7], [4, 23, 14, 7], [4, 23, 0, 30]],
 )
 def test_invalid_trip_window_rejected(window):
     with pytest.raises(ValidationError, match="trip_length_window"):
@@ -336,3 +346,16 @@ def test_round_trip_with_pinned_window():
         trip_length_window=[4, 23, 7, 7],
     )
     assert filters.format()[3][13][0][2] == [4, 23, 7, 7]
+
+
+@pytest.mark.parametrize("type_code", [0, 4])
+def test_non_region_destination_rejected_from_plain_data(type_code):
+    """A dict/JSON destination must hit the same check as an ExplorePlace instance."""
+    with pytest.raises(ValidationError, match="region, continent or country"):
+        ExploreSearchFilters.model_validate(
+            {
+                "origin": Airport.JFK,
+                "destination": {"mid": "/m/04jpl", "type_code": type_code},
+                "departure_date": DEPARTURE_DATE,
+            }
+        )

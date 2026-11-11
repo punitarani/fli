@@ -149,6 +149,12 @@ def test_malformed_destination_records_skipped():
     assert meta["price_slider_max"] == 1500
 
 
+def test_negative_price_record_omitted():
+    """merge_explore_payloads skips model validation, so the decoder must."""
+    chunk = _price_chunk([_price_record("/m/0491y", -5)])
+    assert parse_explore_prices_chunk(chunk, default_currency="USD") == {}
+
+
 def test_price_record_without_fare_omitted():
     chunk = _price_chunk([_price_record("/m/0491y", 18), _price_record("/m/04v3q", None)])
     prices = parse_explore_prices_chunk(chunk, default_currency="USD")

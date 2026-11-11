@@ -50,6 +50,7 @@ from fli.models import (
     TripType,
     display_name,
 )
+from fli.models.google_flights.explore import KG_MID_PREFIXES
 from fli.search import SearchDates, SearchExplore, SearchFlights
 from fli.search.dates import MAX_DATES_PER_SEARCH
 from fli.search.exceptions import SearchParseError
@@ -777,8 +778,9 @@ def _search_error_message(exc: Exception, prefix: str = "Search failed") -> str:
             "EU/EEA."
         )
     # Everything else already carries its own actionable text —
-    # `SearchRejectedError` names the gated header and the issue, and the
-    # client's typed errors name the host and what to check.
+    # `SearchRejectedError` explains its code (the gated header, an invalid
+    # request, or Explore's intermittent refusal), and the client's typed
+    # errors name the host and what to check.
     return f"{prefix}: {exc}"
 
 
@@ -1121,7 +1123,7 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
 def _parse_explore_origin(value: str) -> Airport | ExplorePlace:
     """Resolve an explore origin: airport IATA code or a city knowledge-graph mid."""
     cleaned = value.strip()
-    if cleaned.startswith(("/m/", "/g/")):
+    if cleaned.startswith(KG_MID_PREFIXES):
         # City/metro type — the only origin mid type observed in captures.
         return ExplorePlace(mid=cleaned, type_code=4)
     return resolve_airport(cleaned)
@@ -1130,7 +1132,7 @@ def _parse_explore_origin(value: str) -> Airport | ExplorePlace:
 def _parse_explore_destination(value: str) -> ExploreRegion | ExplorePlace | Airport:
     """Resolve an explore destination: region name, knowledge-graph mid, or IATA code."""
     cleaned = value.strip()
-    if cleaned.startswith(("/m/", "/g/")):
+    if cleaned.startswith(KG_MID_PREFIXES):
         # Sent as a region (type 6). Region, continent and country mids work;
         # a city mid comes back empty and surfaces as a parse_error.
         return ExplorePlace(mid=cleaned)
@@ -1173,7 +1175,11 @@ def _serialize_explore_destination(
         "country": destination.country,
         "mid": destination.mid,
         "price": destination.price,
-        "currency": destination.currency,
+        "currency": (
+            destination.currency or CONFIG.default_currency
+            if destination.price is not None
+            else destination.currency
+        ),
         "departure_date": destination.departure_date,
         "arrival_date": destination.arrival_date,
         "airline": destination.airline,
@@ -1188,8 +1194,16 @@ def _serialize_explore_destination(
     if origin_label and destination.destination_airport and destination.departure_date:
         link_return_date = None
         if exact_nights is not None:
-            departure = datetime.strptime(destination.departure_date, "%Y-%m-%d")
-            link_return_date = (departure + timedelta(days=exact_nights)).strftime("%Y-%m-%d")
+            # The date comes from Google's response, so a malformed one must
+            # only drop the return date from this link, not fail the search
+            # (a bare ValueError would also be misreported as the caller's
+            # validation_error).
+            try:
+                departure = datetime.strptime(destination.departure_date, "%Y-%m-%d")
+            except ValueError:
+                departure = None
+            if departure is not None:
+                link_return_date = (departure + timedelta(days=exact_nights)).strftime("%Y-%m-%d")
         entry["flights_url"] = google_flights_url(
             origin_label,
             destination.destination_airport,
@@ -1266,9 +1280,11 @@ def _execute_explore_search(params: ExploreSearchParams) -> dict[str, Any]:
         if params.sort_by_price:
             destinations.sort(key=lambda d: (d.price is None, d.price or 0))
 
-        limit = params.limit or CONFIG.max_results
-        if limit:
-            destinations = destinations[:limit]
+        # FLI_MCP_MAX_RESULTS caps every tool's output; a caller's own limit
+        # can narrow it further but never raise it.
+        limits = [n for n in (params.limit, CONFIG.max_results) if n]
+        if limits:
+            destinations = destinations[: min(limits)]
 
         origin_label = (
             origin.name.removeprefix("_") if isinstance(origin, Airport) else result.origin_name

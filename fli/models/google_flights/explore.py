@@ -46,8 +46,12 @@ from fli.models.google_flights.base import (
     PriceLimit,
     SeatType,
     TripType,
-    utc_today,
+    earliest_searchable_date,
 )
+
+# Prefixes of Google knowledge-graph ids ("mids"), the identifiers Explore
+# uses for cities, regions and countries.
+KG_MID_PREFIXES = ("/m/", "/g/")
 
 
 class ExplorePlaceType(Enum):
@@ -97,7 +101,7 @@ class ExplorePlace(BaseModel):
     @classmethod
     def validate_mid(cls, v: str) -> str:
         """Ensure the mid looks like a knowledge-graph identifier."""
-        if not (v.startswith("/m/") or v.startswith("/g/")):
+        if not v.startswith(KG_MID_PREFIXES):
             raise ValueError("mid must be a knowledge-graph id starting with /m/ or /g/")
         return v
 
@@ -168,9 +172,14 @@ class ExploreSearchFilters(BaseModel):
     @field_validator("departure_date")
     @classmethod
     def validate_departure_date(cls, v: str) -> str:
-        """Ensure the departure date is well-formed and not in the past."""
+        """Ensure the departure date is well-formed and not in the past.
+
+        Anchored on :func:`earliest_searchable_date`, like every other date
+        check in the package, so a same-day search west of UTC late in the
+        traveler's day is not rejected.
+        """
         parsed = datetime.strptime(v, "%Y-%m-%d").date()
-        if parsed < utc_today():
+        if parsed < earliest_searchable_date():
             raise ValueError("Departure date cannot be in the past")
         return v
 
@@ -181,20 +190,28 @@ class ExploreSearchFilters(BaseModel):
         if value is not None:
             if len(value) != 4 or value[:2] != [4, 23]:
                 raise ValueError("trip_length_window must be [4, 23, min_nights, max_nights]")
-            if value[2] < 0 or value[3] < 0 or value[2] > value[3]:
-                raise ValueError("trip_length_window requires 0 <= min_nights <= max_nights")
+            if value[2] < 0 or value[2] > value[3] or value[3] > 23:
+                raise ValueError("trip_length_window requires 0 <= min_nights <= max_nights <= 23")
         return value
 
     @field_validator("destination", mode="before")
     @classmethod
-    def validate_destination(cls, value):
-        """Reject destinations Explore cannot answer for: airports and cities."""
+    def reject_airport_destination(cls, value: object) -> object:
+        """Reject an airport destination with guidance instead of a union mismatch."""
         if isinstance(value, Airport):
             raise ValueError(
                 "Explore destinations must be a region, continent or country; an airport "
                 f"({value.name.removeprefix('_')}) is rejected by Google. Use a flight or "
                 "date search for a specific airport."
             )
+        return value
+
+    @field_validator("destination")
+    @classmethod
+    def validate_destination(
+        cls, value: ExploreRegion | ExplorePlace
+    ) -> ExploreRegion | ExplorePlace:
+        """Reject non-region places, however they were supplied (instance, dict or JSON)."""
         if isinstance(value, ExplorePlace) and value.type_code != ExplorePlaceType.REGION.value:
             raise ValueError(
                 "Explore destinations must be a region, continent or country mid "
