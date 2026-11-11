@@ -35,6 +35,14 @@ On Node, run through a TypeScript loader: `npx tsx basic_one_way_search.ts`.
 
 ## Multi-city
 
+!!! warning "Not available through the current transport"
+    Google loads multi-city results client-side through the RPC it gated
+    in 2026-08, so the search page carries no rows to read.
+    `search(...)` throws `SearchUnsupportedError` for
+    `TripType.MULTI_CITY` rather than returning the first leg's one-way
+    board, which would decode cleanly into wrong results. Search each leg
+    separately for now. The example below is kept for when that changes.
+
 ```ts
 import {
   Airport,
@@ -78,9 +86,12 @@ for (const legs of itineraries ?? []) {
 
 ```ts
 import {
+  SearchClientError,
   SearchConnectionError,
   SearchHTTPError,
+  SearchParseError,
   SearchTimeoutError,
+  SearchUnsupportedError,
 } from "fli-js";
 
 try {
@@ -92,10 +103,20 @@ try {
     // network/proxy problem
   } else if (err instanceof SearchHTTPError) {
     // non-2xx from Google
+  } else if (err instanceof SearchParseError) {
+    // the page loaded but carried no readable results — a consent or
+    // block page, or a change in Google's page shape
+  } else if (err instanceof SearchUnsupportedError) {
+    // the current transport cannot serve this query (multi-city)
   } else {
     throw err;
   }
 }
 ```
+
+All of the above extend `SearchClientError`, so `catch (err) { if (err
+instanceof SearchClientError) … }` covers "the search failed" in one
+branch. A search that simply found nothing returns `null` instead of
+throwing.
 
 See the [Python examples](../python/examples.md) for the equivalent scripts.

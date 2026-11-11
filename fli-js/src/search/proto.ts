@@ -6,6 +6,7 @@
  */
 
 import { Buffer } from "node:buffer";
+import type { PassengerInfo } from "../models/google-flights/base.ts";
 
 function concatBytes(...parts: Uint8Array[]): Uint8Array {
   let total = 0;
@@ -347,6 +348,249 @@ export interface LegSpec {
 export interface BuildTfsTokenOptions {
   /** `true` for one-way (incl. multi-city); `false` for round-trip. */
   isOneWay?: boolean;
+  /**
+   * Passenger kind codes, one entry per traveller (field 8). Build these
+   * from a search's `PassengerInfo` with {@link passengerCodes}. Defaults
+   * to a single adult so existing callers keep producing the captured
+   * tokens.
+   */
+  passengers?: readonly number[];
+  /**
+   * Cabin class encoded in field 9.
+   * `1` = economy, `2` = premium economy, `3` = business, `4` = first.
+   * Defaults to economy so existing callers keep producing the captured tokens.
+   */
+  seat?: number;
+}
+
+// `tfs` is the itinerary parameter shared by booking deep links and the
+// public search page. Both builders below write the same message, so the
+// field layout lives here once:
+//
+//   1  = 28 (constant)          8  = passenger kind, repeated
+//   2  = 2 (constant)           9  = cabin class
+//   3  = segment, repeated      14 = 1 (constant)
+//   3.2  = departure date       16 = max-uint64 pin (deep links only)
+//   3.4  = selected leg, rep.   19 = 2 one-way / multi-city, 1 round-trip
+//   3.5  = stop ceiling
+//   3.6  = carrier include, repeated (IATA code or alliance name)
+//   3.7  = carrier exclude, repeated (same values as 3.6)
+//   3.13 = origin  3.14 = destination
+//   3.15 = layover airport include, repeated
+//   3.17 = min layover minutes  3.18 = max layover minutes
+//
+// Reverse-engineered from live browser captures; 1:1 with the Python
+// `fli/search/_proto.py`.
+
+const MAX_U64 = (1n << 64n) - 1n;
+
+/**
+ * Passenger kinds, in the order Google's repeated field 8 numbers them:
+ * 1 = adult, 2 = child, 3 = infant on lap, 4 = infant in own seat.
+ *
+ * The two infant codes are easy to transpose and the mistake is expensive
+ * rather than loud: on an international route a lap infant prices at ~10%
+ * of the adult fare and an infant in its own seat at ~100%, so a swap
+ * quotes a plausible but wrong fare instead of erroring. The legacy RPC
+ * struct orders the same four counts
+ * `[adults, children, infants_on_lap, infants_in_seat]`.
+ */
+const PASSENGER_FIELDS: ReadonlyArray<readonly [keyof PassengerInfo, number]> = [
+  ["adults", 1],
+  ["children", 2],
+  ["infants_on_lap", 3],
+  ["infants_in_seat", 4],
+];
+
+/**
+ * Google's own per-booking limit. The Python port's `PassengerInfo` enforces
+ * this in `validate_passenger_counts`
+ * (`fli/models/google_flights/base.py`) — `PassengerInfoSchema` here has no
+ * equivalent cross-field check, so this is the one place on the TypeScript
+ * side that rejects an over-the-limit mix. Keep this in sync with the
+ * Python validator if Google's limit ever changes.
+ */
+const MAX_TOTAL_PASSENGERS = 9;
+
+/**
+ * Convert a `PassengerInfo` into `tfs` field-8 codes, one per traveller.
+ *
+ * Shared by {@link buildTfs} in `tfs.ts` (the search token) and
+ * {@link buildTfsToken} (the per-flight booking token) so the two cannot
+ * drift on how they encode the passenger mix.
+ *
+ * @param passengerInfo A `PassengerInfo`, or any duck-typed object exposing
+ *   some subset of `adults`/`children`/`infants_on_lap`/`infants_in_seat`
+ *   (missing ones count as zero). `null`/`undefined` is treated as an
+ *   all-zero mix.
+ * @returns One code per traveller, in field order. Falls back to `[1]` (a
+ *   single adult) when the mix would otherwise be empty.
+ * @throws {RangeError} Any count is not a non-negative integer, or the
+ *   total exceeds {@link MAX_TOTAL_PASSENGERS}. Checked before building the
+ *   result array, so a wildly out-of-range count (a duck-typed
+ *   `adults: 1_000_000`, say) fails immediately instead of allocating an
+ *   array that size — callers that pass a validated `PassengerInfo` never
+ *   hit this; it exists for the duck-typed callers this function otherwise
+ *   tolerates.
+ */
+export function passengerCodes(passengerInfo: Partial<PassengerInfo> | null | undefined): number[] {
+  let total = 0;
+  const counts: Array<readonly [number, number]> = []; // [code, count]
+  for (const [field, code] of PASSENGER_FIELDS) {
+    const count = (passengerInfo as Partial<PassengerInfo> | null)?.[field] ?? 0;
+    if (!Number.isInteger(count) || count < 0) {
+      throw new RangeError(
+        `passengerInfo.${field} must be a non-negative integer, got ${JSON.stringify(count)}`,
+      );
+    }
+    total += count;
+    counts.push([code, count]);
+  }
+
+  if (total > MAX_TOTAL_PASSENGERS) {
+    throw new RangeError(
+      `passengerInfo totals ${total} travellers, over the ` +
+        `${MAX_TOTAL_PASSENGERS}-traveller limit Google's booking page enforces`,
+    );
+  }
+
+  const codes: number[] = [];
+  for (const [code, count] of counts) {
+    for (let i = 0; i < count; i++) codes.push(code);
+  }
+  return codes.length > 0 ? codes : [1];
+}
+
+/** Optional per-segment restrictions Google reads out of the `tfs` segment. */
+export interface EncodeTfsSegmentOptions {
+  /**
+   * Physical flights pinned for this direction, if any. Supplying them
+   * narrows a search to itineraries that include them — that is how a
+   * round-trip search asks for return options against a chosen outbound.
+   */
+  legs?: readonly LegSpec[];
+  /**
+   * Stop ceiling, zero-based (`0` = non-stop, `1` = one stop or fewer).
+   * `null`/`undefined` leaves the search unconstrained; passing `0` for
+   * "any" would pin it to non-stop instead.
+   */
+  maxStops?: number | null;
+  /**
+   * Only itineraries on these carriers. Google takes airline IATA codes
+   * and alliance names (`"STAR_ALLIANCE"`) in the same list.
+   */
+  carriers?: readonly string[];
+  /** The same values, as an exclude list. */
+  carriersExclude?: readonly string[];
+  /** Only these airports may be used as layover stops. */
+  layoverAirports?: readonly string[];
+  /** Minimum layover wait, in minutes. */
+  minLayover?: number | null;
+  /** Maximum layover wait, in minutes. */
+  maxLayover?: number | null;
+}
+
+/**
+ * Encode one travel direction of a `tfs` itinerary.
+ *
+ * @param origin IATA code (or codes) the direction departs from.
+ * @param dest IATA code (or codes) the direction arrives at.
+ * @param date Departure date in `YYYY-MM-DD` format.
+ * @returns The length-delimited field 3 bytes for this segment.
+ */
+export function encodeTfsSegment(
+  origin: string | readonly string[],
+  dest: string | readonly string[],
+  date: string,
+  options: EncodeTfsSegmentOptions = {},
+): Uint8Array {
+  const {
+    legs = [],
+    maxStops = null,
+    carriers = [],
+    carriersExclude = [],
+    layoverAirports = [],
+    minLayover = null,
+    maxLayover = null,
+  } = options;
+
+  let body = lengthDelim(2, utf8.encode(date));
+  if (maxStops != null) body = concatBytes(body, varintField(5, maxStops));
+  for (const code of carriers) body = concatBytes(body, lengthDelim(6, utf8.encode(code)));
+  for (const code of carriersExclude) body = concatBytes(body, lengthDelim(7, utf8.encode(code)));
+  for (const leg of legs) {
+    body = concatBytes(
+      body,
+      lengthDelim(
+        4,
+        concatBytes(
+          lengthDelim(1, utf8.encode(leg.origin)),
+          lengthDelim(2, utf8.encode(leg.depDate)),
+          lengthDelim(3, utf8.encode(leg.dest)),
+          lengthDelim(5, utf8.encode(leg.airline)),
+          lengthDelim(6, utf8.encode(leg.flightNumber)),
+        ),
+      ),
+    );
+  }
+  for (const code of typeof origin === "string" ? [origin] : origin) {
+    body = concatBytes(
+      body,
+      lengthDelim(13, concatBytes(varintField(1, 1), lengthDelim(2, utf8.encode(code)))),
+    );
+  }
+  for (const code of typeof dest === "string" ? [dest] : dest) {
+    body = concatBytes(
+      body,
+      lengthDelim(14, concatBytes(varintField(1, 1), lengthDelim(2, utf8.encode(code)))),
+    );
+  }
+  for (const code of layoverAirports) body = concatBytes(body, lengthDelim(15, utf8.encode(code)));
+  if (minLayover != null) body = concatBytes(body, varintField(17, minLayover));
+  if (maxLayover != null) body = concatBytes(body, varintField(18, maxLayover));
+  return lengthDelim(3, body);
+}
+
+/** Envelope options for {@link encodeTfsPayload}. */
+export interface EncodeTfsPayloadOptions {
+  /**
+   * `true` for one-way, `false` for round-trip. Controls field 19.
+   * Multi-city is a third value (3) that the search page cannot serve.
+   */
+  isOneWay: boolean;
+  /**
+   * Passenger kind codes, one entry per traveller (1 = adult, 2 = child,
+   * 3 = infant on lap, 4 = infant in own seat). The two infant codes are
+   * the ones to get right: a lap infant prices at ~10% of the adult fare
+   * and an infant in its own seat at ~100%, and transposing them produces
+   * a plausible wrong quote rather than an error.
+   */
+  passengers?: readonly number[];
+  /** Cabin class (1 = economy, 2 = premium, 3 = business, 4 = first). */
+  seat?: number;
+  /**
+   * Emit the field 16 constant that booking deep links carry. The search
+   * page does not need it.
+   */
+  pinMaxU64?: boolean;
+}
+
+/**
+ * Wrap encoded segments in the `tfs` envelope and base64 it.
+ *
+ * @param segments Concatenated output of {@link encodeTfsSegment}.
+ * @returns URL-safe base64 string with padding stripped.
+ */
+export function encodeTfsPayload(segments: Uint8Array, options: EncodeTfsPayloadOptions): string {
+  const { isOneWay, passengers = [1], seat = 1, pinMaxU64 = false } = options;
+  let payload = concatBytes(varintField(1, 28), varintField(2, 2), segments);
+  for (const kind of passengers) payload = concatBytes(payload, varintField(8, kind));
+  payload = concatBytes(payload, varintField(9, seat), varintField(14, 1));
+  if (pinMaxU64) {
+    payload = concatBytes(payload, lengthDelim(16, concatBytes(tag(1, 0), varintBig(MAX_U64))));
+  }
+  payload = concatBytes(payload, varintField(19, isOneWay ? 2 : 1));
+  return toUrlsafeB64(payload);
 }
 
 /**
@@ -363,6 +607,8 @@ export interface BuildTfsTokenOptions {
  */
 export function buildTfsToken(segments: LegSpec[][], options: BuildTfsTokenOptions = {}): string {
   const isOneWay = options.isOneWay ?? true;
+  const passengers = options.passengers ?? [1];
+  const seat = options.seat ?? 1;
   if (segments.length === 0) throw new Error("segments must be non-empty");
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
@@ -371,41 +617,13 @@ export function buildTfsToken(segments: LegSpec[][], options: BuildTfsTokenOptio
 
   let segmentProtos: Uint8Array = new Uint8Array(0);
   for (const seg of segments) {
-    let legsProto: Uint8Array = new Uint8Array(0);
-    for (const leg of seg) {
-      const legProto = concatBytes(
-        lengthDelim(1, utf8.encode(leg.origin)),
-        lengthDelim(2, utf8.encode(leg.depDate)),
-        lengthDelim(3, utf8.encode(leg.dest)),
-        lengthDelim(5, utf8.encode(leg.airline)),
-        lengthDelim(6, utf8.encode(leg.flightNumber)),
-      );
-      legsProto = concatBytes(legsProto, lengthDelim(4, legProto));
-    }
-
     const first = seg[0] as LegSpec;
     const last = seg[seg.length - 1] as LegSpec;
-    const segProto = concatBytes(
-      lengthDelim(2, utf8.encode(first.depDate)),
-      legsProto,
-      lengthDelim(13, concatBytes(varintField(1, 1), lengthDelim(2, utf8.encode(first.origin)))),
-      lengthDelim(14, concatBytes(varintField(1, 1), lengthDelim(2, utf8.encode(last.dest)))),
+    segmentProtos = concatBytes(
+      segmentProtos,
+      encodeTfsSegment(first.origin, last.dest, first.depDate, { legs: seg }),
     );
-    segmentProtos = concatBytes(segmentProtos, lengthDelim(3, segProto));
   }
 
-  const MAX_U64 = (1n << 64n) - 1n;
-  const f19 = isOneWay ? 2 : 1;
-
-  const payload = concatBytes(
-    varintField(1, 28),
-    varintField(2, 2),
-    segmentProtos,
-    varintField(8, 1),
-    varintField(9, 1),
-    varintField(14, 1),
-    lengthDelim(16, concatBytes(tag(1, 0), varintBig(MAX_U64))),
-    varintField(19, f19),
-  );
-  return toUrlsafeB64(payload);
+  return encodeTfsPayload(segmentProtos, { isOneWay, passengers, seat, pinMaxU64: true });
 }

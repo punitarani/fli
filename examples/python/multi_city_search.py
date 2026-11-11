@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """Multi-city flight search example.
 
+CURRENTLY UNAVAILABLE. Since 2026-08 searches are served by Google's
+public ``/travel/flights`` page rather than the ``GetShoppingResults``
+RPC, which now requires a browser-signed header. Google loads multi-city
+results client-side through that same gated RPC, so the page carries no
+flight rows to read — :meth:`SearchFlights.search` raises
+``SearchUnsupportedError`` rather than returning the first leg's one-way
+board, which would decode cleanly into wrong results. Search each leg
+separately for now. This example is kept for when that changes; see
+github.com/punitarani/fli#223.
+
 This example demonstrates how to search a multi-city itinerary (three or
 more one-way legs on different dates) in a single request. Multi-city
 results come back as tuples of ``FlightResult`` — one entry per leg, in

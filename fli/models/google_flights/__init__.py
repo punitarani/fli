@@ -12,11 +12,15 @@ from .base import (
     LayoverRestrictions,
     MaxStops,
     PassengerInfo,
+    PowerType,
     PriceLimit,
+    SeatQuality,
     SeatType,
     SortBy,
     TimeRestrictions,
     TripType,
+    VideoType,
+    WifiTier,
 )
 from .dates import DateSearchFilters
 from .explore import (
@@ -53,9 +57,13 @@ __all__ = [
     "LayoverRestrictions",
     "MaxStops",
     "PassengerInfo",
+    "PowerType",
     "PriceLimit",
+    "SeatQuality",
     "SeatType",
     "SortBy",
     "TimeRestrictions",
     "TripType",
+    "VideoType",
+    "WifiTier",
 ]

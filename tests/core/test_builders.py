@@ -3,6 +3,17 @@ import pytest
 from fli.core.builders import build_date_search_segments, build_flight_segments, normalize_date
 from fli.models import Airport, TripType
 
+# The literal travel dates below are what these assertions are about, so pin
+# the models' clock instead of letting the module start failing the day those
+# dates fall into the past.
+PINNED_TODAY = "2026-01-01"
+
+
+@pytest.fixture(autouse=True)
+def _pinned_clock(pin_today):
+    """Freeze "today" well before every date literal in this module."""
+    pin_today(PINNED_TODAY)
+
 
 class TestNormalizeDate:
     """Tests for normalize_date."""

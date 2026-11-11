@@ -79,6 +79,61 @@ function toKey(code: string): string {
   return /^[0-9]/.test(code) ? `_${code}` : code;
 }
 
+/**
+ * Append IATA codes to duplicate names so every emitted name is unique.
+ *
+ * Mirrors Python's `_disambiguate_names` in `scripts/generate_enums.py`.
+ * The TS `Airport`/`Airline` "enums" are keyed by code (`Airport.JFK ===
+ * "JFK"`) so they can't collide the way Python's value-keyed `Enum` can —
+ * but `AIRPORT_NAMES`/`AIRLINE_NAMES` are still display names shown to
+ * users, and those must match the Python package's output exactly.
+ * Entries with unique names are left untouched.
+ */
+function disambiguateNames(rows: Array<[string, string]>): Array<[string, string]> {
+  const counts = new Map<string, number>();
+  for (const [, name] of rows) counts.set(name, (counts.get(name) ?? 0) + 1);
+  const duplicates = new Set([...counts.entries()].filter(([, c]) => c > 1).map(([name]) => name));
+  if (duplicates.size === 0) return rows;
+  return rows.map(([code, name]) => [code, duplicates.has(name) ? `${name} (${code})` : name]);
+}
+
+/**
+ * Throw if any sanitized key or final name repeats.
+ *
+ * Mirrors Python's `_assert_unique`. Must run after {@link disambiguateNames}
+ * so it validates exactly what {@link renderEnum} is about to emit as object
+ * literal keys (duplicate sanitized codes) and `AIRPORT_NAMES`/`AIRLINE_NAMES`
+ * values (duplicate names).
+ */
+function assertUnique(rows: Array<[string, string]>, typeName: string): void {
+  const keyCounts = new Map<string, number>();
+  for (const [code] of rows) {
+    const key = toKey(code);
+    keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
+  }
+  const dupKeys = [...keyCounts.entries()]
+    .filter(([, c]) => c > 1)
+    .map(([key]) => key)
+    .sort();
+  if (dupKeys.length > 0) {
+    throw new Error(
+      `Duplicate sanitized ${typeName} codes after sanitization: ${dupKeys.join(", ")}`,
+    );
+  }
+
+  const nameCounts = new Map<string, number>();
+  for (const [, name] of rows) nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
+  const dupNames = [...nameCounts.entries()]
+    .filter(([, c]) => c > 1)
+    .map(([name]) => name)
+    .sort();
+  if (dupNames.length > 0) {
+    throw new Error(
+      `Duplicate ${typeName} names remain after disambiguation: ${dupNames.join(", ")}`,
+    );
+  }
+}
+
 function escapeStringLiteral(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
@@ -134,6 +189,12 @@ const allianceRows: Array<[string, string]> = [
 
 const allAirlines = [...airlines, ...allianceRows];
 
+const disambiguatedAirports = disambiguateNames(airports);
+assertUnique(disambiguatedAirports, "Airport");
+
+const disambiguatedAirlines = disambiguateNames(allAirlines);
+assertUnique(disambiguatedAirlines, "Airline");
+
 const airportFile = renderEnum(
   "Airport",
   "AIRPORT_NAMES",
@@ -142,7 +203,7 @@ const airportFile = renderEnum(
  *
  * Auto-generated from data/airports.csv — run \`bun run generate:enums\` to refresh.
  */`,
-  airports,
+  disambiguatedAirports,
 );
 
 const airlineFile = renderEnum(
@@ -153,7 +214,7 @@ const airlineFile = renderEnum(
  *
  * Auto-generated from data/airlines.csv — run \`bun run generate:enums\` to refresh.
  */`,
-  allAirlines,
+  disambiguatedAirlines,
 );
 
 writeFileSync(join(outDir, "airport.ts"), airportFile);

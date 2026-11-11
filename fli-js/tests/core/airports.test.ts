@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { searchAirports } from "../../src/core/airports.ts";
+import { airportDisplayName, searchAirports } from "../../src/core/airports.ts";
 
 describe("searchAirports", () => {
   test("exact IATA wins with score 100", () => {
@@ -73,5 +73,24 @@ describe("searchAirports", () => {
     const r = searchAirports("JFK");
     const jfkCount = r.filter((m) => m.code === "JFK").length;
     expect(jfkCount).toBe(1);
+  });
+});
+
+describe("disambiguated airport names stay internal", () => {
+  test("airportDisplayName strips only the airport's own code suffix", () => {
+    expect(airportDisplayName("OKA")).toBe("Naha Airport");
+    expect(airportDisplayName("NAH")).toBe("Naha Airport");
+    expect(airportDisplayName("JFK")).toBe("John F Kennedy International Airport");
+  });
+
+  test("name search returns the plain name under each code", () => {
+    const byCode = new Map(searchAirports("Naha Airport", 10).map((m) => [m.code, m.name]));
+    expect(byCode.get("OKA")).toBe("Naha Airport");
+    expect(byCode.get("NAH")).toBe("Naha Airport");
+  });
+
+  test("the hidden suffix never produces a name match", () => {
+    const nameMatches = searchAirports("(NC", 10).filter((m) => m.match_type === "name");
+    expect(nameMatches).toEqual([]);
   });
 });

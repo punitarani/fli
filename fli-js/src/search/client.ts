@@ -12,7 +12,7 @@
  *   - wraps low-level errors into the typed {@link SearchClientError} family
  */
 
-import { TokenBucketRateLimiter } from "./concurrency.ts";
+import { sleep, TokenBucketRateLimiter, throwIfAborted } from "./concurrency.ts";
 import {
   SearchClientError,
   SearchConnectionError,
@@ -44,23 +44,89 @@ function resolveProxy(): string | undefined {
   return env.HTTPS_PROXY ?? env.https_proxy ?? env.HTTP_PROXY ?? env.http_proxy ?? undefined;
 }
 
-const DEFAULT_HEADERS: Record<string, string> = {
+/**
+ * Headers every request carries.
+ *
+ * The `user-agent` is the load-bearing one, and not cosmetically: the
+ * `/travel/flights` page inlines its `ds:1` flight payload only for a
+ * request that looks like a browser. Probed 2026-09-20 under Bun 1.3 and
+ * Node 24 — with a Chrome UA the page is ~2.5 MB and carries the rows;
+ * with no UA at all it is ~1.2 MB and carries none, on HTTP 200 either
+ * way. The rest of the headers are not required by that probe, and are
+ * sent because a browser sends them.
+ */
+const BASE_HEADERS: Record<string, string> = {
   // A realistic recent-Chrome UA. Google's frontend is tolerant of mismatch
   // between the UA and the actual TLS fingerprint (which we can't fake from
   // a Node/Bun fetch) but a credible UA makes a difference vs the default
   // "node-fetch" / "undici" strings.
   "user-agent":
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-  accept: "*/*",
   "accept-language": "en-US,en;q=0.9",
   "sec-ch-ua": '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
   "sec-ch-ua-mobile": "?0",
   "sec-ch-ua-platform": '"macOS"',
+};
+
+/**
+ * Headers for the `f.req` RPC POSTs (`GetBookingResults`).
+ *
+ * Unchanged from before the search-page transport landed, so the one
+ * remaining RPC call goes out exactly as it always did.
+ */
+const DEFAULT_HEADERS: Record<string, string> = {
+  ...BASE_HEADERS,
+  accept: "*/*",
   "sec-fetch-dest": "empty",
   "sec-fetch-mode": "cors",
   "sec-fetch-site": "same-origin",
   "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
 };
+
+/**
+ * Headers for the search-page GET.
+ *
+ * A top-level document navigation, which is what this request actually
+ * is — the POST set describes a same-origin XHR, and carries a
+ * form-encoded `content-type` on a request with no body.
+ */
+const DEFAULT_GET_HEADERS: Record<string, string> = {
+  ...BASE_HEADERS,
+  accept:
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+  "sec-fetch-dest": "document",
+  "sec-fetch-mode": "navigate",
+  "sec-fetch-site": "none",
+  "sec-fetch-user": "?1",
+  "upgrade-insecure-requests": "1",
+};
+
+/**
+ * Pre-accepted consent cookie, sent so EU/EEA IPs are not redirected to
+ * Google's consent interstitial — which serves a page with no `ds:1`
+ * payload, so every search there fails to parse. The legacy `CONSENT`
+ * cookie no longer works, and a truncated `SOCS` value is ignored.
+ *
+ * Override with `FLI_SOCS_COOKIE` if Google rotates the value; set it to
+ * the empty string to send no cookie at all.
+ */
+export const DEFAULT_SOCS_COOKIE =
+  "CAISNQgQEitib3FfaWRlbnRpdHlmcm9udGVuZHVpc2VydmVyXzIwMjQwMzE3LjA5X3AwGgJlbiADGgYIgLC_rwY";
+
+/**
+ * The `SOCS` cookie value in effect: `FLI_SOCS_COOKIE` if set (including
+ * to the empty string, which disables the cookie), else
+ * {@link DEFAULT_SOCS_COOKIE}.
+ *
+ * Read at `Client` construction rather than at module load — Python
+ * reads its process environment once at import, but a JS consumer that
+ * sets `process.env` before building a client would find that surprising,
+ * and it makes the behaviour testable without module cache games.
+ */
+export function resolveSocsCookie(): string {
+  const raw = typeof process !== "undefined" ? process.env?.FLI_SOCS_COOKIE : undefined;
+  return raw ?? DEFAULT_SOCS_COOKIE;
+}
 
 export interface ClientOptions {
   /** Calls per second budget. Defaults to 10. */
@@ -75,6 +141,11 @@ export interface ClientOptions {
   proxy?: string | null;
   /** Custom fetch implementation (test seam). */
   fetchImpl?: typeof fetch;
+  /**
+   * `SOCS` consent cookie value. Defaults to `FLI_SOCS_COOKIE` if set,
+   * else {@link DEFAULT_SOCS_COOKIE}. An empty string sends no cookie.
+   */
+  socsCookie?: string;
 }
 
 export interface RequestOptions {
@@ -91,8 +162,24 @@ export interface ClientResponse {
   ok: boolean;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((res) => setTimeout(res, ms));
+/**
+ * Is this URL served by Google?
+ *
+ * The `SOCS` consent cookie must not ride along to whatever other host a
+ * caller points the client at — Python keeps it in a cookie jar scoped to
+ * `.google.com`, and a header has no such scope of its own. `.google.com`
+ * covers `www.google.com` and `consent.google.com`, which are the two
+ * hosts a search actually touches, and deliberately not `google.co.uk`
+ * (Python's jar does not match it either).
+ */
+function isGoogleHost(url: string): boolean {
+  let hostname: string;
+  try {
+    hostname = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return hostname === "google.com" || hostname.endsWith(".google.com");
 }
 
 function hostFromUrl(url: string): string {
@@ -138,6 +225,7 @@ export class Client {
   private readonly backoffMs: number;
   private readonly proxy: string | undefined;
   private readonly fetchImpl: typeof fetch;
+  private readonly cookieHeader: Record<string, string>;
 
   constructor(options: ClientOptions = {}) {
     this.rateLimiter = new TokenBucketRateLimiter(
@@ -149,6 +237,8 @@ export class Client {
     this.backoffMs = options.backoffMs ?? DEFAULT_BACKOFF_MS;
     this.proxy = options.proxy === null ? undefined : (options.proxy ?? resolveProxy());
     this.fetchImpl = options.fetchImpl ?? fetch;
+    const socs = options.socsCookie ?? resolveSocsCookie();
+    this.cookieHeader = socs ? { cookie: `SOCS=${socs}` } : {};
   }
 
   async get(url: string, options: RequestOptions = {}): Promise<ClientResponse> {
@@ -164,6 +254,11 @@ export class Client {
     url: string,
     options: RequestOptions,
   ): Promise<ClientResponse> {
+    // Nothing is spent on behalf of a caller who has already cancelled —
+    // not a rate-limiter token, which would delay the next real request,
+    // and not a `fetchImpl` call.
+    throwIfAborted(options.signal);
+
     let lastError: unknown = null;
     for (let attempt = 0; attempt < this.retries; attempt++) {
       await this.rateLimiter.acquire();
@@ -178,10 +273,15 @@ export class Client {
         }
       }
       const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+      let shouldRetry = false;
       try {
         const init: RequestInit & { proxy?: string } = {
           method,
-          headers: { ...DEFAULT_HEADERS, ...options.headers },
+          headers: {
+            ...(method === "GET" ? DEFAULT_GET_HEADERS : DEFAULT_HEADERS),
+            ...(isGoogleHost(url) ? this.cookieHeader : {}),
+            ...options.headers,
+          },
           signal: controller.signal,
         };
         if (method === "POST" && options.body != null) {
@@ -220,16 +320,25 @@ export class Client {
         // For HTTP errors we still respect the retry budget (matches the
         // Python tenacity retry decorator behavior, which retries on any
         // exception).
-        if (attempt < this.retries - 1) {
-          const wait = this.backoffMs * 2 ** attempt;
-          await sleep(wait);
-          continue;
-        }
-        break;
+        if (attempt >= this.retries - 1) break;
+        shouldRetry = true;
       } finally {
         clearTimeout(timer);
         if (abortListener && externalSignal) {
           externalSignal.removeEventListener("abort", abortListener);
+        }
+      }
+
+      // Outside the try/finally on purpose: the per-attempt timeout timer
+      // is cleared first, so a long backoff never sits under an armed
+      // request timeout. The sleep itself is abortable — waiting out a
+      // 4-second backoff after the caller has cancelled, and leaving the
+      // timer running afterwards, is exactly what a cancellation is for.
+      if (shouldRetry) {
+        try {
+          await sleep(this.backoffMs * 2 ** attempt, externalSignal);
+        } catch (abortErr) {
+          throw externalSignal?.reason ?? abortErr;
         }
       }
     }

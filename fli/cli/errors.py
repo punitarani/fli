@@ -10,16 +10,21 @@ from __future__ import annotations
 import logging
 import sys
 import traceback
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 import typer
 
 from fli.cli.console import console
+from fli.core.errors import classify_error
 from fli.search.exceptions import (
+    SearchCertificateError,
     SearchClientError,
     SearchConnectionError,
     SearchHTTPError,
+    SearchParseError,
+    SearchRejectedError,
     SearchTimeoutError,
 )
 
@@ -31,10 +36,20 @@ def _friendly_message(exc: BaseException) -> str:
     """Return the short, user-facing message for ``exc``."""
     if isinstance(exc, SearchTimeoutError):
         return f"Request timed out. {exc}"
+    if isinstance(exc, SearchCertificateError):
+        return f"TLS certificate error. {exc}"
     if isinstance(exc, SearchConnectionError):
         return f"Network error. {exc}"
     if isinstance(exc, SearchHTTPError):
         return f"Google Flights error. {exc}"
+    if isinstance(exc, SearchRejectedError):
+        return f"Google Flights declined the request. {exc}"
+    if isinstance(exc, SearchParseError):
+        return (
+            f"Could not read Google Flights' response. {exc} "
+            "This is usually a transient page variant or a regional consent "
+            "interstitial — retry, or set FLI_SOCS_COOKIE if you are in the EU/EEA."
+        )
     if isinstance(exc, SearchClientError):
         return f"Search failed. {exc}"
     return f"Unexpected error: {exc.__class__.__name__}: {exc}"
@@ -87,15 +102,46 @@ def report_cli_error(
     return typer.Exit(exit_code)
 
 
-def json_error_payload(exc: BaseException, *, command: str | None = None) -> tuple[str, str, Path]:
-    """Return ``(message, error_type, log_path)`` for JSON-mode error output."""
+@dataclass(frozen=True)
+class JsonErrorPayload:
+    """Everything a CLI ``--format json`` error path needs, from one classification.
+
+    A named structure (rather than a positional tuple) on purpose:
+    ``retryable``/``http_status`` were added alongside the original
+    ``message``/``error_type``/``log_path`` triple, and a wider tuple would
+    have made every call site's unpacking order a silent trap. Use
+    attribute access (``payload.error_type``, ...) at call sites.
+    """
+
+    message: str
+    error_type: str
+    retryable: bool
+    http_status: int | None
+    log_path: Path
+
+
+def json_error_payload(exc: BaseException, *, command: str | None = None) -> JsonErrorPayload:
+    """Return the classified JSON-mode error payload for ``exc``.
+
+    ``error_type`` (and ``retryable``/``http_status``) come from the
+    shared :func:`fli.core.errors.classify_error` classifier —
+    the same one ``fli.mcp.server`` uses for MCP tool error responses — so a
+    CLI ``--format json`` error and an MCP error for the same exception
+    always agree. See that module's docstring for the full vocabulary table
+    and retry guidance.
+
+    The message formatting is unchanged from before this classifier existed:
+    ``str(exc)`` for any :class:`SearchClientError`, and
+    ``f"{type}: {exc}"`` for anything else — only ``error_type`` itself was
+    ever hand-rolled here, and it has moved to the shared classifier.
+    """
     log_path = _write_log(exc, command=command)
-    if isinstance(exc, SearchTimeoutError):
-        return str(exc), "timeout", log_path
-    if isinstance(exc, SearchConnectionError):
-        return str(exc), "connection_error", log_path
-    if isinstance(exc, SearchHTTPError):
-        return str(exc), "http_error", log_path
-    if isinstance(exc, SearchClientError):
-        return str(exc), "search_error", log_path
-    return f"{exc.__class__.__name__}: {exc}", "unexpected_error", log_path
+    classification = classify_error(exc)
+    message = str(exc) if isinstance(exc, SearchClientError) else f"{exc.__class__.__name__}: {exc}"
+    return JsonErrorPayload(
+        message=message,
+        error_type=classification.error_type,
+        retryable=classification.retryable,
+        http_status=classification.http_status,
+        log_path=log_path,
+    )

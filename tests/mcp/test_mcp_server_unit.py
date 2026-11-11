@@ -24,6 +24,19 @@ from fli.mcp.server import (
     _serialize_flight_leg,
     _serialize_layover,
 )
+from fli.search.flights import SPARSE_PASSENGER_MIX_WARNING
+from tests.search._pages import as_search_page
+from tests.search.test_parse_flights_data import _leg, _row
+
+# The tool calls below pass fixed travel dates; pin the models' clock so they
+# stay in the future no matter when the suite runs.
+PINNED_TODAY = "2026-01-01"
+
+
+@pytest.fixture(autouse=True)
+def _pinned_clock(pin_today):
+    """Freeze "today" well before every date literal in this module."""
+    pin_today(PINNED_TODAY)
 
 
 def _make_raiser(exc: BaseException):
@@ -33,6 +46,27 @@ def _make_raiser(exc: BaseException):
         raise exc
 
     return _raiser
+
+
+def _field_8_codes(raw: bytes) -> list[int]:
+    """Walk the top-level tfs message and collect every field-8 (passenger) code."""
+    from fli.search._proto import _read_varint
+
+    codes: list[int] = []
+    offset = 0
+    while offset < len(raw):
+        tag, offset = _read_varint(raw, offset)
+        field, wire = tag >> 3, tag & 0x7
+        if wire == 0:
+            value, offset = _read_varint(raw, offset)
+            if field == 8:
+                codes.append(value)
+        elif wire == 2:
+            length, offset = _read_varint(raw, offset)
+            offset += length
+        else:  # pragma: no cover - the encoder emits only wire types 0 and 2
+            raise AssertionError(f"unexpected wire type {wire} at offset {offset}")
+    return codes
 
 
 class TestAirlineCode:
@@ -68,6 +102,7 @@ class TestSerializeFlightLeg:
         leg.legroom = None
         leg.overnight = False
         leg.amenities = None
+        leg.cabin = None
         for k, v in overrides.items():
             setattr(leg, k, v)
         return leg
@@ -95,6 +130,13 @@ class TestSerializeFlightLeg:
         assert "operating_airline" not in result
         assert "aircraft" not in result
         assert "legroom" not in result
+        assert "cabin" not in result
+
+    def test_cabin_serialized_as_seat_type_name(self):
+        from fli.models import SeatType
+
+        leg = self._make_leg(cabin=SeatType.BUSINESS)
+        assert _serialize_flight_leg(leg)["cabin"] == "BUSINESS"
 
     def test_overnight_true_included(self):
         leg = self._make_leg(overnight=True)
@@ -493,6 +535,84 @@ class TestSearchReturnsBookingUrl:
             "https://www.google.com/travel/flights/booking?tfs=TEST"
         )
 
+    def test_per_flight_booking_url_carries_search_passenger_mix(self, monkeypatch, params):
+        """A family search's passenger_info reaches build_flight_booking_url.
+
+        Otherwise the flights array shows a family-priced result but every
+        booking_url opens Google's page priced for a single adult.
+        """
+        flight = _make_bookable_flight()
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.search",
+            lambda self, *a, **k: [flight],
+        )
+        captured_kwargs: dict = {}
+
+        def _capture(self, f, **kw):
+            captured_kwargs.update(kw)
+            return "https://www.google.com/travel/flights/booking?tfs=TEST"
+
+        monkeypatch.setattr("fli.mcp.server.SearchFlights.build_flight_booking_url", _capture)
+
+        family_params = params.model_copy(
+            update={"passengers": 2, "children": 1, "infants_on_lap": 1}
+        )
+        result = _execute_flight_search(family_params)
+        assert result["success"] is True
+        passenger_info = captured_kwargs["passenger_info"]
+        assert passenger_info.adults == 2
+        assert passenger_info.children == 1
+        assert passenger_info.infants_on_lap == 1
+
+    def test_booking_url_token_decodes_to_the_requested_mix(self, monkeypatch, params):
+        """One un-patched assertion: decode the real booking_url token.
+
+        Every other passenger-mix test at this layer monkeypatches
+        ``build_flight_booking_url`` and asserts on the captured
+        ``PassengerInfo`` object. Here only ``SearchFlights.search`` is
+        stubbed, so ``build_flight_booking_url`` runs for real and produces
+        an actual ``tfs`` token — a bug in the token builder itself, not
+        just in how this call site passes ``passenger_info``, would be
+        caught here too.
+        """
+        import base64
+        import urllib.parse
+        from datetime import datetime
+
+        from fli.models import Airline, Airport, FlightLeg, FlightResult
+
+        flight = FlightResult(
+            price=342.0,
+            currency="USD",
+            duration=420,
+            stops=0,
+            legs=[
+                FlightLeg(
+                    airline=Airline.BA,
+                    flight_number="178",
+                    departure_airport=Airport.JFK,
+                    arrival_airport=Airport.LHR,
+                    departure_datetime=datetime(2026, 12, 1, 20, 30),
+                    arrival_datetime=datetime(2026, 12, 2, 8, 30),
+                    duration=420,
+                )
+            ],
+        )
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.search",
+            lambda self, *a, **k: [flight],
+        )
+        family_params = params.model_copy(update={"passengers": 2, "children": 1})
+
+        result = _execute_flight_search(family_params)
+        assert result["success"] is True
+        booking_url = result["flights"][0]["booking_url"]
+
+        tfs = urllib.parse.parse_qs(urllib.parse.urlparse(booking_url).query)["tfs"][0]
+        pad = "=" * ((4 - len(tfs) % 4) % 4)
+        raw = base64.urlsafe_b64decode(tfs + pad)
+        assert _field_8_codes(raw) == [1, 1, 2]
+
     def test_top_level_search_booking_url_still_present(self, monkeypatch, params):
         """The top-level search booking_url (q= link) is kept alongside per-flight links."""
         flight = _make_bookable_flight()
@@ -515,6 +635,113 @@ class TestSearchReturnsBookingUrl:
         result = _execute_flight_search(params)
         assert result["count"] == 0
         assert "booking_url" in result
+
+
+class TestEmptyResultSparsePassengerMixNote:
+    """An empty result for children/infants isn't necessarily "no flights".
+
+    Google's search page inlines fewer (sometimes zero) rows for those
+    parties — see ``SPARSE_PASSENGER_MIX_WARNING`` in ``fli.search.flights``.
+    The MCP response carries the same explanation as a ``note`` key so an
+    agent relays it instead of "no flights exist".
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_flights(self, monkeypatch):
+        # Mirrors SearchFlights.search's real contract (set
+        # sparse_passenger_mix, then return None) rather than a bare
+        # `lambda: None`, so these tests exercise _execute_flight_search
+        # reading search_client.sparse_passenger_mix under the same
+        # condition the real library sets it — a party with a child or
+        # infant — without needing a stubbed HTTP client. The end-to-end
+        # case (the note tracking a genuinely empty Google page rather than
+        # the caller's own filter) is covered separately below with a
+        # stubbed page, where the real search() sets the attribute itself.
+        def _fake_search(self, filters, *a, **k):
+            info = filters.passenger_info
+            self._sparse_passenger_mix = (
+                info.children + info.infants_on_lap + info.infants_in_seat
+            ) > 0
+            return None
+
+        monkeypatch.setattr("fli.mcp.server.SearchFlights.search", _fake_search)
+
+    def test_empty_with_infant_carries_a_note(self):
+        params = FlightSearchParams(
+            origin="JFK", destination="LHR", departure_date="2026-12-01", infants_on_lap=1
+        )
+        result = _execute_flight_search(params)
+        assert result["count"] == 0
+        assert result["note"] == SPARSE_PASSENGER_MIX_WARNING
+
+    def test_empty_with_child_carries_a_note(self):
+        params = FlightSearchParams(
+            origin="JFK", destination="LHR", departure_date="2026-12-01", passengers=2, children=1
+        )
+        result = _execute_flight_search(params)
+        assert result["count"] == 0
+        assert result["note"] == SPARSE_PASSENGER_MIX_WARNING
+
+    def test_empty_adults_only_has_no_note_key(self):
+        params = FlightSearchParams(origin="JFK", destination="LHR", departure_date="2026-12-01")
+        result = _execute_flight_search(params)
+        assert result["count"] == 0
+        assert "note" not in result
+
+    def test_non_empty_with_infant_has_no_note_key(self, monkeypatch):
+        flight = _make_bookable_flight()
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.search",
+            lambda self, *a, **k: [flight],
+        )
+        params = FlightSearchParams(
+            origin="JFK", destination="LHR", departure_date="2026-12-01", infants_in_seat=1
+        )
+        result = _execute_flight_search(params)
+        assert result["count"] == 1
+        assert "note" not in result
+
+
+class TestEmptyResultNoteTracksGoogleNotTheCallersFilter:
+    """End-to-end (stubbed page, real ``SearchFlights.search``).
+
+    A page that genuinely carries no rows still gets the note; a page that
+    carries a row the caller's own airline filter then removes does not —
+    that emptiness is the filter's doing, not Google's.
+    """
+
+    def _page(self, rows: list) -> str:
+        payload = [[None, None, None, None, "FAKE_SESSION"], None, [rows], None]
+        return as_search_page(payload)
+
+    def _stub_get(self, monkeypatch, body: str) -> None:
+        def _fake_get(self, url, **kwargs):  # noqa: ANN001
+            return type("R", (), {"text": body, "raise_for_status": lambda self: None})()
+
+        monkeypatch.setattr("fli.search.client.Client.get", _fake_get)
+
+    def test_genuinely_empty_page_carries_a_note(self, monkeypatch):
+        self._stub_get(monkeypatch, self._page([]))
+        params = FlightSearchParams(
+            origin="JFK", destination="LHR", departure_date="2026-12-01", children=1
+        )
+        result = _execute_flight_search(params)
+        assert result["count"] == 0
+        assert result["note"] == SPARSE_PASSENGER_MIX_WARNING
+
+    def test_rows_filtered_out_by_airline_has_no_note_key(self, monkeypatch):
+        row = _row(legs=[_leg(dep_iata="JFK", arr_iata="LHR", airline_code="DL")])
+        self._stub_get(monkeypatch, self._page([row]))
+        params = FlightSearchParams(
+            origin="JFK",
+            destination="LHR",
+            departure_date="2026-12-01",
+            children=1,
+            airlines=["AA"],
+        )
+        result = _execute_flight_search(params)
+        assert result["count"] == 0
+        assert "note" not in result
 
 
 class TestExecuteBookingOptions:
@@ -560,6 +787,32 @@ class TestExecuteBookingOptions:
             "https://www.google.com/travel/flights/booking?tfs=SEL"
         )
 
+    def test_selected_flight_booking_url_carries_search_passenger_mix(self, monkeypatch, params):
+        """get_booking_options forwards the search's passenger_info too."""
+        flight = _make_bookable_flight()
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.search",
+            lambda self, *a, **k: [flight],
+        )
+        monkeypatch.setattr(
+            "fli.mcp.server.SearchFlights.get_booking_options",
+            lambda self, *a, **k: [_make_option_helper()],
+        )
+        captured_kwargs: dict = {}
+
+        def _capture(self, f, **kw):
+            captured_kwargs.update(kw)
+            return "https://www.google.com/travel/flights/booking?tfs=SEL"
+
+        monkeypatch.setattr("fli.mcp.server.SearchFlights.build_flight_booking_url", _capture)
+
+        family_params = params.model_copy(update={"passengers": 2, "children": 1})
+        result = _execute_booking_options(family_params, ["BA178"])
+        assert result["success"] is True
+        passenger_info = captured_kwargs["passenger_info"]
+        assert passenger_info.adults == 2
+        assert passenger_info.children == 1
+
     def test_no_match_lists_available_flights(self, monkeypatch, params):
         flight = _make_bookable_flight()
         monkeypatch.setattr(
@@ -595,3 +848,224 @@ class TestExecuteBookingOptions:
         assert "booking_url" in result
         assert "note" in result
         assert "booking_url" in result["note"]
+
+
+class TestDateSearchCapSurfacing:
+    """The per-search date cap reaches the MCP caller as a plain error string."""
+
+    def test_over_the_cap_returns_a_readable_error(self):
+        from fli.mcp.server import DateSearchParams, _execute_date_search
+
+        params = DateSearchParams(
+            origin="JFK",
+            destination="LHR",
+            start_date="2026-02-01",
+            end_date="2026-12-01",
+        )
+        result = _execute_date_search(params)
+
+        assert result["success"] is False
+        assert "93-date limit" in result["error"]
+        assert result["dates"] == []
+
+    def test_budget_window_prompt_default_range_fits_under_the_cap(self):
+        """The prompt's default window must not suggest an over-cap search."""
+        from datetime import datetime
+
+        from fli.mcp.server import find_budget_window_prompt
+        from fli.search.dates import MAX_DATES_PER_SEARCH
+
+        text = find_budget_window_prompt(origin="JFK", destination="LHR")
+        start_s, end_s = text.split("for trips between ")[1].split(". ")[0].split(" and ")
+        start = datetime.strptime(start_s.strip(), "%Y-%m-%d")
+        end = datetime.strptime(end_s.strip(), "%Y-%m-%d")
+        assert (end - start).days + 1 <= MAX_DATES_PER_SEARCH
+
+
+class TestLiveSearchAssertionHelper:
+    """`assert_live_search` must skip transport failures and fail real ones."""
+
+    @staticmethod
+    def _failure(message: str) -> dict:
+        return {"success": False, "error": f"Search failed: {message}", "flights": []}
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            # Every string below is produced verbatim by the library today.
+            "Search page carried no ds:1 payload — Google may have changed the "
+            "page shape, or served a consent/blocked page instead.",
+            "Google Flights declined the request (error 13) and returned no data.",
+            "Timed out talking to Google Flights (www.google.com).",
+            "Could not reach Google Flights (www.google.com).",
+            "Google Flights returned an error response (HTTP 429).",
+            "Priced 0 of 8 dates — every date in the range failed. Reasons: …",
+        ],
+        ids=["no-payload", "rejected", "timeout", "connection", "http-429", "sweep-total"],
+    )
+    def test_real_transport_messages_skip(self, message):
+        import _pytest.outcomes
+
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        with pytest.raises(_pytest.outcomes.Skipped):
+            assert_live_search(self._failure(message), results_key="flights", trip_type="ONE_WAY")
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            # A pydantic ValidationError always ends with this URL. The old
+            # rule matched the bare substring "http" inside it and skipped.
+            "1 validation error for FlightLeg\narrival_datetime\n  Input should be a "
+            "valid datetime [type=datetime_type]\n  For further information visit "
+            "https://errors.pydantic.dev/2.11/v/datetime_type",
+            "Parsed 0/20 flight rows — Google response shape may have changed "
+            "(sample reasons: ValueError: price field is not numeric)",
+            "Shopping response shape changed — no flights array at inner[2]/[3]: "
+            "list index out of range",
+            "TypeError: 'NoneType' object is not subscriptable",
+        ],
+        ids=["pydantic-url", "zero-rows-parsed", "shape-changed", "type-error"],
+    )
+    def test_parse_and_code_failures_still_fail(self, message):
+        """A decoder regression must never hide behind the transport skip."""
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        with pytest.raises(AssertionError, match="non-transport reason"):
+            assert_live_search(self._failure(message), results_key="flights", trip_type="ONE_WAY")
+
+    def test_parse_wording_wins_over_transport_wording(self):
+        """Mentioning both must fail, not skip — the parse half is the real news."""
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        message = (
+            "Search page carried no ds:1 payload; also 1 validation error for "
+            "FlightLeg, see https://errors.pydantic.dev/2.11/v/datetime_type"
+        )
+        with pytest.raises(AssertionError, match="non-transport reason"):
+            assert_live_search(self._failure(message), results_key="flights", trip_type="ONE_WAY")
+
+    def test_wrong_success_shape_fails(self):
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        with pytest.raises(AssertionError):
+            assert_live_search(
+                {"success": True, "flights": [], "count": 0},  # no trip_type at all
+                results_key="flights",
+                trip_type="ONE_WAY",
+            )
+
+    def test_success_path_is_strict(self):
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        assert_live_search(
+            {"success": True, "flights": [], "trip_type": "ONE_WAY", "count": 0},
+            results_key="flights",
+            trip_type="ONE_WAY",
+        )
+        with pytest.raises(AssertionError):
+            assert_live_search(
+                {"success": True, "flights": [], "trip_type": "ROUND_TRIP", "count": 0},
+                results_key="flights",
+                trip_type="ONE_WAY",
+            )
+
+    def test_transport_failure_is_a_skip(self):
+        import _pytest.outcomes
+
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        with pytest.raises(_pytest.outcomes.Skipped):
+            assert_live_search(
+                {
+                    "success": False,
+                    "error": "Search failed: Search page carried no ds:1 payload",
+                    "flights": [],
+                },
+                results_key="flights",
+                trip_type="ONE_WAY",
+            )
+
+    def test_other_failures_still_fail(self):
+        """A genuine bug must not hide behind the skip."""
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        with pytest.raises(AssertionError, match="non-transport reason"):
+            assert_live_search(
+                {
+                    "success": False,
+                    "error": "Search failed: TypeError: 'NoneType' is not subscriptable",
+                    "flights": [],
+                },
+                results_key="flights",
+                trip_type="ONE_WAY",
+            )
+
+
+class TestSearchErrorMessage:
+    """MCP callers have no log file, so the hint has to be in the response."""
+
+    def test_parse_error_carries_the_consent_hint(self):
+        from fli.mcp.server import _search_error_message
+        from fli.search import SearchParseError
+
+        message = _search_error_message(SearchParseError("Search page carried no ds:1 payload."))
+        assert message.startswith("Search failed: ")
+        assert "ds:1" in message
+        assert "FLI_SOCS_COOKIE" in message
+
+    def test_rejected_error_is_passed_through(self):
+        from fli.mcp.server import _search_error_message
+        from fli.search import SearchRejectedError
+
+        message = _search_error_message(SearchRejectedError(13))
+        assert "declined the request" in message
+        assert "FLI_SOCS_COOKIE" not in message
+
+    def test_other_errors_keep_the_plain_shape(self):
+        from fli.mcp.server import _search_error_message
+
+        assert _search_error_message(ValueError("boom")) == "Search failed: boom"
+
+    def test_prefix_is_configurable(self):
+        from fli.mcp.server import _search_error_message
+
+        assert _search_error_message(ValueError("boom"), "Booking lookup failed") == (
+            "Booking lookup failed: boom"
+        )
+
+    def test_the_hint_survives_assert_live_search(self):
+        """The hint must not turn a transport skip into a failure."""
+        import _pytest.outcomes
+
+        from fli.mcp.server import _search_error_message
+        from fli.search import SearchParseError
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        error = _search_error_message(SearchParseError("Search page carried no ds:1 payload."))
+        with pytest.raises(_pytest.outcomes.Skipped):
+            assert_live_search(
+                {"success": False, "error": error, "flights": []},
+                results_key="flights",
+                trip_type="ONE_WAY",
+            )
+
+
+class TestTrippedSweepErrorIsRecognised:
+    """The breaker's error text must reach the live tests as a transport failure."""
+
+    def test_both_sweep_failure_wordings_skip(self):
+        import _pytest.outcomes
+
+        from tests.mcp.test_mcp_server import assert_live_search
+
+        for message in (
+            "Priced 0 of 30 dates — every date in the range failed. Reasons: …",
+            "Priced 0 of 30 dates — no date in the range could be priced. Reasons: …",
+        ):
+            with pytest.raises(_pytest.outcomes.Skipped):
+                assert_live_search(
+                    {"success": False, "error": f"Search failed: {message}", "dates": []},
+                    results_key="dates",
+                    trip_type="ONE_WAY",
+                )

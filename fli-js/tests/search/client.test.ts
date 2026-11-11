@@ -32,7 +32,13 @@ describe("Client", () => {
     originalEnv = process.env.FLI_TIMEOUT;
   });
   afterEach(() => {
-    process.env.FLI_TIMEOUT = originalEnv;
+    // Assigning `undefined` to process.env stores the string "undefined"
+    // (Node semantics, adopted by Bun 1.4), which poisons later tests.
+    if (originalEnv === undefined) {
+      delete process.env.FLI_TIMEOUT;
+    } else {
+      process.env.FLI_TIMEOUT = originalEnv;
+    }
   });
 
   test("POST with body sends the expected request", async () => {
@@ -159,9 +165,11 @@ describe("Client", () => {
     expect(calls).toBe(1);
   });
 
-  test("pre-aborted external signal short-circuits before any fetch retry", async () => {
+  test("pre-aborted external signal short-circuits before any fetch at all", async () => {
     let calls = 0;
-    // Real `fetch` rejects synchronously on a pre-aborted signal — model that.
+    // Real `fetch` rejects synchronously on a pre-aborted signal, but a
+    // custom `fetchImpl` need not — so the client checks first and never
+    // calls it, nor takes a rate-limiter token for a dead request.
     const fake = async (_u: unknown, init?: RequestInit): Promise<Response> => {
       calls++;
       if (init?.signal?.aborted) {
@@ -180,7 +188,7 @@ describe("Client", () => {
       expect(e).toBe(reason);
       expect(e).not.toBeInstanceOf(SearchTimeoutError);
     }
-    expect(calls).toBe(1);
+    expect(calls).toBe(0);
   });
 
   test("retries on transient network failure then succeeds", async () => {

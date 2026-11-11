@@ -27,6 +27,13 @@ class TestAirportsCommand:
         assert payload[0]["code"] == "JFK"
         assert payload[0]["match_type"] == "iata_exact"
 
+    def test_icao_code_resolves(self, runner):
+        result = runner.invoke(app, ["airports", "KJFK", "--json"])
+        assert result.exit_code == 0
+        payload = json.loads(result.stdout)
+        assert payload[0]["code"] == "JFK"
+        assert payload[0]["match_type"] == "icao_exact"
+
     def test_city_query_returns_all_airports(self, runner):
         result = runner.invoke(app, ["airports", "new york", "--json"])
         assert result.exit_code == 0

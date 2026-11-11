@@ -22,14 +22,20 @@ from .google_flights import (
     LayoverRestrictions,
     MaxStops,
     PassengerInfo,
+    PowerType,
     PriceLimit,
+    SeatQuality,
     SeatType,
     SortBy,
     TimeRestrictions,
     TripType,
+    VideoType,
+    WifiTier,
 )
+from .names import display_name
 
 __all__ = [
+    "display_name",
     "Airline",
     "Airport",
     "Alliance",
@@ -53,9 +59,13 @@ __all__ = [
     "LayoverRestrictions",
     "MaxStops",
     "PassengerInfo",
+    "PowerType",
     "PriceLimit",
+    "SeatQuality",
     "SeatType",
     "SortBy",
     "TimeRestrictions",
     "TripType",
+    "VideoType",
+    "WifiTier",
 ]

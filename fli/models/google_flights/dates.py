@@ -24,6 +24,8 @@ from fli.models.google_flights.base import (
     PriceLimit,
     SeatType,
     TripType,
+    earliest_searchable_date,
+    utc_today,
 )
 
 MAX_PAST_FROM_DATE_DAYS = 6
@@ -123,22 +125,27 @@ class DateSearchFilters(BaseModel):
     @field_validator("to_date")
     @classmethod
     def validate_to_date(cls, v: str) -> str:
-        """Validate that to_date is in the future."""
+        """Validate that to_date is not in the past."""
         to_date = datetime.strptime(v, "%Y-%m-%d").date()
-        if to_date <= datetime.now().date():
-            raise ValueError("To date must be in the future")
+        if to_date < earliest_searchable_date():
+            raise ValueError("To date cannot be in the past")
         return v
 
     @model_validator(mode="after")
     def validate_and_adjust_from_date(self) -> "DateSearchFilters":
         """Adjust from_date to current date if it's in the past."""
         from_date = self.parsed_from_date.date()
-        current_date = datetime.now().date()
+        to_date = self.parsed_to_date.date()
+        # The clamp target is plain "today", not the rejection floor: anchoring it
+        # to earliest_searchable_date() would widen MAX_PAST_FROM_DATE_DAYS by a day.
+        current_date = utc_today()
 
         if from_date < current_date:
             delta = current_date - from_date
             if delta > timedelta(days=MAX_PAST_FROM_DATE_DAYS):
-                self.from_date = current_date.strftime("%Y-%m-%d")
+                # to_date may itself sit at the rejection floor (yesterday UTC),
+                # so cap the clamp at to_date to keep the range ordered.
+                self.from_date = min(current_date, to_date).strftime("%Y-%m-%d")
 
         return self
 

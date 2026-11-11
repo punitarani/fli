@@ -12,13 +12,17 @@ from typing import Annotated, Any
 
 from fastmcp import FastMCP
 from mcp.types import Icon
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from fli.core import (
     build_date_search_segments,
     build_flight_segments,
     build_time_restrictions,
+    classify_error,
+    format_validation_error,
     google_flights_url,
     parse_airlines,
     parse_alliances,
@@ -27,11 +31,12 @@ from fli.core import (
     parse_emissions,
     parse_max_stops,
     parse_sort_by,
-    resolve_airport,
+    resolve_airports,
     search_airports,
 )
 from fli.core.parsers import ParseError
 from fli.models import (
+    Airline,
     Airport,
     BagsFilter,
     DateSearchFilters,
@@ -42,8 +47,11 @@ from fli.models import (
     PassengerInfo,
     PriceLimit,
     TripType,
+    display_name,
 )
 from fli.search import SearchDates, SearchExplore, SearchFlights
+from fli.search.dates import MAX_DATES_PER_SEARCH
+from fli.search.flights import SPARSE_PASSENGER_MIX_WARNING
 
 
 class FlightSearchConfig(BaseSettings):
@@ -96,9 +104,25 @@ mcp = FastMCP(
 )
 
 
+@mcp.custom_route("/health", methods=["GET"])
+async def health_check(_request: Request) -> JSONResponse:
+    """Liveness probe for container healthchecks (see ``docker-compose.yml``).
+
+    Deliberately does not call Google Flights: an upstream outage should not
+    make the orchestrator restart an otherwise healthy server.
+    """
+    return JSONResponse({"status": "ok"})
+
+
 # =============================================================================
 # Request/Response Models
 # =============================================================================
+
+# Filters the API surface still accepts but the current transport cannot
+# honour (see "Search transport" in README.md). Spelled out in every
+# parameter description because an LLM caller reads the tool schema, not the
+# README.
+_IGNORED_BY_TRANSPORT = "Currently ignored by the search-page transport (logged as a warning)."
 
 
 class FlightSearchParams(BaseModel):
@@ -136,14 +160,29 @@ class FlightSearchParams(BaseModel):
         ge=1,
         description="Number of adult passengers",
     )
+    children: int = Field(0, ge=0, description="Number of children (ages 2-11)")
+    infants_in_seat: int = Field(
+        0, ge=0, description="Number of infants (under 2) occupying their own seat"
+    )
+    infants_on_lap: int = Field(0, ge=0, description="Number of lap infants (under 2, no seat)")
     exclude_basic_economy: bool = Field(
-        False, description="Exclude basic economy fares from results"
+        False,
+        description=f"Exclude basic economy fares from results. {_IGNORED_BY_TRANSPORT}",
     )
-    emissions: str = Field("ALL", description="Filter by emissions level: ALL or LESS")
+    emissions: str = Field(
+        "ALL",
+        description=f"Filter by emissions level: ALL or LESS. {_IGNORED_BY_TRANSPORT}",
+    )
     checked_bags: int = Field(
-        0, ge=0, le=2, description="Number of checked bags to include in price (0, 1, or 2)"
+        0,
+        ge=0,
+        le=2,
+        description=f"Number of checked bags in price (0-2). {_IGNORED_BY_TRANSPORT}",
     )
-    carry_on: bool = Field(False, description="Include carry-on bag fee in displayed price")
+    carry_on: bool = Field(
+        False,
+        description=f"Include carry-on bag fee in displayed price. {_IGNORED_BY_TRANSPORT}",
+    )
     show_all_results: bool = Field(
         True, description="Return all available results instead of curated ~30"
     )
@@ -186,6 +225,17 @@ class FlightSearchParams(BaseModel):
         ge=1,
         description="Maximum layover duration in minutes (multi-stop trips only).",
     )
+    top_n: int = Field(
+        5,
+        description=(
+            "Round-trip only: number of outbound options to expand into return-flight "
+            "combinations. Cost is `1 + top_n` page fetches (one outbound search plus one "
+            "per expanded candidate). The default sort expands only the cheapest `top_n` "
+            "outbounds, which are often all the same airline — raise top_n (max 10) to see "
+            "more carriers on a round trip, at the cost of more requests. Ignored for "
+            "one-way searches."
+        ),
+    )
 
 
 class DateSearchParams(BaseModel):
@@ -198,7 +248,12 @@ class DateSearchParams(BaseModel):
         description="Arrival airport IATA code(s), comma-separated for multiple (e.g., 'LHR,CDG')"
     )
     start_date: str = Field(description="Start of date range in YYYY-MM-DD format")
-    end_date: str = Field(description="End of date range in YYYY-MM-DD format")
+    end_date: str = Field(
+        description=(
+            "End of date range in YYYY-MM-DD format. A range may span at most "
+            f"{MAX_DATES_PER_SEARCH} dates; each date costs its own page fetch."
+        )
+    )
     trip_duration: int = Field(
         3, ge=1, description="Trip duration in days (for round-trip searches)"
     )
@@ -222,6 +277,11 @@ class DateSearchParams(BaseModel):
         ge=1,
         description="Number of adult passengers",
     )
+    children: int = Field(0, ge=0, description="Number of children (ages 2-11)")
+    infants_in_seat: int = Field(
+        0, ge=0, description="Number of infants (under 2) occupying their own seat"
+    )
+    infants_on_lap: int = Field(0, ge=0, description="Number of lap infants (under 2, no seat)")
     currency: str | None = Field(
         None,
         description=(
@@ -440,15 +500,24 @@ def _flight_idents(flight: Any) -> list[str]:
     return [f"{_airline_code(leg.airline)}{leg.flight_number}" for leg in _flight_legs(flight)]
 
 
+def _plain_name(value: Any) -> Any:
+    """Return an airport/airline's display name without the internal `` (CODE)`` suffix.
+
+    Legs are duck-typed here (tests and callers may pass plain strings), so
+    anything that is not an ``Airport``/``Airline`` member passes through as is.
+    """
+    return display_name(value) if isinstance(value, Airport | Airline) else value
+
+
 def _serialize_flight_leg(leg: Any) -> dict[str, Any]:
     """Serialize a single flight leg to a dictionary."""
     out: dict[str, Any] = {
-        "departure_airport": leg.departure_airport,
-        "arrival_airport": leg.arrival_airport,
+        "departure_airport": _plain_name(leg.departure_airport),
+        "arrival_airport": _plain_name(leg.arrival_airport),
         "departure_time": leg.departure_datetime,
         "arrival_time": leg.arrival_datetime,
         "duration": leg.duration,
-        "airline": leg.airline,
+        "airline": _plain_name(leg.airline),
         "airline_code": _airline_code(leg.airline),
         "flight_number": leg.flight_number,
     }
@@ -462,6 +531,12 @@ def _serialize_flight_leg(leg: Any) -> dict[str, Any]:
         out["aircraft"] = leg.aircraft
     if getattr(leg, "legroom", None):
         out["legroom"] = leg.legroom
+    cabin_name = getattr(getattr(leg, "cabin", None), "name", None)
+    if isinstance(cabin_name, str):
+        # Report the SeatType member name (ECONOMY / BUSINESS / ...) so it
+        # matches the `cabin_class` tool parameter rather than Google's
+        # numeric code.
+        out["cabin"] = cabin_name
     if getattr(leg, "overnight", False):
         out["overnight"] = True
     amenities = getattr(leg, "amenities", None)
@@ -487,9 +562,11 @@ def _serialize_layover(layover: Any) -> dict[str, Any]:
 def _flight_extras(flight: Any) -> dict[str, Any]:
     """Surface optional rich fields when populated by the parser.
 
-    Emissions fields (``co2_emissions_g`` etc.) are deliberately omitted —
-    the ``--emissions LESS`` filter still flows through to Google, but
-    raw CO₂ numbers are not part of the tool's response shape.
+    Emissions fields (``co2_emissions_g`` etc.) are deliberately omitted:
+    raw CO₂ numbers are not part of the tool's response shape. Note the
+    ``emissions`` filter itself is currently ignored by the search-page
+    transport too — it has no ``tfs`` field — and the search logs a warning
+    naming it. See "Search transport" in README.md.
     """
     out: dict[str, Any] = {}
     for src, key in (
@@ -599,12 +676,8 @@ def _serialize_date_result(
 # =============================================================================
 
 
-def _resolve_airports(codes: str) -> list[Airport]:
-    """Resolve one or more comma-separated airport codes."""
-    airports = [resolve_airport(code.strip()) for code in codes.split(",") if code.strip()]
-    if not airports:
-        raise ParseError(f"No valid airport codes found in: '{codes}'")
-    return airports
+# Shared with the CLI; the private name is kept for backwards compatibility.
+_resolve_airports = resolve_airports
 
 
 def _build_flight_filters(
@@ -657,7 +730,12 @@ def _build_flight_filters(
 
     filters = FlightSearchFilters(
         trip_type=trip_type,
-        passenger_info=PassengerInfo(adults=params.passengers),
+        passenger_info=PassengerInfo(
+            adults=params.passengers,
+            children=params.children,
+            infants_in_seat=params.infants_in_seat,
+            infants_on_lap=params.infants_on_lap,
+        ),
         flight_segments=segments,
         stops=max_stops,
         seat_type=cabin_class,
@@ -675,6 +753,28 @@ def _build_flight_filters(
     return filters, trip_type, origins, destinations
 
 
+def _search_error_message(exc: Exception, prefix: str = "Search failed") -> str:
+    """Render a search exception for an MCP response, with actionable hints.
+
+    `SearchParseError` means a page arrived that we could not read, which is
+    most often Google's regional consent interstitial. The CLI already points
+    at `FLI_SOCS_COOKIE` for that; an MCP caller has no log file to consult, so
+    it needs the hint in the response itself.
+    """
+    from fli.search.exceptions import SearchParseError
+
+    if isinstance(exc, SearchParseError):
+        return (
+            f"{prefix}: {exc} This is usually a transient page variant or a regional "
+            "consent interstitial — retry, or check FLI_SOCS_COOKIE if you are in the "
+            "EU/EEA."
+        )
+    # Everything else already carries its own actionable text —
+    # `SearchRejectedError` names the gated header and the issue, and the
+    # client's typed errors name the host and what to check.
+    return f"{prefix}: {exc}"
+
+
 def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
     """Execute a flight search and return formatted results."""
     try:
@@ -685,6 +785,7 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
         search_client = SearchFlights()
         flights = search_client.search(
             filters,
+            top_n=params.top_n,
             currency=currency,
             language=params.language,
             country=params.country,
@@ -701,13 +802,23 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
         )
 
         if not flights:
-            return {
+            response: dict[str, Any] = {
                 "success": True,
                 "flights": [],
                 "count": 0,
                 "trip_type": trip_type.name,
                 "booking_url": booking_url,
             }
+            # Read the library's own verdict rather than recomputing "empty +
+            # children/infants" here: SearchFlights.search already knows
+            # whether the empty result traces back to a page Google itself
+            # served with zero rows, versus the caller's own airline/price/
+            # duration/window filter removing rows Google did inline — that
+            # distinction lives in the fetch path, not in params, so it can
+            # only be answered correctly once, there.
+            if search_client.sparse_passenger_mix:
+                response["note"] = SPARSE_PASSENGER_MIX_WARNING
+            return response
 
         # Serialize results; attach per-flight deep-link booking URL.
         is_round_trip = trip_type == TripType.ROUND_TRIP
@@ -720,6 +831,8 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
                     currency=params.currency,
                     language=params.language,
                     country=params.country,
+                    seat_type=filters.seat_type,
+                    passenger_info=filters.passenger_info,
                 ),
             )
             for f in flights
@@ -737,12 +850,26 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
         }
 
     except ParseError as e:
-        return {"success": False, "error": str(e), "flights": []}
+        return {
+            "success": False,
+            "error": str(e),
+            "flights": [],
+            **classify_error(e).as_fields(),
+        }
+    except ValidationError as e:
+        return {
+            "success": False,
+            "error": format_validation_error(e),
+            "flights": [],
+            **classify_error(e).as_fields(),
+        }
     except Exception as e:
-        error_msg = str(e)
-        if "validation error" in error_msg.lower():
-            return {"success": False, "error": "Invalid parameter value", "flights": []}
-        return {"success": False, "error": f"Search failed: {error_msg}", "flights": []}
+        return {
+            "success": False,
+            "error": _search_error_message(e),
+            "flights": [],
+            **classify_error(e).as_fields(),
+        }
 
 
 def _execute_booking_options(
@@ -754,7 +881,10 @@ def _execute_booking_options(
     selects the itinerary identified by ``flight_numbers`` (or the top
     result when omitted), then calls
     :meth:`fli.search.SearchFlights.get_booking_options` and serializes the
-    vendor list — each carrying a direct ``booking_url``.
+    vendor list — each carrying a direct ``booking_url``. ``params.top_n``
+    is forwarded to the re-run search so a round-trip itinerary that was
+    only discoverable with a raised ``top_n`` (see :func:`search_flights`)
+    can still be matched here.
     """
     try:
         filters, trip_type, origins, destinations = _build_flight_filters(params)
@@ -763,6 +893,7 @@ def _execute_booking_options(
         search_client = SearchFlights()
         flights = search_client.search(
             filters,
+            top_n=params.top_n,
             currency=currency,
             language=params.language,
             country=params.country,
@@ -792,6 +923,11 @@ def _execute_booking_options(
                 "available_flights": [_flight_idents(f) for f in flights[:20]],
                 "options": [],
                 "booking_url": booking_url,
+                # Not an exception — the caller passed flight_numbers that don't
+                # match any result from this search. Deterministic and
+                # caller-fixable, same bucket as a bad parameter.
+                "error_type": "validation_error",
+                "retryable": False,
             }
 
         options = search_client.get_booking_options(
@@ -808,6 +944,8 @@ def _execute_booking_options(
             currency=params.currency,
             language=params.language,
             country=params.country,
+            seat_type=filters.seat_type,
+            passenger_info=filters.passenger_info,
         )
         serialized = [_serialize_booking_option(o) for o in options]
         result = {
@@ -832,12 +970,26 @@ def _execute_booking_options(
         return result
 
     except ParseError as e:
-        return {"success": False, "error": str(e), "options": []}
+        return {
+            "success": False,
+            "error": str(e),
+            "options": [],
+            **classify_error(e).as_fields(),
+        }
+    except ValidationError as e:
+        return {
+            "success": False,
+            "error": format_validation_error(e),
+            "options": [],
+            **classify_error(e).as_fields(),
+        }
     except Exception as e:
-        error_msg = str(e)
-        if "validation error" in error_msg.lower():
-            return {"success": False, "error": "Invalid parameter value", "options": []}
-        return {"success": False, "error": f"Booking lookup failed: {error_msg}", "options": []}
+        return {
+            "success": False,
+            "error": _search_error_message(e, "Booking lookup failed"),
+            "options": [],
+            **classify_error(e).as_fields(),
+        }
 
 
 def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
@@ -879,7 +1031,12 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
         # Create search filters
         filters = DateSearchFilters(
             trip_type=trip_type,
-            passenger_info=PassengerInfo(adults=params.passengers),
+            passenger_info=PassengerInfo(
+                adults=params.passengers,
+                children=params.children,
+                infants_in_seat=params.infants_in_seat,
+                infants_on_lap=params.infants_on_lap,
+            ),
             flight_segments=segments,
             stops=max_stops,
             seat_type=cabin_class,
@@ -932,9 +1089,26 @@ def _execute_date_search(params: DateSearchParams) -> dict[str, Any]:
         }
 
     except ParseError as e:
-        return {"success": False, "error": str(e), "dates": []}
+        return {
+            "success": False,
+            "error": str(e),
+            "dates": [],
+            **classify_error(e).as_fields(),
+        }
+    except ValidationError as e:
+        return {
+            "success": False,
+            "error": format_validation_error(e),
+            "dates": [],
+            **classify_error(e).as_fields(),
+        }
     except Exception as e:
-        return {"success": False, "error": f"Search failed: {str(e)}", "dates": []}
+        return {
+            "success": False,
+            "error": _search_error_message(e),
+            "dates": [],
+            **classify_error(e).as_fields(),
+        }
 
 
 def _parse_explore_origin(value: str) -> Airport | ExplorePlace:
@@ -1182,21 +1356,37 @@ def search_flights(
         int | None,
         Field(description="Number of adult passengers", ge=1),
     ] = None,
+    children: Annotated[
+        int,
+        Field(description="Number of children (ages 2-11)", ge=0),
+    ] = 0,
+    infants_in_seat: Annotated[
+        int,
+        Field(description="Number of infants (under 2) occupying their own seat", ge=0),
+    ] = 0,
+    infants_on_lap: Annotated[
+        int,
+        Field(description="Number of lap infants (under 2, no seat)", ge=0),
+    ] = 0,
     exclude_basic_economy: Annotated[
         bool,
-        Field(description="Exclude basic economy fares from results"),
+        Field(description=f"Exclude basic economy fares from results. {_IGNORED_BY_TRANSPORT}"),
     ] = False,
     emissions: Annotated[
         str,
-        Field(description="Filter by emissions level: ALL or LESS"),
+        Field(description=f"Filter by emissions level: ALL or LESS. {_IGNORED_BY_TRANSPORT}"),
     ] = "ALL",
     checked_bags: Annotated[
         int,
-        Field(description="Number of checked bags to include in price (0, 1, or 2)", ge=0, le=2),
+        Field(
+            description=f"Number of checked bags in price (0-2). {_IGNORED_BY_TRANSPORT}",
+            ge=0,
+            le=2,
+        ),
     ] = 0,
     carry_on: Annotated[
         bool,
-        Field(description="Include carry-on bag fee in displayed price"),
+        Field(description=f"Include carry-on bag fee in displayed price. {_IGNORED_BY_TRANSPORT}"),
     ] = False,
     show_all_results: Annotated[
         bool,
@@ -1239,11 +1429,32 @@ def search_flights(
         int | None,
         Field(description="Maximum layover duration in minutes.", ge=1),
     ] = None,
+    top_n: Annotated[
+        int,
+        Field(
+            description=(
+                "Round-trip only: number of outbound options to expand into return-flight "
+                "combinations. Cost is `1 + top_n` page fetches. Round-trip results all "
+                "from one airline? Raise top_n to see more carriers (max 10) — the default "
+                "sort otherwise only expands the cheapest 5 outbounds, which are often the "
+                "same carrier. Ignored for one-way searches."
+            ),
+            ge=1,
+            le=10,
+        ),
+    ] = 5,
 ) -> dict[str, Any]:
     """Search for flights between two airports on a specific date.
 
     Returns a list of available flights with prices, durations, and leg details.
     Supports one-way and round-trip searches with various filtering options.
+
+    On failure (`success: false`), the response also carries `error_type`
+    (e.g. `validation_error`, `timeout`, `parse_error`) and a `retryable`
+    bool — classify the failure from `error_type` instead of parsing the
+    `error` message text. The client has already retried internally with
+    backoff; if `retryable` is true, retry at most once or twice more with
+    your own exponential backoff in seconds (429 means slow down further).
     """
     effective_departure_window = departure_window or CONFIG.default_departure_window
     params = FlightSearchParams(
@@ -1257,6 +1468,9 @@ def search_flights(
         max_stops=max_stops,
         sort_by=sort_by,
         passengers=passengers or CONFIG.default_passengers,
+        children=children,
+        infants_in_seat=infants_in_seat,
+        infants_on_lap=infants_on_lap,
         exclude_basic_economy=exclude_basic_economy,
         emissions=emissions,
         checked_bags=checked_bags,
@@ -1266,6 +1480,7 @@ def search_flights(
         language=language,
         country=country,
         exclude_airlines=exclude_airlines,
+        top_n=top_n,
         alliance=alliance,
         exclude_alliance=exclude_alliance,
         min_layover=min_layover,
@@ -1302,7 +1517,15 @@ def search_dates(
         ),
     ],
     start_date: Annotated[str, Field(description="Start of date range in YYYY-MM-DD format")],
-    end_date: Annotated[str, Field(description="End of date range in YYYY-MM-DD format")],
+    end_date: Annotated[
+        str,
+        Field(
+            description=(
+                "End of date range in YYYY-MM-DD format. A range may span at most "
+                f"{MAX_DATES_PER_SEARCH} dates; each date costs its own page fetch."
+            )
+        ),
+    ],
     trip_duration: Annotated[
         int,
         Field(description="Trip duration in days for round-trips", ge=1),
@@ -1335,6 +1558,18 @@ def search_dates(
         int | None,
         Field(description="Number of adult passengers", ge=1),
     ] = None,
+    children: Annotated[
+        int,
+        Field(description="Number of children (ages 2-11)", ge=0),
+    ] = 0,
+    infants_in_seat: Annotated[
+        int,
+        Field(description="Number of infants (under 2) occupying their own seat", ge=0),
+    ] = 0,
+    infants_on_lap: Annotated[
+        int,
+        Field(description="Number of lap infants (under 2, no seat)", ge=0),
+    ] = 0,
     currency: Annotated[
         str | None,
         Field(description="ISO 4217 currency code (USD, EUR, GBP, JPY...) for prices."),
@@ -1372,6 +1607,13 @@ def search_dates(
 
     Returns a list of dates with their prices, useful for flexible travel planning.
     Supports both one-way and round-trip searches.
+
+    On failure (`success: false`), the response also carries `error_type`
+    (e.g. `validation_error`, `timeout`, `parse_error`) and a `retryable`
+    bool — classify the failure from `error_type` instead of parsing the
+    `error` message text. The client has already retried internally with
+    backoff; if `retryable` is true, retry at most once or twice more with
+    your own exponential backoff in seconds (429 means slow down further).
     """
     effective_departure_window = departure_window or CONFIG.default_departure_window
     params = DateSearchParams(
@@ -1387,6 +1629,9 @@ def search_dates(
         departure_window=effective_departure_window,
         sort_by_price=sort_by_price,
         passengers=passengers or CONFIG.default_passengers,
+        children=children,
+        infants_in_seat=infants_in_seat,
+        infants_on_lap=infants_on_lap,
         currency=currency,
         language=language,
         country=country,
@@ -1586,13 +1831,25 @@ def get_booking_options(
         int | None,
         Field(description="Number of adult passengers", ge=1),
     ] = None,
+    children: Annotated[
+        int,
+        Field(description="Number of children (ages 2-11)", ge=0),
+    ] = 0,
+    infants_in_seat: Annotated[
+        int,
+        Field(description="Number of infants (under 2) occupying their own seat", ge=0),
+    ] = 0,
+    infants_on_lap: Annotated[
+        int,
+        Field(description="Number of lap infants (under 2, no seat)", ge=0),
+    ] = 0,
     airlines: Annotated[
         list[str] | None,
         Field(description="Filter by airline IATA codes (e.g., ['BA', 'AA'])"),
     ] = None,
     exclude_basic_economy: Annotated[
         bool,
-        Field(description="Exclude basic economy fares from results"),
+        Field(description=f"Exclude basic economy fares from results. {_IGNORED_BY_TRANSPORT}"),
     ] = False,
     currency: Annotated[
         str | None,
@@ -1639,16 +1896,34 @@ def get_booking_options(
     ] = None,
     emissions: Annotated[
         str,
-        Field(description="Filter by emissions level: ALL or LESS"),
+        Field(description=f"Filter by emissions level: ALL or LESS. {_IGNORED_BY_TRANSPORT}"),
     ] = "ALL",
     checked_bags: Annotated[
         int,
-        Field(description="Number of checked bags to include in price (0, 1, or 2)", ge=0, le=2),
+        Field(
+            description=f"Number of checked bags in price (0-2). {_IGNORED_BY_TRANSPORT}",
+            ge=0,
+            le=2,
+        ),
     ] = 0,
     carry_on: Annotated[
         bool,
-        Field(description="Include carry-on bag fee in displayed price"),
+        Field(description=f"Include carry-on bag fee in displayed price. {_IGNORED_BY_TRANSPORT}"),
     ] = False,
+    top_n: Annotated[
+        int,
+        Field(
+            description=(
+                "Round-trip only: number of outbound options the re-run search expands "
+                "into return-flight combinations — pass the same value used for the "
+                "search_flights call that found this itinerary, or a flight found with a "
+                "higher top_n may not be reproduced here. Cost is `1 + top_n` page fetches. "
+                "Ignored for one-way searches."
+            ),
+            ge=1,
+            le=10,
+        ),
+    ] = 5,
 ) -> dict[str, Any]:
     """Get bookable fares (vendor names, prices, and direct booking URLs) for a flight.
 
@@ -1659,11 +1934,22 @@ def get_booking_options(
     flight numbers, then call this tool to retrieve where and at what price
     it can be booked.
 
-    Pass the same filters (``sort_by``, ``departure_window``,
+    Pass the same filters (``sort_by``, ``departure_window``, ``top_n``,
     ``exclude_airlines``, ``alliance``, layover/bags/emissions, …) that were
     used for ``search_flights`` so the re-run search reproduces the same result
     set — otherwise, when ``flight_numbers`` is omitted, the priced "top
-    result" may differ from the one the user saw.
+    result" may differ from the one the user saw, and a flight found only
+    because ``search_flights`` was called with a higher ``top_n`` may not be
+    found at all.
+
+    On failure (``success: false``, including "no flight matched
+    flight_numbers"), the response also carries ``error_type`` (e.g.
+    ``validation_error``, ``rejected_error``) and a ``retryable`` bool —
+    classify the failure from ``error_type`` instead of parsing the
+    ``error`` message text. The client has already retried internally with
+    backoff; if ``retryable`` is true, retry at most once or twice more
+    with your own exponential backoff in seconds (429 means slow down
+    further).
     """
     effective_departure_window = departure_window or CONFIG.default_departure_window
     params = FlightSearchParams(
@@ -1676,6 +1962,9 @@ def get_booking_options(
         max_stops=max_stops,
         sort_by=sort_by,
         passengers=passengers or CONFIG.default_passengers,
+        children=children,
+        infants_in_seat=infants_in_seat,
+        infants_on_lap=infants_on_lap,
         airlines=airlines,
         exclude_basic_economy=exclude_basic_economy,
         emissions=emissions,
@@ -1689,6 +1978,7 @@ def get_booking_options(
         exclude_alliance=exclude_alliance,
         min_layover=min_layover,
         max_layover=max_layover,
+        top_n=top_n,
     )
     return _execute_booking_options(params, flight_numbers)
 
@@ -1709,6 +1999,7 @@ def _find_airports_impl(query: str, limit: int = 10) -> dict[str, Any]:
             "success": False,
             "error": str(exc),
             "query": query,
+            **classify_error(exc).as_fields(),
         }
 
     return {
@@ -1733,17 +2024,24 @@ def find_airports(
         str,
         Field(
             description=(
-                "City name, airport name, or IATA code (e.g., 'new york', 'heathrow', 'JFK')"
+                "City name, airport name, IATA code, or ICAO code "
+                "(e.g., 'new york', 'heathrow', 'JFK', 'KJFK')"
             )
         ),
     ],
     limit: Annotated[int, Field(description="Maximum results to return", ge=1, le=50)] = 10,
 ) -> dict[str, Any]:
-    """Search for airports by city name, airport name, or IATA code.
+    """Search for airports by city name, airport name, IATA code, or ICAO code.
 
     Use this tool to find airport IATA codes before searching for flights.
     Supports city names (e.g., "new york" returns JFK, LGA, EWR),
-    airport names (e.g., "heathrow" returns LHR), and IATA codes.
+    airport names (e.g., "heathrow" returns LHR), IATA codes, and 4-letter
+    ICAO codes (e.g., "KJFK" returns JFK).
+
+    On failure (``success: false``), the response also carries ``error_type``
+    (currently always ``unexpected_error`` for this tool, since airport
+    lookup is local and has no known-transient failure modes) and a
+    ``retryable`` bool.
     """
     return _find_airports_impl(query, limit=limit)
 

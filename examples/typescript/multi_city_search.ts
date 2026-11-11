@@ -1,6 +1,16 @@
 /**
  * Multi-city itinerary search (three legs on different dates).
  *
+ * CURRENTLY UNAVAILABLE. Since 2026-08 searches are served by Google's
+ * public `/travel/flights` page rather than the `GetShoppingResults` RPC,
+ * which now requires a browser-signed header. Google loads multi-city
+ * results client-side through that same gated RPC, so the page carries no
+ * flight rows to read — `search()` raises `SearchUnsupportedError` rather
+ * than returning the first leg's one-way board, which would decode
+ * cleanly into wrong results. Search each leg separately for now. This
+ * example is kept for when that changes; see
+ * https://github.com/punitarani/fli#223.
+ *
  * Mirrors examples/python/multi_city_search.py. Results come back as an
  * array of itineraries, each itinerary an array of FlightResult — one per
  * leg, in order. Run with:

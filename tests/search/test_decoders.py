@@ -12,13 +12,43 @@ from datetime import datetime
 
 import pytest
 
+from fli.models import Airline, Airport
 from fli.search._decoders import (
+    _AIRLINE_BY_CODE,
+    _AIRPORT_BY_CODE,
     _extract_booking_urls,
     _extract_fare_name,
+    _parse_airport,
     _parse_emissions,
     _safe_airline,
     parse_booking_chunk,
 )
+
+
+class TestAirportAirlineByCodeCompleteness:
+    """``_AIRPORT_BY_CODE`` / ``_AIRLINE_BY_CODE`` must cover every enum code.
+
+    Building these lookup dicts from ``for m in Airport`` (iterating the
+    Enum) silently skips alias members, so codes that share a display name
+    with an earlier code (e.g. ``OKA``/``NAH``, both "Naha Airport") were
+    never inserted — rows for those airports/airlines were then dropped as
+    "unknown code". The dicts must instead be built from ``__members__``,
+    which includes every registered name.
+    """
+
+    def test_airport_by_code_contains_every_member_name(self):
+        for name in Airport.__members__:
+            assert name in _AIRPORT_BY_CODE
+
+    def test_airline_by_code_contains_every_member_name(self):
+        for name in Airline.__members__:
+            assert name in _AIRLINE_BY_CODE
+
+    def test_tri_resolves_to_tri_not_psc(self):
+        assert _parse_airport("TRI") is Airport.TRI
+
+    def test_oka_resolves_to_oka_not_nah(self):
+        assert _parse_airport("OKA") is Airport.OKA
 
 
 class TestSafeAirline:

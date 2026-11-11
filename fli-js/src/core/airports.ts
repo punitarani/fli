@@ -83,6 +83,17 @@ for (const [city, codes] of Object.entries(CITY_AIRPORTS)) {
 }
 
 /**
+ * Strip the internal " (CODE)" suffix that keeps duplicate names unique in
+ * AIRPORT_NAMES. The code is always returned separately, so users should see
+ * the plain name (mirrors Python's `fli.models.display_name`).
+ */
+export function airportDisplayName(code: string): string {
+  const name = AIRPORT_NAMES[code as Airport] ?? code;
+  const suffix = ` (${code})`;
+  return name.endsWith(suffix) ? name.slice(0, -suffix.length) : name;
+}
+
+/**
  * Search airports by city name, airport name, or IATA code.
  *
  * Results are ranked 0-100 (higher = better) via the same 5-priority
@@ -148,25 +159,26 @@ export function searchAirports(query: string, limit = 10): AirportMatch[] {
   }
 
   // 4. Airport name substring match (position-weighted score)
-  for (const [code, name] of Object.entries(AIRPORT_NAMES)) {
+  for (const code of Object.keys(AIRPORT_NAMES)) {
     if (seen.has(code)) continue;
-    const nameLower = name.toLowerCase();
-    const pos = nameLower.indexOf(queryLower);
+    // Match on the name users see, not the internal " (CODE)" suffix.
+    const displayName = airportDisplayName(code);
+    const pos = displayName.toLowerCase().indexOf(queryLower);
     if (pos !== -1) {
       const score = 70.0 - pos * 0.1;
-      results.push({ code: code as Airport, name, match_type: "name", score });
+      results.push({ code: code as Airport, name: displayName, match_type: "name", score });
       seen.add(code);
     }
   }
 
   // 5. IATA prefix match (≤3-char query)
   if (queryUpper.length <= 3) {
-    for (const [code, name] of Object.entries(AIRPORT_NAMES)) {
+    for (const code of Object.keys(AIRPORT_NAMES)) {
       if (seen.has(code)) continue;
       if (code.startsWith(queryUpper)) {
         results.push({
           code: code as Airport,
-          name,
+          name: airportDisplayName(code),
           match_type: "iata_prefix",
           score: 60.0,
         });

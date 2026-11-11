@@ -10,6 +10,13 @@ from fli.cli.main import app
 from fli.models import Airline
 from fli.models.google_flights.base import TripType
 from fli.search import DatePrice
+from fli.search.exceptions import (
+    SearchCertificateError,
+    SearchClientError,
+    SearchConnectionError,
+    SearchHTTPError,
+    SearchTimeoutError,
+)
 
 
 @pytest.fixture
@@ -31,6 +38,87 @@ def test_basic_dates_search(runner, mock_search_dates, mock_console):
     mock_search_dates.search.assert_called_once()
     args, _ = mock_search_dates.search.call_args
     assert args[0].trip_type == TripType.ONE_WAY
+
+
+def test_dates_with_passengers(runner, mock_search_dates, mock_console):
+    """Test dates search passes adult passenger count into filters."""
+    mock_search_dates.search.return_value = []
+    result = runner.invoke(app, ["dates", "JFK", "LAX", "--passengers", "2", "--format", "json"])
+    assert result.exit_code == 0
+    args, _ = mock_search_dates.search.call_args
+    assert args[0].passenger_info.adults == 2
+    payload = json.loads(result.stdout)
+    assert payload["query"]["passengers"] == 2
+
+
+def test_dates_with_family_passenger_mix(runner, mock_search_dates, mock_console):
+    """Test dates search passes the full passenger mix into filters and JSON query echo."""
+    mock_search_dates.search.return_value = []
+    result = runner.invoke(
+        app,
+        [
+            "dates",
+            "JFK",
+            "LAX",
+            "--passengers",
+            "2",
+            "--children",
+            "1",
+            "--infants-in-seat",
+            "1",
+            "--infants-on-lap",
+            "1",
+            "--format",
+            "json",
+        ],
+    )
+    assert result.exit_code == 0
+    args, _ = mock_search_dates.search.call_args
+    assert args[0].passenger_info.adults == 2
+    assert args[0].passenger_info.children == 1
+    assert args[0].passenger_info.infants_in_seat == 1
+    assert args[0].passenger_info.infants_on_lap == 1
+    payload = json.loads(result.stdout)
+    assert payload["query"]["passengers"] == 2
+    assert payload["query"]["children"] == 1
+    assert payload["query"]["infants_in_seat"] == 1
+    assert payload["query"]["infants_on_lap"] == 1
+
+
+def test_dates_invalid_passenger_mix_exits_nonzero_with_clean_message(
+    runner, mock_search_dates, mock_console
+):
+    """A passenger mix Google Flights would reject fails cleanly, not with a pydantic dump."""
+    result = runner.invoke(
+        app,
+        ["dates", "JFK", "LAX", "--passengers", "1", "--infants-on-lap", "3"],
+    )
+    assert result.exit_code == 1
+    assert "validation error for" not in result.stdout.lower()
+    assert "infants_on_lap" in result.stdout
+    mock_search_dates.search.assert_not_called()
+
+
+def test_dates_invalid_passenger_mix_json_error(runner, mock_search_dates, mock_console):
+    """JSON mode surfaces the same passenger-mix error as a clean payload."""
+    result = runner.invoke(
+        app,
+        [
+            "dates",
+            "JFK",
+            "LAX",
+            "--passengers",
+            "9",
+            "--children",
+            "1",
+            "--format",
+            "json",
+        ],
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert "Total passengers must be between 1 and 9" in payload["error"]["message"]
 
 
 def test_dates_with_date_range(runner, mock_search_dates, mock_console):
@@ -297,3 +385,104 @@ def test_dates_json_empty_results(runner, mock_search_dates, mock_console):
     assert payload["success"] is True
     assert payload["count"] == 0
     assert payload["dates"] == []
+
+
+def test_dates_over_the_cap_reports_cleanly(runner, mock_console):
+    """A range wider than the per-search date cap fails with a readable message.
+
+    Deliberately not mocking ``SearchDates``: the cap is enforced before any
+    request, and the point is that the CLI surfaces it rather than dumping a
+    traceback.
+    """
+    from_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    to_date = (datetime.now() + timedelta(days=200)).strftime("%Y-%m-%d")
+
+    result = runner.invoke(app, ["dates", "JFK", "LAX", "--from", from_date, "--to", to_date])
+
+    assert result.exit_code == 1
+    assert "93-date limit" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_dates_over_the_cap_json(runner, mock_console):
+    """The same cap error is a structured JSON error, not a crash.
+
+    This is a bare ``ValueError`` raised by ``SearchDates.search()`` with
+    no mocking involved — it used to hit the CLI's
+    ``except (AttributeError, ValueError)`` block and get hardcoded
+    ``error_type="search_error"``. It's now routed through the shared
+    classifier and reports ``validation_error`` (a deliberate behaviour
+    change) plus the new ``retryable`` field.
+    """
+    from_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    to_date = (datetime.now() + timedelta(days=200)).strftime("%Y-%m-%d")
+
+    result = runner.invoke(
+        app,
+        ["dates", "JFK", "LAX", "--from", from_date, "--to", to_date, "--format", "json"],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert "93-date limit" in payload["error"]["message"]
+    assert payload["error"]["type"] == "validation_error"
+    assert payload["error"]["retryable"] is False
+
+
+def test_dates_json_invalid_airport_code(runner, mock_search_dates, mock_console):
+    """An unresolvable airport code reports validation_error, not a crash."""
+    result = runner.invoke(
+        app,
+        ["dates", "ZZZZ", "LAX", "--format", "json"],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert payload["error"]["type"] == "validation_error"
+    assert payload["error"]["retryable"] is False
+    mock_search_dates.search.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "exc, expected_type, expected_retryable",
+    [
+        # Released v0.9.0 CLI --format json values — must not move.
+        pytest.param(SearchTimeoutError("slow"), "timeout", True, id="timeout"),
+        pytest.param(SearchConnectionError("no route"), "connection_error", True, id="connection"),
+        # certificate_error is a SearchConnectionError subclass but, unlike
+        # its parent, deterministic — not retryable.
+        pytest.param(
+            SearchCertificateError("bad cert"), "certificate_error", False, id="certificate"
+        ),
+        pytest.param(SearchHTTPError("bad gw", status_code=502), "http_error", True, id="http-5xx"),
+        pytest.param(
+            SearchClientError("generic"), "search_error", False, id="generic-search-error"
+        ),
+        pytest.param(RuntimeError("bug"), "unexpected_error", False, id="unexpected"),
+        # A bare AttributeError used to be hardcoded to "search_error" by
+        # the (AttributeError, ValueError) block; it isn't a
+        # SearchClientError or input-validation failure, so the shared
+        # classifier now calls it unexpected_error.
+        pytest.param(
+            AttributeError("'NoneType' object has no attribute 'name'"),
+            "unexpected_error",
+            False,
+            id="bare-attribute-error",
+        ),
+    ],
+)
+def test_dates_json_error_type_matches_shared_classifier(
+    runner, mock_search_dates, mock_console, exc, expected_type, expected_retryable
+):
+    """Dates --format json's error_type/retryable match fli.core.errors.classify_error."""
+    mock_search_dates.search.side_effect = exc
+
+    result = runner.invoke(app, ["dates", "JFK", "LAX", "--format", "json"])
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert payload["error"]["type"] == expected_type
+    assert payload["error"]["retryable"] is expected_retryable

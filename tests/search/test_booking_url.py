@@ -9,7 +9,7 @@ import urllib.parse
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
-from fli.models import Airline, Airport, FlightLeg, FlightResult
+from fli.models import Airline, Airport, FlightLeg, FlightResult, SeatType
 from fli.search.flights import SearchFlights
 
 # ---------------------------------------------------------------------------
@@ -231,3 +231,108 @@ class TestBuildFlightBookingUrl:
         client = _make_client()
         result = client.build_flight_booking_url(_one_way())
         assert isinstance(result, str)
+
+    def test_seat_type_defaults_to_economy(self):
+        """Omitted seat_type still encodes field 9 as economy (1)."""
+        import base64
+
+        client = _make_client()
+        url = client.build_flight_booking_url(_one_way())
+        tfs = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["tfs"][0]
+        pad = "=" * ((4 - len(tfs) % 4) % 4)
+        raw = base64.urlsafe_b64decode(tfs + pad)
+        assert b"\x48\x01" in raw
+        assert b"\x48\x03" not in raw
+
+    def test_seat_type_business_changes_tfs_field_9(self):
+        """Passing SeatType.BUSINESS encodes field 9 as 3, not the economy default."""
+        import base64
+
+        client = _make_client()
+        economy_url = client.build_flight_booking_url(_one_way())
+        business_url = client.build_flight_booking_url(_one_way(), seat_type=SeatType.BUSINESS)
+        assert economy_url != business_url
+
+        def _raw(url: str) -> bytes:
+            tfs = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["tfs"][0]
+            pad = "=" * ((4 - len(tfs) % 4) % 4)
+            return base64.urlsafe_b64decode(tfs + pad)
+
+        business = _raw(business_url)
+        assert b"\x40\x01\x48\x03\x70\x01" in business
+        assert b"\x40\x01\x48\x01\x70\x01" not in business
+
+    def _field_8_codes(self, raw: bytes) -> list[int]:
+        """Walk the top-level message and collect every field-8 (passenger) code."""
+        from fli.search._proto import _read_varint
+
+        codes: list[int] = []
+        offset = 0
+        while offset < len(raw):
+            tag, offset = _read_varint(raw, offset)
+            field, wire = tag >> 3, tag & 0x7
+            if wire == 0:
+                value, offset = _read_varint(raw, offset)
+                if field == 8:
+                    codes.append(value)
+            elif wire == 2:
+                length, offset = _read_varint(raw, offset)
+                offset += length
+            else:  # pragma: no cover - the encoder emits only wire types 0 and 2
+                raise AssertionError(f"unexpected wire type {wire} at offset {offset}")
+        return codes
+
+    def test_passenger_info_defaults_to_single_adult(self):
+        """Omitted passenger_info still encodes field 8 as one adult (1)."""
+        import base64
+
+        client = _make_client()
+        url = client.build_flight_booking_url(_one_way())
+        tfs = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["tfs"][0]
+        pad = "=" * ((4 - len(tfs) % 4) % 4)
+        raw = base64.urlsafe_b64decode(tfs + pad)
+        assert self._field_8_codes(raw) == [1]
+
+    def test_passenger_info_family_mix_encodes_one_entry_per_traveller(self):
+        """A family PassengerInfo's decoded tfs token carries one field-8 code per traveller."""
+        import base64
+
+        from fli.models import PassengerInfo
+
+        client = _make_client()
+        url = client.build_flight_booking_url(
+            _one_way(), passenger_info=PassengerInfo(adults=2, children=1)
+        )
+        tfs = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["tfs"][0]
+        pad = "=" * ((4 - len(tfs) % 4) % 4)
+        raw = base64.urlsafe_b64decode(tfs + pad)
+        assert self._field_8_codes(raw) == [1, 1, 2]
+
+    def test_garbage_passenger_info_still_returns_url(self):
+        """A malformed passenger_info degrades to a single adult, never raises."""
+        client = _make_client()
+        url = client.build_flight_booking_url(_one_way(), passenger_info="not-a-passenger-info")
+        assert isinstance(url, str)
+        assert url.startswith("https://www.google.com/travel/flights/booking?tfs=")
+
+    def test_huge_duck_typed_count_falls_back_quickly(self):
+        """An out-of-range duck-typed count must not build a multi-megabyte URL.
+
+        ``passenger_codes`` rejects a count this large before building any
+        list, so the existing broad ``except Exception`` here still returns
+        the generic fallback URL — quickly, not after seconds spent building
+        a list with a million entries.
+        """
+        import time
+
+        class _Duck:
+            adults = 10**6
+
+        client = _make_client()
+        start = time.monotonic()
+        url = client.build_flight_booking_url(_one_way(), passenger_info=_Duck())
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 1.0
+        assert len(url) < 200
+        assert url.startswith("https://www.google.com/travel/flights")

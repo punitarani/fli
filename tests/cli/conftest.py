@@ -100,6 +100,12 @@ def mock_search_flights(monkeypatch):
     mock.build_flight_booking_url.return_value = (
         "https://www.google.com/travel/flights/booking?tfs=test"
     )
+    # Real SearchFlights.search() sets this False whenever the result isn't
+    # both empty *and* the reason is a page Google itself served empty (see
+    # sparse_passenger_mix on the real class) — default the mock the same
+    # way so tests that don't care about it don't pick up a truthy MagicMock
+    # attribute by accident. Tests that exercise the hint/note set it True.
+    mock.sparse_passenger_mix = False
     monkeypatch.setattr("fli.search.flights.SearchFlights.__new__", lambda cls: mock)
     monkeypatch.setattr("fli.search.SearchFlights.__new__", lambda cls: mock)
     return mock

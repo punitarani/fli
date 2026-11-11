@@ -6,7 +6,6 @@ from typing import Any
 
 import plotext as plt
 import typer
-from click import Context, Parameter
 from rich import box
 from rich.console import Group
 from rich.panel import Panel
@@ -20,10 +19,12 @@ from fli.core.builders import normalize_date
 from fli.core.parsers import ParseError
 from fli.core.parsers import parse_airlines as core_parse_airlines
 from fli.core.parsers import parse_max_stops as core_parse_max_stops
-from fli.models import Airline, Airport, MaxStops, TripType
+from fli.models import Airline, Airport, MaxStops, TripType, display_name
 
 
-def validate_currency(ctx: Context, param: Parameter, value: str | None) -> str | None:
+def validate_currency(
+    ctx: typer.Context, param: typer.CallbackParam, value: str | None
+) -> str | None:
     """Validate currency code format for typer callbacks."""
     if value is None:
         return None
@@ -33,7 +34,7 @@ def validate_currency(ctx: Context, param: Parameter, value: str | None) -> str 
     return normalized
 
 
-def validate_date(ctx: Context, param: Parameter, value: str) -> str | None:
+def validate_date(ctx: typer.Context, param: typer.CallbackParam, value: str) -> str | None:
     """Validate date format for typer callbacks."""
     if value is None:
         return None
@@ -45,7 +46,7 @@ def validate_date(ctx: Context, param: Parameter, value: str) -> str | None:
 
 
 def validate_time_range(
-    ctx: Context, param: Parameter, value: str | None
+    ctx: typer.Context, param: typer.CallbackParam, value: str | None
 ) -> tuple[int, int] | None:
     """Validate and parse time range in format 'start-end' (24h format) for typer callbacks."""
     if not value:
@@ -160,8 +161,8 @@ def filter_dates_by_days(dates: list, days: list[DayOfWeek], trip_type: TripType
 
 
 def format_airport(airport: Airport) -> str:
-    """Format airport code and name (first two words)."""
-    name_parts = airport.value.split()[:3]  # Get first three words
+    """Format airport code and name (first three words)."""
+    name_parts = display_name(airport).split()[:3]  # Get first three words
     name = " ".join(name_parts)
     return f"{airport.name} ({name})"
 
@@ -175,12 +176,12 @@ def format_duration(minutes: int) -> str:
 
 def serialize_airport(airport: Airport) -> dict[str, str]:
     """Serialize an airport for machine-readable output."""
-    return {"code": airport.name, "name": airport.value}
+    return {"code": airport.name, "name": display_name(airport)}
 
 
 def serialize_airline(airline: Airline) -> dict[str, str]:
     """Serialize an airline for machine-readable output."""
-    return {"code": airline.name.removeprefix("_"), "name": airline.value}
+    return {"code": airline.name.removeprefix("_"), "name": display_name(airline)}
 
 
 def serialize_flight_leg(leg: Any) -> dict[str, Any]:
@@ -198,6 +199,9 @@ def serialize_flight_leg(leg: Any) -> dict[str, Any]:
         payload["aircraft"] = leg.aircraft
     if getattr(leg, "legroom", None):
         payload["legroom"] = leg.legroom
+    cabin_name = getattr(getattr(leg, "cabin", None), "name", None)
+    if isinstance(cabin_name, str):
+        payload["cabin"] = cabin_name
     if getattr(leg, "overnight", False):
         payload["overnight"] = True
     if getattr(leg, "operating_airline", None) is not None:
@@ -342,8 +346,14 @@ def build_json_success_response(
     results_key: str,
     results: list[dict[str, Any]],
     booking_url: str | None = None,
+    note: str | None = None,
 ) -> dict[str, Any]:
-    """Build a JSON success payload for CLI commands."""
+    """Build a JSON success payload for CLI commands.
+
+    ``note`` is an optional explanatory string (e.g. the sparse-passenger-mix
+    hint on an empty result) — additive, like ``booking_url``, so callers that
+    don't pass it see no shape change.
+    """
     payload: dict[str, Any] = {
         "success": True,
         "data_source": "google_flights",
@@ -355,6 +365,8 @@ def build_json_success_response(
     }
     if booking_url:
         payload["booking_url"] = booking_url
+    if note:
+        payload["note"] = note
     return payload
 
 
@@ -363,9 +375,17 @@ def build_json_error_response(
     search_type: str,
     message: str,
     error_type: str = "validation_error",
+    retryable: bool = False,
+    http_status: int | None = None,
     query: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build a JSON error payload for CLI commands."""
+    """Build a JSON error payload for CLI commands.
+
+    ``retryable`` and (when known) ``http_status`` mirror the MCP tools'
+    error responses — both come from the same
+    :func:`fli.core.errors.classify_error`, typically passed straight
+    through via ``**classify_error(exc).as_fields()`` at the call site.
+    """
     payload = {
         "success": False,
         "data_source": "google_flights",
@@ -373,8 +393,11 @@ def build_json_error_response(
         "error": {
             "type": error_type,
             "message": message,
+            "retryable": retryable,
         },
     }
+    if http_status is not None:
+        payload["error"]["http_status"] = http_status
     if query is not None:
         payload["query"] = query
     return payload

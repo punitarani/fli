@@ -8,6 +8,8 @@
  * so the parser operates on `Uint8Array` rather than the JS string.
  */
 
+import { SearchRejectedError } from "./exceptions.ts";
+
 const PREFIX = ")]}'";
 const PREFIX_BYTES = new TextEncoder().encode(PREFIX);
 
@@ -49,7 +51,17 @@ function* chunksFromOuter(outer: unknown): Generator<unknown> {
     if (!Array.isArray(row) || row.length < 3) continue;
     if (row[0] !== "wrb.fr") continue;
     const inner = row[2];
-    if (typeof inner !== "string" || inner.length === 0) continue;
+    if (typeof inner !== "string" || inner.length === 0) {
+      // Payload-less row: Google declined the call and parked an error
+      // code in slot 5. Throw instead of yielding nothing, so callers
+      // don't report a hard block as "no flights on this route".
+      const slot = row.length > 5 ? row[5] : null;
+      const code = Array.isArray(slot) && slot.length > 0 ? slot[0] : null;
+      if (typeof code === "number" && Number.isInteger(code)) {
+        throw new SearchRejectedError(code);
+      }
+      continue;
+    }
     try {
       yield JSON.parse(inner);
     } catch {
@@ -71,12 +83,17 @@ export function* iterWrbChunks(body: string | Uint8Array): Generator<unknown> {
   // Fast path: legacy single-chunk responses with no length headers.
   const first = raw[0];
   if (first === undefined || first < 0x30 || first > 0x39) {
+    let outer: unknown;
     try {
-      const outer = JSON.parse(decoder.decode(raw));
-      yield* chunksFromOuter(outer);
+      outer = JSON.parse(decoder.decode(raw));
     } catch {
       // Discard malformed body.
+      return;
     }
+    // Deliberately outside the `try`: `chunksFromOuter` throws
+    // `SearchRejectedError` on a payload-less row, and swallowing that
+    // would turn a hard rejection back into "no flights found".
+    yield* chunksFromOuter(outer);
     return;
   }
 
@@ -95,13 +112,15 @@ export function* iterWrbChunks(body: string | Uint8Array): Generator<unknown> {
     const chunkBytes = Math.max(length - 1, 0);
     const payload = raw.subarray(cursor, cursor + chunkBytes);
     cursor += chunkBytes;
+    let outer: unknown;
     try {
-      const trimmed = decoder.decode(payload).trim();
-      const outer = JSON.parse(trimmed);
-      yield* chunksFromOuter(outer);
+      outer = JSON.parse(decoder.decode(payload).trim());
     } catch {
       // Discard malformed chunks.
+      continue;
     }
+    // Outside the `try` — see the note in the single-chunk path above.
+    yield* chunksFromOuter(outer);
   }
 }
 

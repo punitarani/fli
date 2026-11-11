@@ -184,6 +184,19 @@ class TestSnapshotFlightShape:
         with_ac = [leg for f in jfk_lax_oneway for leg in f.legs if leg.aircraft]
         assert with_ac, "Expected aircraft set on at least one leg"
 
+    def test_seat_ratings_differ_on_flights_with_the_same_wifi_tier(self, jfk_lax_oneway):
+        # Captured B6 123 and AA 300 both have Wi-Fi tier 2 at leg[12][11],
+        # but their seat-quality codes at leg[13] are 3 and 1 respectively.
+        legs = [leg for flight in jfk_lax_oneway for leg in flight.legs]
+        jetblue = next(
+            leg for leg in legs if leg.airline.name == "B6" and leg.flight_number == "123"
+        )
+        american = next(
+            leg for leg in legs if leg.airline.name == "AA" and leg.flight_number == "300"
+        )
+        assert jetblue.amenities.legroom_rating == 3
+        assert american.amenities.legroom_rating == 1
+
 
 class TestSnapshotFilterEnforcement:
     """The captured filter responses should reflect the filter applied."""
@@ -308,3 +321,53 @@ class TestPremiumRoundTripPriceless:
             assert f.duration > 0
             assert f.legs[0].departure_airport.name == "LAX"
             assert f.legs[-1].arrival_airport.name == "LHR"
+
+
+class TestRealSearchPageExtraction:
+    """`extract_payload` against a real captured search page.
+
+    Every other fixture here is an RPC body; this one is the page HTML the
+    transport actually reads now, so it is the only offline guard on the
+    regex that finds the ``ds:1`` blob among the page's other
+    ``AF_initDataCallback`` blocks. The file keeps that script block exactly
+    as Google served it, inside a minimal HTML shell.
+
+    Same drift policy as the rest of the module: assert structure, never
+    prices or flight numbers.
+    """
+
+    FIXTURE = "search_page_jfk_lhr_nonstop_ds1.html"
+
+    @pytest.fixture(scope="class")
+    def page(self) -> str:
+        return (FIXTURE_DIR / self.FIXTURE).read_text(encoding="utf-8")
+
+    def test_payload_is_extracted(self, page):
+        from fli.search._tfs import extract_payload
+
+        payload = extract_payload(page)
+        assert isinstance(payload, list) and len(payload) > 3
+
+    def test_payload_decodes_into_flights(self, page):
+        from fli.search._tfs import extract_payload
+
+        payload = extract_payload(page)
+        flights = []
+        for index in (2, 3):
+            block = payload[index] if index < len(payload) else None
+            if not isinstance(block, list) or not block:
+                continue
+            for row in block[0]:
+                try:
+                    flights.append(parse_flight_row(row))
+                except (AttributeError, IndexError, KeyError, TypeError, ValueError):
+                    continue
+        assert len(flights) > 0, "a real search page must decode into at least one flight"
+        assert all(f.legs for f in flights)
+        assert {f.legs[0].departure_airport.name for f in flights} == {"JFK"}
+
+    def test_fixture_carries_no_cookies(self, page):
+        """The capture must not ship anything account-specific."""
+        lowered = page.lower()
+        for marker in ("set-cookie", "sapisid", "apisid", "hsid", "__secure-", "authuser"):
+            assert marker not in lowered, f"fixture leaks {marker!r}"
