@@ -128,14 +128,23 @@ class ExploreSearchFilters(BaseModel):
     leading ``4, 23`` are constants observed in every capture; the trailing
     pair is the UI's trip-length slider. Live probing confirmed the pair
     changes round-trip fares (e.g. forcing exactly 14 nights re-prices every
-    destination). Round-trip mode is experimental: without a window forcing a
-    minimum stay, quoted fares match one-way prices.
+    destination).
+
+    Round trips must pin the trip length (``min_nights == max_nights``, at
+    least 1). Live checks on 2026-11-11 (JFK to Europe, 45 days out) showed
+    that a range quotes one-way prices for many destinations: ``[0, 23]``,
+    ``[1, 23]`` and ``[2, 23]`` matched the one-way price for 55 of 55, and
+    even ``[7, 14]`` for 31 of 51, while a pinned 7 nights matched for 2 of 22.
+
+    ``destination`` must be a region, continent or country: an airport
+    (``["LHR", 0]``) gets error 3 ``INVALID_ARGUMENT`` and a city mid comes
+    back with no destination records, whether sent as type 4 or 6.
     """
 
     trip_type: TripType = TripType.ONE_WAY
     passenger_info: PassengerInfo = Field(default_factory=PassengerInfo)
     origin: Airport | ExplorePlace
-    destination: ExploreRegion | ExplorePlace | Airport = ExploreRegion.ANYWHERE
+    destination: ExploreRegion | ExplorePlace = ExploreRegion.ANYWHERE
     departure_date: str
     stops: MaxStops = MaxStops.ANY
     seat_type: SeatType = SeatType.ECONOMY
@@ -175,6 +184,37 @@ class ExploreSearchFilters(BaseModel):
             if value[2] < 0 or value[3] < 0 or value[2] > value[3]:
                 raise ValueError("trip_length_window requires 0 <= min_nights <= max_nights")
         return value
+
+    @field_validator("destination", mode="before")
+    @classmethod
+    def validate_destination(cls, value):
+        """Reject destinations Explore cannot answer for: airports and cities."""
+        if isinstance(value, Airport):
+            raise ValueError(
+                "Explore destinations must be a region, continent or country; an airport "
+                f"({value.name.removeprefix('_')}) is rejected by Google. Use a flight or "
+                "date search for a specific airport."
+            )
+        if isinstance(value, ExplorePlace) and value.type_code != ExplorePlaceType.REGION.value:
+            raise ValueError(
+                "Explore destinations must be a region, continent or country mid "
+                f"(type_code {ExplorePlaceType.REGION.value}); got type_code {value.type_code}."
+            )
+        return value
+
+    @model_validator(mode="after")
+    def validate_round_trip_window(self) -> "ExploreSearchFilters":
+        """Require a pinned trip length for round trips (see the class docstring)."""
+        if self.trip_type != TripType.ROUND_TRIP:
+            return self
+        window = self.trip_length_window
+        if window is None or window[2] != window[3] or window[2] < 1:
+            raise ValueError(
+                "Explore round trips need a fixed trip length: trip_length_window "
+                "[4, 23, n, n] with n >= 1. A range of nights quotes one-way prices "
+                "for many destinations."
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_origin_destination(self) -> "ExploreSearchFilters":

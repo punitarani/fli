@@ -20,10 +20,9 @@ def main() -> None:
         departure_date=departure_date,
     )
 
+    # Raises SearchRejectedError if Google refuses every attempt (it refuses
+    # some Explore requests intermittently; the search retries a few first).
     result = SearchExplore().search(filters, currency="GBP")
-    if result is None:
-        print("Search failed")
-        return
 
     priced = sorted(
         (d for d in result.destinations if d.price is not None),

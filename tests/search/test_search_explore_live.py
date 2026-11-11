@@ -11,12 +11,25 @@ in pre-commit CI.
 from datetime import datetime, timedelta
 
 import pytest
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from fli.models import ExplorePlace, ExploreSearchFilters
 from fli.search import SearchExplore
+from fli.search.exceptions import SearchRejectedError
 
-pytestmark = pytest.mark.live
+# Google refuses a share of Explore requests with error 13 (about 40% in live
+# checks on 2026-11-11, in clusters). SearchExplore already retries that a few
+# times; a run that is refused on every attempt is reported as xfail rather
+# than a failure, so the daily canary only goes red when Explore breaks in
+# some other way (bad parse, wrong prices, a new error code).
+pytestmark = [
+    pytest.mark.live,
+    pytest.mark.xfail(
+        raises=SearchRejectedError,
+        strict=False,
+        reason="Google intermittently refuses Explore with error 13",
+    ),
+]
 
 LONDON = ExplorePlace(mid="/m/04jpl", type_code=4)
 SOUTHERN_EUROPE = ExplorePlace(mid="/m/0250wj", type_code=6)
@@ -34,7 +47,12 @@ def _filters() -> ExploreSearchFilters:
     )
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), reraise=True)
+@retry(
+    retry=retry_if_exception_type(ValueError),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    reraise=True,
+)
 def _search_with_retry(client: SearchExplore, filters: ExploreSearchFilters, **kw):
     result = client.search(filters, **kw)
     if result is None or not result.destinations:

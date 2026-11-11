@@ -294,3 +294,45 @@ def test_valid_one_way_trip_window(window):
         origin=Airport.LHR, departure_date=DEPARTURE_DATE, trip_length_window=window
     )
     assert filters.format()[3][13][0][2] == window
+
+
+def test_airport_destination_rejected():
+    """Google answers an airport destination with error 3 (live, 2026-11-11)."""
+    with pytest.raises(ValidationError, match="airport"):
+        ExploreSearchFilters(
+            origin=Airport.JFK, destination=Airport.LHR, departure_date=DEPARTURE_DATE
+        )
+
+
+def test_city_typed_destination_rejected():
+    """A city-typed destination gets error 3; only region-typed mids work."""
+    with pytest.raises(ValidationError, match="region, continent or country"):
+        ExploreSearchFilters(
+            origin=Airport.JFK,
+            destination=ExplorePlace(mid="/m/04jpl", type_code=4),
+            departure_date=DEPARTURE_DATE,
+        )
+
+
+@pytest.mark.parametrize(
+    "window", [None, [4, 23, 0, 23], [4, 23, 1, 23], [4, 23, 7, 14], [4, 23, 0, 0]]
+)
+def test_round_trip_requires_pinned_window(window):
+    """A range of nights quotes one-way prices (live, 2026-11-11)."""
+    with pytest.raises(ValidationError, match="fixed trip length"):
+        ExploreSearchFilters(
+            origin=Airport.JFK,
+            departure_date=DEPARTURE_DATE,
+            trip_type=TripType.ROUND_TRIP,
+            trip_length_window=window,
+        )
+
+
+def test_round_trip_with_pinned_window():
+    filters = ExploreSearchFilters(
+        origin=Airport.JFK,
+        departure_date=DEPARTURE_DATE,
+        trip_type=TripType.ROUND_TRIP,
+        trip_length_window=[4, 23, 7, 7],
+    )
+    assert filters.format()[3][13][0][2] == [4, 23, 7, 7]

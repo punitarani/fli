@@ -73,6 +73,12 @@ _SEARCH_CLIENT_ERROR_CASES = [
     pytest.param(SearchHTTPError("forbidden", status_code=403), "http_error", False, id="http-4xx"),
     pytest.param(SearchRejectedError(13), "rejected_error", False, id="rejected"),
     pytest.param(
+        SearchRejectedError(13, retryable=True),
+        "rejected_error",
+        True,
+        id="rejected-intermittent",
+    ),
+    pytest.param(
         SearchUnsupportedError("multi-city unsupported"),
         "unsupported_error",
         False,

@@ -267,9 +267,12 @@ of destinations with their cheapest fares.
 - `origin` - Airport IATA code (e.g. 'JFK') or a city knowledge-graph mid (e.g. '/m/04jpl')
 - `departure_date` - Date in YYYY-MM-DD format (required — the endpoint errors without one)
 - `destination` - ANYWHERE (default), EUROPE, SOUTHERN_EUROPE, ASIA, AFRICA,
-  NORTH_AMERICA, SOUTH_AMERICA, OCEANIA, a raw `/m/...` mid, or an IATA code
-- `round_trip` / `trip_min_nights` / `trip_max_nights` - Round-trip pricing with a
-  trip-length window (nights, 0-23)
+  NORTH_AMERICA, SOUTH_AMERICA, OCEANIA, or a region/country `/m/...` mid. Airports
+  (Google: error 3) and city mids (empty response) are not supported; an IATA code
+  gets a `validation_error` pointing at `search_flights`.
+- `round_trip` / `trip_min_nights` / `trip_max_nights` - Round trips need a fixed
+  trip length (min == max, 1-23 nights): for a range, Google quotes one-way prices
+  for many destinations (measured 2026-11-11), so a range is rejected.
 - `max_price`, `cabin_class`, `max_stops`, `airlines`, `exclude_airlines`,
   `alliance`, `exclude_alliance`, `max_flight_duration` - Same semantics as `search_flights`
 - `currency` / `language` / `country` - Same locale knobs as `search_flights`
@@ -281,10 +284,14 @@ coordinates, an image URL, and a `flights_url` deep link. Chain a result's
 `destination_airport` into `search_flights` for bookable itineraries.
 
 Explore retains its RPC transport: the public Explore page embeds configuration
-but no destination results. The RPC worked in live checks on 2026-11-11, but
-has intermittently returned error 13. `SearchExplore.search` raises
-`SearchRejectedError` for rejections and `SearchParseError` for unreadable
-responses; MCP classifies both using the shared error contract.
+but no destination results. The RPC works, but Google refuses about 40% of
+requests with error 13, fast and in clusters (measured 2026-11-11).
+`SearchExplore.search` retries error 13 (`EXPLORE_ATTEMPTS`, `EXPLORE_RETRY_BACKOFF`)
+and, if every attempt is refused, raises `SearchRejectedError(retryable=True)`,
+which MCP reports as `rejected_error` with `retryable: true`. Other codes (e.g. 3,
+`INVALID_ARGUMENT`) are raised at once and are not retryable. Unreadable responses
+raise `SearchParseError`. The live Explore tests xfail on a persistent error 13 so
+the canary doesn't file a flight-search outage for it.
 
 ### `get_booking_options`
 **Currently unavailable:** it calls `GetBookingResults`, which is gated behind
@@ -335,7 +342,7 @@ as-is rather than renamed for the MCP tools.
 | `validation_error` | `false` | Bad input — unknown airport code, an invalid passenger mix, a date range over the 93-date cap, etc. Fix the request; retrying unchanged will fail again. |
 | `unsupported_error` | `false` | The request is well-formed but this transport can't serve it (e.g. multi-city). Change the request. |
 | `parse_error` | `false` | Google served a page fli couldn't read. Usually (not always) a regional consent/blocked interstitial. Not retryable as-is; set `FLI_SOCS_COOKIE` (EU/EEA) and retry — don't just retry the same request unchanged. |
-| `rejected_error` | `false` | Google refused the RPC outright (e.g. `get_booking_options`'s `GetBookingResults` call today — see above). Deterministic; retrying the same request will not help. |
+| `rejected_error` | `false` (`true` for Explore's intermittent error 13) | Google refused the RPC outright (e.g. `get_booking_options`'s `GetBookingResults` call today — see above). Deterministic; retrying the same request will not help — except when `retryable` is `true`, which only Explore's error 13 sets. |
 | `timeout` | `true` | The request to Google Flights timed out. See retry guidance below. |
 | `certificate_error` | `false` | TLS certificate verification failed, most often behind a TLS-intercepting corporate proxy. Deterministic; set `FLI_CA_BUNDLE` (or `CURL_CA_BUNDLE` / `REQUESTS_CA_BUNDLE`) and try again — retrying unchanged will not help. |
 | `connection_error` | `true` | A network/DNS issue prevented reaching Google Flights. See retry guidance below. |

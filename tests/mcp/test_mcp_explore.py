@@ -81,8 +81,15 @@ class TestDestinationParsing:
         assert isinstance(place, ExplorePlace)
         assert place.mid == "/m/05qtj"
 
-    def test_airport_code(self):
-        assert _parse_explore_destination("LHR") is Airport.LHR
+    def test_airport_code_is_rejected_with_guidance(self, mock_search):
+        """Google answers an airport destination with error 3, so fail locally."""
+        params = ExploreSearchParams(origin="JFK", destination="LHR", departure_date=DEPARTURE_DATE)
+        result = _search_explore_from_params(params)
+        assert result["success"] is False
+        assert result["error_type"] == "validation_error"
+        assert "search_flights" in result["error"]
+        assert "LHR" in result["error"]
+        mock_search.return_value.search.assert_not_called()
 
     def test_garbage_reports_options(self, mock_search):
         params = ExploreSearchParams(
@@ -143,19 +150,51 @@ class TestExecuteExploreSearch:
         assert result["count"] == 1
         assert result["destinations"][0]["name"] == "Malta"
 
-    def test_round_trip_builds_window(self, mock_search):
+    def test_round_trip_builds_pinned_window(self, mock_search):
         params = ExploreSearchParams(
             origin="JFK",
             departure_date=DEPARTURE_DATE,
             round_trip=True,
             trip_min_nights=7,
-            trip_max_nights=14,
+            trip_max_nights=7,
         )
         result = _search_explore_from_params(params)
         assert result["success"] is True
         assert result["trip_type"] == "ROUND_TRIP"
         filters = mock_search.return_value.search.call_args.args[0]
-        assert filters.trip_length_window == [4, 23, 7, 14]
+        assert filters.trip_length_window == [4, 23, 7, 7]
+
+    @pytest.mark.parametrize("nights", ["min", "max"])
+    def test_round_trip_with_one_bound_pins_it(self, mock_search, nights):
+        params = ExploreSearchParams(
+            origin="JFK",
+            departure_date=DEPARTURE_DATE,
+            round_trip=True,
+            **{f"trip_{nights}_nights": 5},
+        )
+        result = _search_explore_from_params(params)
+        assert result["success"] is True
+        filters = mock_search.return_value.search.call_args.args[0]
+        assert filters.trip_length_window == [4, 23, 5, 5]
+
+    @pytest.mark.parametrize(
+        "window",
+        [
+            pytest.param({}, id="no-window"),
+            pytest.param({"trip_min_nights": 7, "trip_max_nights": 14}, id="range"),
+            pytest.param({"trip_min_nights": 0, "trip_max_nights": 0}, id="zero-nights"),
+        ],
+    )
+    def test_round_trip_without_fixed_length_is_rejected(self, mock_search, window):
+        """A range of nights quotes one-way prices, so it must not reach Google."""
+        params = ExploreSearchParams(
+            origin="JFK", departure_date=DEPARTURE_DATE, round_trip=True, **window
+        )
+        result = _search_explore_from_params(params)
+        assert result["success"] is False
+        assert result["error_type"] == "validation_error"
+        assert "fixed trip length" in result["error"]
+        mock_search.return_value.search.assert_not_called()
 
     def test_trip_window_min_exceeding_max_is_rejected(self, mock_search):
         """An inverted nights window must fail locally, not reach Google."""
@@ -199,29 +238,6 @@ class TestExecuteExploreSearch:
         malta = result["destinations"][0]
         assert "through" in malta["flights_url"]
         assert expected_return in malta["flights_url"]
-
-    def test_ranged_trip_length_keeps_outbound_only_link(self, mock_search):
-        """Google never reveals the chosen return date, so we must not invent one."""
-        params = ExploreSearchParams(
-            origin="JFK",
-            departure_date=DEPARTURE_DATE,
-            round_trip=True,
-            trip_min_nights=7,
-            trip_max_nights=14,
-        )
-        result = _search_explore_from_params(params)
-        malta = result["destinations"][0]
-        assert "flights_url" in malta
-        assert "through" not in malta["flights_url"]
-
-    def test_none_result_is_reported_as_error(self, mock_search):
-        """An unparseable response is a failed request, not an empty result set."""
-        mock_search.return_value.search.return_value = None
-        params = ExploreSearchParams(origin="JFK", departure_date=DEPARTURE_DATE)
-        result = _search_explore_from_params(params)
-        assert result["success"] is False
-        assert "no parseable response" in result["error"]
-        assert result["destinations"] == []
 
     def test_search_exception_reported(self, mock_search):
         mock_search.return_value.search.side_effect = RuntimeError("boom")

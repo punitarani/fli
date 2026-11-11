@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from fli.search import explore as explore_module
 from fli.search._decoders import (
     is_explore_destinations_chunk,
     is_explore_prices_chunk,
@@ -19,7 +20,7 @@ from fli.search._decoders import (
     parse_explore_prices_chunk,
 )
 from fli.search.exceptions import SearchParseError, SearchRejectedError
-from fli.search.explore import SearchExplore
+from fli.search.explore import EXPLORE_ATTEMPTS, SearchExplore
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -40,13 +41,16 @@ class _FakeResponse:
 
 
 class _FakeClient:
-    def __init__(self, text: str):
-        self._text = text
+    """Serves ``texts`` in order, repeating the last one once they run out."""
+
+    def __init__(self, *texts: str):
+        self._texts = list(texts)
         self.calls: list[dict[str, Any]] = []
 
     def post(self, url: str, **kwargs: Any) -> _FakeResponse:
         self.calls.append({"url": url, **kwargs})
-        return _FakeResponse(self._text)
+        index = min(len(self.calls), len(self._texts)) - 1
+        return _FakeResponse(self._texts[index])
 
 
 def _frame(inner: Any) -> str:
@@ -159,17 +163,27 @@ def test_price_record_without_fare_omitted():
 # ---------------------------------------------------------------------------
 
 
-def _search_with_body(body: str) -> tuple[Any, _FakeClient]:
+@pytest.fixture(autouse=True)
+def _no_retry_sleep(monkeypatch):
+    """Record Explore's error-13 backoff instead of sleeping through it."""
+    sleeps: list[float] = []
+    monkeypatch.setattr(explore_module.time, "sleep", sleeps.append)
+    return sleeps
+
+
+def _search_with_body(*bodies: str, destination: Any = None) -> tuple[Any, _FakeClient]:
     from datetime import datetime, timedelta
 
     from fli.models import Airport, ExploreSearchFilters
 
     search = SearchExplore()
-    fake = _FakeClient(body)
+    fake = _FakeClient(*bodies)
     search.client = fake
+    extra = {"destination": destination} if destination is not None else {}
     filters = ExploreSearchFilters(
         origin=Airport.LHR,
         departure_date=(datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
+        **extra,
     )
     return search.search(filters, currency="USD"), fake
 
@@ -234,12 +248,45 @@ def test_unparseable_body_raises(body):
         _search_with_body(body)
 
 
-def test_error_13_body_raises():
-    """The opaque error envelope Google sends for bad requests."""
-    body = ")]}'\n\n" + json.dumps([["wrb.fr", None, None, None, None, [13]]])
+def _error_body(code: int) -> str:
+    return ")]}'\n\n" + json.dumps([["wrb.fr", None, None, None, None, [code]]])
+
+
+def test_error_13_on_every_attempt_raises_retryable(_no_retry_sleep):
+    """Explore's error 13 is intermittent: retried, then reported as retryable."""
     with pytest.raises(SearchRejectedError) as exc:
-        _search_with_body(body)
+        _search_with_body(_error_body(13))
     assert exc.value.code == 13
+    assert exc.value.retryable is True
+    assert "intermittently" in str(exc.value)
+    assert "bgr" not in str(exc.value)
+    assert len(_no_retry_sleep) == EXPLORE_ATTEMPTS - 1
+
+
+def test_error_13_then_success_returns_results(_no_retry_sleep):
+    good = _body(_dest_chunk(DESTS), _price_chunk(PRICES))
+    result, fake = _search_with_body(_error_body(13), _error_body(13), good)
+    assert len(fake.calls) == 3
+    assert [d.price for d in result.destinations] == [18, 132, None]
+    assert _no_retry_sleep == [1.0, 2.0]
+
+
+def test_error_3_is_not_retried(_no_retry_sleep):
+    """INVALID_ARGUMENT is Google refusing the request itself, not a transient gate."""
+    with pytest.raises(SearchRejectedError) as exc:
+        _search_with_body(_error_body(3))
+    assert exc.value.code == 3
+    assert exc.value.retryable is False
+    assert "INVALID_ARGUMENT" in str(exc.value)
+    assert "bgr" not in str(exc.value)
+    assert _no_retry_sleep == []
+
+
+def test_empty_body_for_raw_mid_destination_mentions_cities():
+    from fli.models import ExplorePlace
+
+    with pytest.raises(SearchParseError, match="may also be a city"):
+        _search_with_body(_body([None] * 9), destination=ExplorePlace(mid="/m/04jpl"))
 
 
 # ---------------------------------------------------------------------------

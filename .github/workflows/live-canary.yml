@@ -4,6 +4,8 @@ name: Live Canary
 # test_search_flights_new_filters_live.py, the four live cases in
 # tests/mcp/test_mcp_server.py::TestMCPServer, test_search_explore_live.py, and the previously-unmocked
 # cases in test_search_flights.py / test_search_dates.py)
+# The Explore tests xfail instead of failing when Google refuses every attempt
+# with its intermittent error 13, so that refusal alone never files an issue.
 # against the real Google Flights network. These are excluded from the
 # `--all` CI job (see ci.yml) because a transient search-page variant or a
 # runner IP being treated worse than a residential one is a property of the
