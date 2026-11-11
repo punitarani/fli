@@ -12,10 +12,12 @@ from typing import Any
 
 import pytest
 
+from fli.models import ExploreDestination
 from fli.search import explore as explore_module
 from fli.search._decoders import (
     is_explore_destinations_chunk,
     is_explore_prices_chunk,
+    merge_explore_payloads,
     parse_explore_destinations_chunk,
     parse_explore_prices_chunk,
 )
@@ -153,6 +155,13 @@ def test_negative_price_record_omitted():
     """merge_explore_payloads skips model validation, so the decoder must."""
     chunk = _price_chunk([_price_record("/m/0491y", -5)])
     assert parse_explore_prices_chunk(chunk, default_currency="USD") == {}
+
+
+def test_merge_rejects_invalid_price_fields():
+    """The merge runs the model's own validation, so a bad field leaves the destination unpriced."""
+    dest = ExploreDestination(mid="/m/0491y", name="Somewhere")
+    merged = merge_explore_payloads({}, [dest], {"/m/0491y": {"price": 10.0, "stops": -1}})
+    assert merged.destinations[0].price is None
 
 
 def test_price_record_without_fare_omitted():

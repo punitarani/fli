@@ -1204,8 +1204,8 @@ def _serialize_explore_destination(
             try:
                 departure = datetime.strptime(destination.departure_date, "%Y-%m-%d")
             except ValueError:
-                departure = None
-            if departure is not None:
+                pass
+            else:
                 link_return_date = (departure + timedelta(days=exact_nights)).strftime("%Y-%m-%d")
         entry["flights_url"] = google_flights_url(
             origin_label,

@@ -174,6 +174,7 @@ def main() -> int:
     )
 
     selected = args.scenario or list(registry)
+    skipped = 0
     for name in selected:
         if name not in registry:
             print(f"!! Unknown scenario: {name}")
@@ -197,11 +198,13 @@ def main() -> int:
             # Explore refuses ~40% of requests with error 13; writing that
             # envelope would replace a good fixture with a refusal.
             print(f"!! {name}: rejected with error {exc.code}; fixture left unchanged")
+            skipped += 1
             continue
         path = out_dir / f"{name}.bin"
         path.write_bytes(r.content)
         print(f"  {name}: {len(r.content)} bytes -> {path}")
-    return 0
+    # A refused scenario kept its old fixture; say so in the exit status.
+    return 1 if skipped else 0
 
 
 if __name__ == "__main__":
