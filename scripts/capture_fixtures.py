@@ -1,4 +1,4 @@
-"""Capture live GetShoppingResults / GetCalendarGraph responses for snapshot tests.
+"""Capture live GetShoppingResults / GetExploreDestinations responses for snapshot tests.
 
 Usage::
 
@@ -26,6 +26,8 @@ from fli.models import (
     Airline,
     Airport,
     Alliance,
+    ExplorePlace,
+    ExploreSearchFilters,
     FlightSearchFilters,
     FlightSegment,
     LayoverRestrictions,
@@ -35,7 +37,7 @@ from fli.models import (
     SortBy,
     TripType,
 )
-from fli.search import SearchFlights
+from fli.search import SearchExplore, SearchFlights
 from fli.search._urls import with_locale_params
 from fli.search.client import get_client
 
@@ -124,6 +126,19 @@ SCENARIOS: dict[str, tuple[Callable[[], FlightSearchFilters], str]] = {
     ),
 }
 
+# Explore scenarios hit GetExploreDestinations, which additionally requires
+# SearchExplore's same-origin headers (see fli/search/explore.py).
+EXPLORE_SCENARIOS: dict[str, tuple[Callable[[], ExploreSearchFilters], str]] = {
+    "explore_lon_southern_europe": (
+        lambda: ExploreSearchFilters(
+            origin=ExplorePlace(mid="/m/04jpl", type_code=4),  # London
+            destination=ExplorePlace(mid="/m/0250wj", type_code=6),  # Southern Europe
+            departure_date=_future(30),
+        ),
+        "USD",
+    ),
+}
+
 
 def main() -> int:
     """CLI entry point — capture fixtures listed in ``SCENARIOS``."""
@@ -144,20 +159,33 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     client = get_client()
 
-    selected = args.scenario or list(SCENARIOS)
+    # name -> (filters factory, currency, endpoint URL, extra headers).
+    registry: dict[str, tuple[Callable[[], object], str, str, dict | None]] = {
+        name: (factory, currency, SearchFlights.BASE_URL, None)
+        for name, (factory, currency) in SCENARIOS.items()
+    }
+    registry.update(
+        {
+            name: (factory, currency, SearchExplore.BASE_URL, SearchExplore.DEFAULT_HEADERS)
+            for name, (factory, currency) in EXPLORE_SCENARIOS.items()
+        }
+    )
+
+    selected = args.scenario or list(registry)
     for name in selected:
-        if name not in SCENARIOS:
+        if name not in registry:
             print(f"!! Unknown scenario: {name}")
             continue
-        factory, currency = SCENARIOS[name]
+        factory, currency, base_url, headers = registry[name]
         filters = factory()
         encoded = filters.encode()
-        url = with_locale_params(SearchFlights.BASE_URL, currency, None, None)
+        url = with_locale_params(base_url, currency, None, None)
         r = client.post(
             url=url,
             data=f"f.req={encoded}",
             impersonate="chrome",
             allow_redirects=True,
+            **({"headers": headers} if headers else {}),
         )
         path = out_dir / f"{name}.bin"
         path.write_bytes(r.content)

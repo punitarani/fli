@@ -9,11 +9,13 @@ from .exceptions import (
     SearchTimeoutError,
     SearchUnsupportedError,
 )
+from .explore import SearchExplore
 from .flights import SearchFlights
 
 __all__ = [
     "SearchFlights",
     "SearchDates",
+    "SearchExplore",
     "DatePrice",
     "SearchClientError",
     "SearchTimeoutError",
