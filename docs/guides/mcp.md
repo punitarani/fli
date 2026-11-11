@@ -223,10 +223,10 @@ destination like `ANYWHERE` or a continent.
 |-----------|------|----------|---------|-------------|
 | `origin` | string | Yes | - | Airport IATA code (e.g., 'JFK') or a city knowledge-graph mid (e.g., '/m/04jpl' for London) |
 | `departure_date` | string | Yes | - | Departure date in YYYY-MM-DD format |
-| `destination` | string | No | ANYWHERE | ANYWHERE, EUROPE, SOUTHERN_EUROPE, ASIA, AFRICA, NORTH_AMERICA, SOUTH_AMERICA, OCEANIA, a knowledge-graph mid (e.g., '/m/02j9z'), or an IATA code |
-| `round_trip` | bool | No | false | Price round trips instead of one-ways |
-| `trip_min_nights` | int | No | null | Minimum trip length in nights (round trips, 0-23) |
-| `trip_max_nights` | int | No | null | Maximum trip length in nights (round trips, 0-23) |
+| `destination` | string | No | ANYWHERE | ANYWHERE, EUROPE, SOUTHERN_EUROPE, ASIA, AFRICA, NORTH_AMERICA, SOUTH_AMERICA, OCEANIA, or a country/region knowledge-graph mid (e.g., '/m/07ssc' for the UK). Airports and cities are refused — use `search_flights` for one route |
+| `round_trip` | bool | No | false | Price round trips of an exact length (requires `trip_min_nights` ≥ 1) |
+| `trip_min_nights` | int | No | null | Trip length in nights (0-23); required, ≥ 1, for round trips |
+| `trip_max_nights` | int | No | null | Maximum nights (0-23); for round trips leave unset or equal to `trip_min_nights` |
 | `max_price` | int | No | null | Maximum fare cap |
 | `cabin_class` | string | No | ECONOMY | ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST |
 | `max_stops` | string | No | ANY | ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS |
@@ -290,9 +290,20 @@ fallback. A rejection or malformed response returns `success: false` with
 `error_type` and `retryable`, following the other search tools. Destinations
 without a fare remain successful results with `price: null`.
 
-For round trips, `flights_url` includes a return date only when
-`trip_min_nights == trip_max_nights`. Otherwise it links to the outbound
-search because Explore does not reveal the quoted fare's return date.
+A round trip needs an exact length: `trip_min_nights` ≥ 1 with
+`trip_max_nights` unset (it defaults to the same value) or equal. With a
+range, Google quotes some destinations at their one-way price and nothing
+in the response says which — measured JFK to Europe, the share priced
+identically to the one-way search was 53/54 with no window, 22/47 for 7-10
+nights, and 2/19 for exactly 7. A range is refused with `validation_error`;
+search each length you care about separately.
+
+Destinations must be a region, continent or country. Google rejects an
+airport destination with error 3 and returns nothing for a city mid, so
+airport codes are refused locally; a city mid fails with `parse_error`.
+
+For round trips, `flights_url` includes the return date (departure date
+plus the trip length).
 
 ### `get_booking_options`
 

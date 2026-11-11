@@ -100,8 +100,10 @@ class SearchExplore:
 
         if not destinations:
             raise SearchParseError(
-                "Explore search returned no parseable destination records. Google may "
-                "have changed the response shape or served a blocked/consent response."
+                "Explore search returned no parseable destination records. If the "
+                "destination is a knowledge-graph mid, check it names a country or "
+                "region: a city mid returns no records. Otherwise Google may have "
+                "changed the response shape or served a blocked/consent response."
             )
 
         return merge_explore_payloads(meta, destinations, prices)

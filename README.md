@@ -128,11 +128,11 @@ flexible.
 | Parameter             | Type   | Description                                                  |
 |-----------------------|--------|--------------------------------------------------------------|
 | `origin`              | string | Airport IATA code (e.g. 'JFK') or a city mid (e.g. '/m/04jpl') |
-| `destination`         | string | ANYWHERE (default), EUROPE, SOUTHERN_EUROPE, ASIA, AFRICA, NORTH_AMERICA, SOUTH_AMERICA, OCEANIA, a knowledge-graph mid, or an IATA code |
+| `destination`         | string | ANYWHERE (default), EUROPE, SOUTHERN_EUROPE, ASIA, AFRICA, NORTH_AMERICA, SOUTH_AMERICA, OCEANIA, or a country/region knowledge-graph mid (not an airport or city) |
 | `departure_date`      | string | Departure date in YYYY-MM-DD format (required)               |
-| `round_trip`          | bool   | Price round trips instead of one-ways                        |
-| `trip_min_nights`     | int    | Minimum trip length in nights (round trips, 0-23)            |
-| `trip_max_nights`     | int    | Maximum trip length in nights (round trips, 0-23)            |
+| `round_trip`          | bool   | Price round trips of an exact length (needs `trip_min_nights` ≥ 1) |
+| `trip_min_nights`     | int    | Trip length in nights (0-23); ≥ 1 for round trips            |
+| `trip_max_nights`     | int    | Max nights (0-23); round trips: unset or = `trip_min_nights` |
 | `max_price`           | int    | Maximum fare cap                                             |
 | `cabin_class`         | string | ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST                 |
 | `max_stops`           | string | ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS                   |

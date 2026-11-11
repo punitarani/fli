@@ -15,8 +15,22 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from fli.models import ExplorePlace, ExploreSearchFilters
 from fli.search import SearchExplore
+from fli.search.exceptions import SearchRejectedError
 
-pytestmark = pytest.mark.live
+# GetExploreDestinations is a FlightsFrontendService RPC behind the same
+# signed-header gate as #223: measured 2026-11-11, Google refused 8 of 20
+# identical requests with error 13, in bursts long enough to beat this
+# file's three-attempt retry about once in five runs. Only that rejection is
+# expected — ``raises=`` keeps any other failure (a parse regression, wrong
+# currency) a real failure, and an unlucky-free run still passes as XPASS.
+pytestmark = [
+    pytest.mark.live,
+    pytest.mark.xfail(
+        raises=SearchRejectedError,
+        strict=False,
+        reason="GetExploreDestinations intermittently answers error 13 (#223)",
+    ),
+]
 
 LONDON = ExplorePlace(mid="/m/04jpl", type_code=4)
 SOUTHERN_EUROPE = ExplorePlace(mid="/m/0250wj", type_code=6)

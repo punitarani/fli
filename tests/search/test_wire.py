@@ -773,6 +773,17 @@ class TestSearchRejectedErrorRendering:
     def test_unknown_code_keeps_the_bare_number(self):
         assert "with error 9999 and" in str(SearchRejectedError(9999))
 
+    def test_invalid_argument_does_not_blame_the_signed_header(self):
+        # Error 3 is Google refusing the request's contents (e.g. an airport
+        # as an Explore destination) — deterministic, unrelated to #223.
+        message = str(SearchRejectedError(3))
+        assert "with error 3 (INVALID_ARGUMENT)" in message
+        assert "bgr" not in message
+        assert "retrying it unchanged will not help" in message
+
+    def test_internal_still_names_the_signed_header(self):
+        assert "x-goog-batchexecute-bgr" in str(SearchRejectedError(13))
+
 
 class TestErrorEnvelopeWithPartialResults:
     """A TRAILING error row must not destroy chunks Google already sent."""

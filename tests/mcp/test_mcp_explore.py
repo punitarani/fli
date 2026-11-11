@@ -81,8 +81,15 @@ class TestDestinationParsing:
         assert isinstance(place, ExplorePlace)
         assert place.mid == "/m/05qtj"
 
-    def test_airport_code(self):
-        assert _parse_explore_destination("LHR") is Airport.LHR
+    def test_airport_code_is_refused_with_a_pointer_to_search_flights(self, mock_search):
+        """Google answers an airport destination with error 3; refuse it locally."""
+        params = ExploreSearchParams(origin="JFK", destination="LHR", departure_date=DEPARTURE_DATE)
+        result = _search_explore_from_params(params)
+        assert result["success"] is False
+        assert result["error_type"] == "validation_error"
+        assert "search_flights" in result["error"]
+        assert "LHR" in result["error"]
+        mock_search.return_value.search.assert_not_called()
 
     def test_garbage_reports_options(self, mock_search):
         params = ExploreSearchParams(
@@ -149,13 +156,40 @@ class TestExecuteExploreSearch:
             departure_date=DEPARTURE_DATE,
             round_trip=True,
             trip_min_nights=7,
-            trip_max_nights=14,
+            trip_max_nights=7,
         )
         result = _search_explore_from_params(params)
         assert result["success"] is True
         assert result["trip_type"] == "ROUND_TRIP"
         filters = mock_search.return_value.search.call_args.args[0]
-        assert filters.trip_length_window == [4, 23, 7, 14]
+        assert filters.trip_length_window == [4, 23, 7, 7]
+
+    @pytest.mark.parametrize(
+        ("min_nights", "max_nights"), [(None, None), (0, None), (0, 0), (None, 7), (7, 14)]
+    )
+    def test_round_trip_without_exact_length_is_rejected(self, mock_search, min_nights, max_nights):
+        """A range makes Google quote one-way fares for some destinations; never send it."""
+        params = ExploreSearchParams(
+            origin="JFK",
+            departure_date=DEPARTURE_DATE,
+            round_trip=True,
+            trip_min_nights=min_nights,
+            trip_max_nights=max_nights,
+        )
+        result = _search_explore_from_params(params)
+        assert result["success"] is False
+        assert result["error_type"] == "validation_error"
+        assert "exact trip length" in result["error"]
+        mock_search.return_value.search.assert_not_called()
+
+    def test_round_trip_max_nights_defaults_to_min(self, mock_search):
+        params = ExploreSearchParams(
+            origin="JFK", departure_date=DEPARTURE_DATE, round_trip=True, trip_min_nights=3
+        )
+        result = _search_explore_from_params(params)
+        assert result["success"] is True
+        filters = mock_search.return_value.search.call_args.args[0]
+        assert filters.trip_length_window == [4, 23, 3, 3]
 
     def test_trip_window_min_exceeding_max_is_rejected(self, mock_search):
         """An inverted nights window must fail locally, not reach Google."""
@@ -200,19 +234,16 @@ class TestExecuteExploreSearch:
         assert "through" in malta["flights_url"]
         assert expected_return in malta["flights_url"]
 
-    def test_ranged_trip_length_keeps_outbound_only_link(self, mock_search):
-        """Google never reveals the chosen return date, so we must not invent one."""
+    def test_return_date_in_link_when_max_nights_left_unset(self, mock_search):
+        """trip_max_nights defaults to the minimum, so the return date is still known."""
         params = ExploreSearchParams(
-            origin="JFK",
-            departure_date=DEPARTURE_DATE,
-            round_trip=True,
-            trip_min_nights=7,
-            trip_max_nights=14,
+            origin="JFK", departure_date=DEPARTURE_DATE, round_trip=True, trip_min_nights=7
         )
         result = _search_explore_from_params(params)
-        malta = result["destinations"][0]
-        assert "flights_url" in malta
-        assert "through" not in malta["flights_url"]
+        expected_return = (
+            datetime.strptime(DEPARTURE_DATE, "%Y-%m-%d") + timedelta(days=7)
+        ).strftime("%Y-%m-%d")
+        assert expected_return in result["destinations"][0]["flights_url"]
 
     def test_none_result_is_reported_as_error(self, mock_search):
         """An unparseable response is a failed request, not an empty result set."""

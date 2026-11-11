@@ -93,11 +93,19 @@ class SearchRejectedError(SearchClientError):
         # ``0`` is gRPC's OK, so there is no error number to name — it reads
         # the same as no code at all rather than claiming "error 0".
         suffix = f" with error {named}" if code else ""
-        message = (
-            f"Google Flights declined the request{suffix} and returned no data. "
-            "Its API now requires a browser-signed x-goog-batchexecute-bgr header, "
-            "which this client cannot produce. See github.com/punitarani/fli#223."
-        )
+        if code == 3:
+            # INVALID_ARGUMENT is Google refusing the request's contents —
+            # deterministic, and nothing to do with the signed-header gate.
+            reason = (
+                "Google rejected the request's contents as invalid, so retrying it "
+                "unchanged will not help; check the request parameters."
+            )
+        else:
+            reason = (
+                "Its API now requires a browser-signed x-goog-batchexecute-bgr header, "
+                "which this client cannot produce. See github.com/punitarani/fli#223."
+            )
+        message = f"Google Flights declined the request{suffix} and returned no data. {reason}"
         if detail:
             message = f"{message} Details: {detail}"
         super().__init__(message)

@@ -338,14 +338,24 @@ class ExploreSearchParams(BaseModel):
         "ANYWHERE",
         description=(
             "Where to explore: ANYWHERE, EUROPE, SOUTHERN_EUROPE, ASIA, AFRICA, "
-            "NORTH_AMERICA, SOUTH_AMERICA, OCEANIA, a raw knowledge-graph mid "
-            "(e.g., '/m/02j9z'), or an airport IATA code."
+            "NORTH_AMERICA, SOUTH_AMERICA, OCEANIA, or a country/region "
+            "knowledge-graph mid (e.g., '/m/07ssc' for the UK). Airports and cities "
+            "are not accepted as destinations; use search_flights for a single route."
         ),
     )
     departure_date: str = Field(description="Departure date in YYYY-MM-DD format (required)")
-    round_trip: bool = Field(False, description="Price round trips instead of one-ways")
+    round_trip: bool = Field(
+        False,
+        description="Price round trips of an exact length (requires trip_min_nights >= 1)",
+    )
     trip_min_nights: int | None = Field(
-        None, ge=0, le=23, description="Minimum trip length in nights (round trips)"
+        None,
+        ge=0,
+        le=23,
+        description=(
+            "Trip length in nights. Required (>= 1) for round trips, which need an "
+            "exact length: trip_max_nights must be unset or equal"
+        ),
     )
     trip_max_nights: int | None = Field(
         None, ge=0, le=23, description="Maximum trip length in nights (round trips)"
@@ -1122,22 +1132,32 @@ def _parse_explore_origin(value: str) -> Airport | ExplorePlace:
     return resolve_airport(cleaned)
 
 
-def _parse_explore_destination(value: str) -> ExploreRegion | ExplorePlace | Airport:
-    """Resolve an explore destination: region name, knowledge-graph mid, or IATA code."""
+def _parse_explore_destination(value: str) -> ExploreRegion | ExplorePlace:
+    """Resolve an explore destination: region name or region/country knowledge-graph mid.
+
+    Airports are refused locally: Google answers an airport destination with
+    error 3 (INVALID_ARGUMENT), so sending one only produces a confusing
+    rejection. A single route is what ``search_flights`` is for.
+    """
     cleaned = value.strip()
     if cleaned.startswith(("/m/", "/g/")):
         return ExplorePlace(mid=cleaned)
     region_key = cleaned.upper().replace(" ", "_").replace("-", "_")
     if region_key in ExploreRegion.__members__:
         return ExploreRegion[region_key]
+    regions = ", ".join(ExploreRegion.__members__)
     try:
-        return resolve_airport(cleaned)
+        airport = resolve_airport(cleaned)
     except ParseError:
-        regions = ", ".join(ExploreRegion.__members__)
         raise ParseError(
             f"Unknown explore destination '{value}'. Use one of: {regions}; "
-            "a knowledge-graph mid like '/m/02j9z'; or an airport IATA code."
+            "or a country/region knowledge-graph mid like '/m/07ssc'."
         ) from None
+    raise ParseError(
+        f"Explore cannot search to a single airport ('{airport.name.removeprefix('_')}'); "
+        f"use search_flights for that route. Explore destinations are: {regions}; "
+        "or a country/region knowledge-graph mid like '/m/07ssc'."
+    )
 
 
 def _serialize_explore_destination(
@@ -1205,9 +1225,24 @@ def _execute_explore_search(params: ExploreSearchParams) -> dict[str, Any]:
 
         trip_length_window = None
         wants_window = params.trip_min_nights is not None or params.trip_max_nights is not None
+        if params.round_trip:
+            # Only an exact trip length yields round-trip fares: with a range
+            # Google quotes some destinations at their one-way price, unmarked
+            # (see ExploreSearchFilters). trip_max_nights defaults to the minimum.
+            exact = params.trip_min_nights
+            if not exact or params.trip_max_nights not in (None, exact):
+                raise ParseError(
+                    "round_trip needs an exact trip length: set trip_min_nights >= 1 and "
+                    "leave trip_max_nights unset or equal to it (e.g. trip_min_nights=7 for "
+                    "a one-week trip). With a range of nights Google quotes one-way fares "
+                    "for some destinations; search each length separately instead"
+                )
         if params.round_trip or wants_window:
             min_nights = params.trip_min_nights if params.trip_min_nights is not None else 0
-            max_nights = params.trip_max_nights if params.trip_max_nights is not None else 23
+            if params.trip_max_nights is not None:
+                max_nights = params.trip_max_nights
+            else:
+                max_nights = min_nights if params.round_trip else 23
             if min_nights > max_nights:
                 raise ParseError(
                     f"trip_min_nights ({min_nights}) cannot exceed trip_max_nights ({max_nights})"
@@ -1253,15 +1288,10 @@ def _execute_explore_search(params: ExploreSearchParams) -> dict[str, Any]:
             origin.name.removeprefix("_") if isinstance(origin, Airport) else result.origin_name
         )
         locale = (params.currency, params.language, params.country)
-        # The return date is only knowable when the trip length is pinned to
-        # a single value; Google's response never reveals it otherwise.
-        exact_nights = (
-            params.trip_min_nights
-            if params.round_trip
-            and params.trip_min_nights is not None
-            and params.trip_min_nights == params.trip_max_nights
-            else None
-        )
+        # Google's response never reveals a return date; it is knowable here
+        # because a round trip is validated to an exact length. Read it off
+        # the window actually sent, since trip_max_nights may be left unset.
+        exact_nights = trip_length_window[2] if params.round_trip and trip_length_window else None
         serialized = [
             _serialize_explore_destination(d, origin_label, locale, exact_nights)
             for d in destinations
@@ -1675,17 +1705,25 @@ def search_explore(
         str,
         Field(
             description="Where to explore: ANYWHERE, EUROPE, SOUTHERN_EUROPE, ASIA, "
-            "AFRICA, NORTH_AMERICA, SOUTH_AMERICA, OCEANIA, a knowledge-graph mid "
-            "(e.g., '/m/02j9z'), or an airport IATA code"
+            "AFRICA, NORTH_AMERICA, SOUTH_AMERICA, OCEANIA, or a country/region "
+            "knowledge-graph mid (e.g., '/m/07ssc' for the UK). Airports and cities "
+            "are not accepted; use search_flights for a single route"
         ),
     ] = "ANYWHERE",
     round_trip: Annotated[
         bool,
-        Field(description="Price round trips instead of one-ways"),
+        Field(description="Price round trips of an exact length (requires trip_min_nights >= 1)"),
     ] = False,
     trip_min_nights: Annotated[
         int | None,
-        Field(description="Minimum trip length in nights (round trips)", ge=0, le=23),
+        Field(
+            description=(
+                "Trip length in nights. Required (>= 1) for round trips, which need an "
+                "exact length: trip_max_nights must be unset or equal"
+            ),
+            ge=0,
+            le=23,
+        ),
     ] = None,
     trip_max_nights: Annotated[
         int | None,
@@ -1757,11 +1795,13 @@ def search_explore(
 
     Follow up with `search_flights` using a result's `destination_airport`
     and `departure_date` for bookable itineraries; each priced destination
-    also carries a `flights_url` deep link. For round-trip searches the
-    link includes the return date only when the trip length is pinned
-    (trip_min_nights == trip_max_nights); otherwise it pre-fills the
-    outbound date only, because Google's Explore response does not reveal
-    which return date produced the quoted fare.
+    also carries a `flights_url` deep link.
+
+    Round trips need an exact length: pass `trip_min_nights` (>= 1) and
+    leave `trip_max_nights` unset. With a range of nights Google quotes some
+    destinations at their one-way price with nothing marking which, so a
+    range is refused; for "a week or two", search 7 and 14 nights
+    separately. Each round-trip `flights_url` carries the return date.
     """
     params = ExploreSearchParams(
         origin=origin,

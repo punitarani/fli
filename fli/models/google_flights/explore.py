@@ -54,7 +54,8 @@ class ExplorePlaceType(Enum):
     """Location type codes accepted by the Explore endpoint.
 
     ``AIRPORT`` matches the encoding used by every other fli endpoint;
-    ``CITY`` and ``REGION`` were both observed in the HAR capture.
+    ``CITY`` and ``REGION`` were both observed in the HAR capture. Only
+    ``REGION`` is accepted as a destination (see :class:`ExploreSearchFilters`).
     """
 
     AIRPORT = 0
@@ -88,6 +89,7 @@ class ExplorePlace(BaseModel):
     Use this to pass any Google mid not covered by :class:`ExploreRegion`
     (e.g. a city or country resolved externally). ``type_code`` follows
     :class:`ExplorePlaceType` (4 = city/metro, 6 = region/country/continent).
+    Cities work as origins only; as a destination only type 6 is served.
     """
 
     mid: str
@@ -128,8 +130,22 @@ class ExploreSearchFilters(BaseModel):
     leading ``4, 23`` are constants observed in every capture; the trailing
     pair is the UI's trip-length slider. Live probing confirmed the pair
     changes round-trip fares (e.g. forcing exactly 14 nights re-prices every
-    destination). Round-trip mode is experimental: without a window forcing a
-    minimum stay, quoted fares match one-way prices.
+    destination). But only a pinned window (``min_nights == max_nights``)
+    yields round-trip fares: the wider the window, the more destinations come
+    back at their one-way price, with nothing marking which. Measured
+    2026-11-11, JFK to Europe, share of destinations priced identically to
+    the one-way search: no window or 0-23 nights 53/54, 1-23 54/55, 3-10
+    26/49, 7-10 22/47, 5-7 6/24, 7-7 2/19, 14-14 5/37. A round trip
+    therefore requires a pinned window of at least one night; anything else
+    is rejected here rather than returning mislabelled fares.
+
+    ``destination`` must be a region, country or continent (an
+    :class:`ExploreRegion`, or an :class:`ExplorePlace` with type code 6).
+    Google answers an airport destination and a city-typed mid (type 4) with
+    error 3 (``INVALID_ARGUMENT``), and a city mid sent as a region with no
+    destination records at all; airports and city-typed mids are rejected
+    here. The field keeps ``Airport`` in its annotation only so that error is
+    a readable message.
     """
 
     trip_type: TripType = TripType.ONE_WAY
@@ -175,6 +191,39 @@ class ExploreSearchFilters(BaseModel):
             if value[2] < 0 or value[3] < 0 or value[2] > value[3]:
                 raise ValueError("trip_length_window requires 0 <= min_nights <= max_nights")
         return value
+
+    @field_validator("destination")
+    @classmethod
+    def validate_destination(
+        cls, value: "ExploreRegion | ExplorePlace | Airport"
+    ) -> "ExploreRegion | ExplorePlace | Airport":
+        """Reject destination kinds Google's Explore endpoint does not serve."""
+        if isinstance(value, Airport):
+            raise ValueError(
+                "Explore destinations must be a region, country or continent, not an "
+                f"airport ({value.name.removeprefix('_')}); Google rejects airport "
+                "destinations with error 3. Use search_flights for a single route."
+            )
+        if isinstance(value, ExplorePlace) and value.type_code != ExplorePlaceType.REGION.value:
+            raise ValueError(
+                "Explore destination mids must be region-typed (type_code 6, a country or "
+                f"continent); got type_code {value.type_code}, which Google rejects with error 3"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def validate_round_trip_window(self) -> "ExploreSearchFilters":
+        """Require an exact trip length for round trips; ranges mix in one-way fares."""
+        window = self.trip_length_window
+        if self.trip_type == TripType.ROUND_TRIP and (
+            window is None or window[2] < 1 or window[2] != window[3]
+        ):
+            raise ValueError(
+                "Round-trip Explore searches need an exact trip length: a "
+                "trip_length_window with min_nights == max_nights >= 1. With a range "
+                "Google quotes one-way fares for some destinations, unmarked"
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_origin_destination(self) -> "ExploreSearchFilters":

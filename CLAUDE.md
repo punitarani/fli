@@ -267,9 +267,13 @@ of destinations with their cheapest fares.
 - `origin` - Airport IATA code (e.g. 'JFK') or a city knowledge-graph mid (e.g. '/m/04jpl')
 - `departure_date` - Date in YYYY-MM-DD format (required — the endpoint errors without one)
 - `destination` - ANYWHERE (default), EUROPE, SOUTHERN_EUROPE, ASIA, AFRICA,
-  NORTH_AMERICA, SOUTH_AMERICA, OCEANIA, a raw `/m/...` mid, or an IATA code
+  NORTH_AMERICA, SOUTH_AMERICA, OCEANIA, or a country/region `/m/...` mid. Airports
+  are refused locally (Google answers them with error 3) and a city mid returns no
+  records — use `search_flights` for one route
 - `round_trip` / `trip_min_nights` / `trip_max_nights` - Round-trip pricing with a
-  trip-length window (nights, 0-23)
+  trip-length window (nights, 0-23). A round trip requires an exact length
+  (`trip_min_nights` >= 1, `trip_max_nights` unset or equal): with a range Google
+  quotes some destinations at their one-way price, unmarked, so a range is refused
 - `max_price`, `cabin_class`, `max_stops`, `airlines`, `exclude_airlines`,
   `alliance`, `exclude_alliance`, `max_flight_duration` - Same semantics as `search_flights`
 - `currency` / `language` / `country` - Same locale knobs as `search_flights`
@@ -284,7 +288,10 @@ Explore retains its RPC transport: the public Explore page embeds configuration
 but no destination results. The RPC worked in live checks on 2026-11-11, but
 has intermittently returned error 13. `SearchExplore.search` raises
 `SearchRejectedError` for rejections and `SearchParseError` for unreadable
-responses; MCP classifies both using the shared error contract.
+responses; MCP classifies both using the shared error contract. Measured
+2026-11-11, 8 of 20 identical requests got error 13, so the live tests in
+`test_search_explore_live.py` are `xfail(raises=SearchRejectedError)` — a
+rejection can't fail the canary, any other failure still does.
 
 ### `get_booking_options`
 **Currently unavailable:** it calls `GetBookingResults`, which is gated behind

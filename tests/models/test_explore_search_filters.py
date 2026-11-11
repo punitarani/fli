@@ -294,3 +294,54 @@ def test_valid_one_way_trip_window(window):
         origin=Airport.LHR, departure_date=DEPARTURE_DATE, trip_length_window=window
     )
     assert filters.format()[3][13][0][2] == window
+
+
+@pytest.mark.parametrize(
+    "destination",
+    [
+        Airport.LHR,
+        ExplorePlace(mid="/m/04jpl", type_code=4),
+        ExplorePlace(mid="/m/04jpl", type_code=0),
+    ],
+)
+def test_non_region_destination_rejected(destination):
+    """Google answers airport and city-typed destinations with error 3; fail locally."""
+    with pytest.raises(ValidationError, match="destination"):
+        ExploreSearchFilters(
+            origin=Airport.JFK, destination=destination, departure_date=DEPARTURE_DATE
+        )
+
+
+@pytest.mark.parametrize(
+    "destination", [ExploreRegion.EUROPE, ExplorePlace(mid="/m/07ssc", type_code=6)]
+)
+def test_region_destination_accepted(destination):
+    filters = ExploreSearchFilters(
+        origin=Airport.JFK, destination=destination, departure_date=DEPARTURE_DATE
+    )
+    assert filters.format()[3][13][0][1][0][0][1] == 6
+
+
+@pytest.mark.parametrize(
+    "window", [None, [4, 23, 0, 23], [4, 23, 0, 0], [4, 23, 1, 23], [4, 23, 7, 10]]
+)
+def test_round_trip_without_exact_length_rejected(window):
+    """A range (or no window) makes Google quote one-way fares for some destinations."""
+    with pytest.raises(ValidationError, match="exact trip length"):
+        ExploreSearchFilters(
+            origin=Airport.JFK,
+            departure_date=DEPARTURE_DATE,
+            trip_type=TripType.ROUND_TRIP,
+            trip_length_window=window,
+        )
+
+
+@pytest.mark.parametrize("window", [[4, 23, 1, 1], [4, 23, 7, 7], [4, 23, 23, 23]])
+def test_round_trip_with_exact_length_accepted(window):
+    filters = ExploreSearchFilters(
+        origin=Airport.JFK,
+        departure_date=DEPARTURE_DATE,
+        trip_type=TripType.ROUND_TRIP,
+        trip_length_window=window,
+    )
+    assert filters.format()[3][13][0][2] == window
