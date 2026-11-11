@@ -210,6 +210,99 @@ Find the cheapest travel dates between two airports within a date range.
 Each date result carries a `booking_url` deep-linking to Google Flights for
 that specific date (and return date for round trips).
 
+### `search_explore`
+
+Discover where you can fly cheaply when the destination is flexible — powered
+by Google Flights Explore (`GetExploreDestinations`). One call returns dozens
+of destinations with their cheapest fares for an origin and a broad
+destination like `ANYWHERE` or a continent.
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `origin` | string | Yes | - | Airport IATA code (e.g., 'JFK') or a city knowledge-graph mid (e.g., '/m/04jpl' for London) |
+| `departure_date` | string | Yes | - | Departure date in YYYY-MM-DD format |
+| `destination` | string | No | ANYWHERE | ANYWHERE, EUROPE, SOUTHERN_EUROPE, ASIA, AFRICA, NORTH_AMERICA, SOUTH_AMERICA, OCEANIA, or a region or country knowledge-graph mid (e.g., '/m/07ssc' for the UK). Airports and cities are not supported |
+| `round_trip` | bool | No | false | Price round trips instead of one-ways. Needs a fixed trip length |
+| `trip_min_nights` | int | No | null | Trip length in nights (round trips: 1-23, one fixed value) |
+| `trip_max_nights` | int | No | null | Must equal `trip_min_nights` for round trips |
+| `max_price` | int | No | null | Maximum fare cap |
+| `cabin_class` | string | No | ECONOMY | ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST |
+| `max_stops` | string | No | ANY | ANY, NON_STOP, ONE_STOP, or TWO_PLUS_STOPS |
+| `airlines` | list | No | null | Filter by airline codes (e.g., ['BA', 'AA']) |
+| `exclude_airlines` | list | No | null | Airline IATA codes to **exclude** |
+| `alliance` | list | No | null | Restrict to ONEWORLD / SKYTEAM / STAR_ALLIANCE |
+| `exclude_alliance` | list | No | null | Alliance(s) to **exclude** |
+| `max_flight_duration` | int | No | null | Maximum flight duration in minutes |
+| `passengers` | int | No | 1 | Number of adult passengers |
+| `currency` | string | No | null | ISO 4217 currency code (`curr=`) |
+| `language` | string | No | null | BCP-47 language code (`hl=`) |
+| `country` | string | No | null | ISO 3166-1 alpha-2 country (`gl=`) |
+| `sort_by_price` | bool | No | true | Sort destinations by price (lowest first) |
+| `limit` | int | No | null | Maximum number of destinations to return |
+
+**Example Response:**
+
+```json
+{
+  "success": true,
+  "origin": "LHR",
+  "origin_name": "London",
+  "destination": "EUROPE",
+  "region_name": "Europe",
+  "departure_date": "2026-09-10",
+  "trip_type": "ONE_WAY",
+  "count": 77,
+  "priced_count": 55,
+  "destinations": [
+    {
+      "name": "Edinburgh",
+      "country": "United Kingdom",
+      "mid": "/m/02m77",
+      "price": 21.0,
+      "currency": "GBP",
+      "departure_date": "2026-09-10",
+      "arrival_date": "2026-09-10",
+      "airline": "RK",
+      "airline_name": "Ryanair UK",
+      "stops": 0,
+      "duration_minutes": 80,
+      "destination_airport": "EDI",
+      "latitude": 55.953252,
+      "longitude": -3.188267,
+      "image_url": "https://encrypted-tbn3.gstatic.com/images?q=...",
+      "flights_url": "https://www.google.com/travel/flights?q=Flights%20from%20LHR%20to%20EDI%20on%202026-09-10"
+    }
+  ]
+}
+```
+
+Some destinations come back without a price (`price: null`) — Google found no
+itinerary matching the filters for them. Follow up with
+[`search_flights`](#search_flights) using a result's `destination_airport` and
+`departure_date` for bookable itineraries; each priced destination also
+carries a ready-made `flights_url` deep link.
+
+Explore still uses the `GetExploreDestinations` RPC. Google refuses a share
+of these requests with error 13 (about 40% in live checks on 2026-11-11, in
+clusters); the search retries it a few times with a short backoff, and if
+every attempt is refused it returns `error_type: "rejected_error"` with
+`retryable: true`, so one more try after a few seconds is worthwhile. The public
+`/travel/explore` page currently embeds configuration, but no destination
+results to use as a fallback. Other failures return `success: false` with
+`error_type` and `retryable`, following the other search tools. Destinations
+without a fare remain successful results with `price: null`.
+
+Round trips need a fixed trip length (`trip_min_nights`, and `trip_max_nights`
+if given, set to the same value). For a range of nights Google quotes one-way
+prices for many destinations, so the tool rejects it. With the length fixed,
+`flights_url` includes the return date.
+
+Destinations must be a region, continent or country. Google rejects an airport
+(error 3) and returns nothing for a city, so the tool refuses an IATA code and
+points to `search_flights` instead.
+
 ### `get_booking_options`
 
 Get bookable fares — vendor names, prices, and **direct booking URLs** — for a
@@ -318,7 +411,7 @@ vocabulary once.
 | `validation_error` | `false` | Bad input — unknown airport code, an invalid passenger mix, a date range over the 93-date cap, etc. Fix the request; retrying unchanged will fail again. |
 | `unsupported_error` | `false` | The request is well-formed but this transport can't serve it (e.g. multi-city). Change the request. |
 | `parse_error` | `false` | Google served a page fli couldn't read. Usually (not always) a regional consent/blocked interstitial. Not retryable as-is; set `FLI_SOCS_COOKIE` (EU/EEA) and retry — don't just retry the same request unchanged. |
-| `rejected_error` | `false` | Google refused the RPC outright (e.g. `get_booking_options`'s `GetBookingResults` call today). Deterministic; retrying the same request will not help. |
+| `rejected_error` | `false` (`true` for Explore's intermittent error 13) | Google refused the RPC outright (e.g. `get_booking_options`'s `GetBookingResults` call today). Deterministic; retrying the same request will not help, except when `retryable` is `true`, which only Explore's error 13 sets. |
 | `timeout` | `true` | The request to Google Flights timed out. See retry guidance below. |
 | `certificate_error` | `false` | TLS certificate verification failed, most often behind a TLS-intercepting corporate proxy. Deterministic; set `FLI_CA_BUNDLE` (or `CURL_CA_BUNDLE` / `REQUESTS_CA_BUNDLE`) to a CA bundle path and try again — retrying unchanged will not help. |
 | `connection_error` | `true` | A network/DNS issue prevented reaching Google Flights. See retry guidance below. |

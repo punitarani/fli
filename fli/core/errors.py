@@ -47,9 +47,10 @@ follows the same "name what happened" convention as ``parse_error``.
   arrived but couldn't be read, usually a regional consent/blocked
   interstitial. Set ``FLI_SOCS_COOKIE`` (EU/EEA) and retry; don't just
   retry the same request unchanged.
-- ``rejected_error`` (not retryable): ``SearchRejectedError`` — Google
-  refused the RPC outright (e.g. booking options); deterministic,
-  retrying will not help.
+- ``rejected_error`` (not retryable unless the exception says so):
+  ``SearchRejectedError`` — Google refused the RPC outright (e.g. booking
+  options); deterministic, retrying will not help. The exception is Explore's
+  error 13, which is intermittent and sets ``retryable`` on the exception.
 - ``timeout`` (retryable): ``SearchTimeoutError``.
 - ``certificate_error`` (not retryable): ``SearchCertificateError`` — a
   ``SearchConnectionError`` subclass, checked first: TLS certificate
@@ -157,8 +158,9 @@ def classify_error(exc: BaseException) -> ErrorClassification:
     if isinstance(exc, SearchRejectedError):
         # Google answered but declined the RPC outright (e.g. booking
         # options without a browser-signed header). Deterministic for a
-        # plain HTTP client — retrying the same request will not help.
-        return ErrorClassification("rejected_error", retryable=False)
+        # plain HTTP client unless the raiser knows otherwise: Explore's
+        # error 13 is intermittent and sets ``retryable`` on the exception.
+        return ErrorClassification("rejected_error", retryable=exc.retryable)
     if isinstance(exc, SearchUnsupportedError):
         # The query is well formed but this transport has no path to
         # answer it (e.g. multi-city). Retrying will not help; the

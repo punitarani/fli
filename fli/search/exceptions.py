@@ -84,20 +84,44 @@ class SearchRejectedError(SearchClientError):
     apart.
     """
 
-    def __init__(self, code: int | None = None, *, detail: str | None = None):
-        """Record the status code, its gRPC name and any detail block."""
+    def __init__(
+        self,
+        code: int | None = None,
+        *,
+        detail: str | None = None,
+        hint: str | None = None,
+        retryable: bool = False,
+    ):
+        """Record the status code, its gRPC name and any detail block.
+
+        ``hint`` replaces the default explanation that follows the first
+        sentence; endpoints whose rejections mean something else (Explore's
+        intermittent error 13, for one) pass their own. ``retryable`` marks a
+        rejection that is known to be transient, which ``classify_error``
+        reports to callers.
+        """
         self.code = code
         self.detail = detail
+        self.retryable = retryable
         self.status_name = _GRPC_STATUS_NAMES.get(code) if code is not None else None
         named = f"{code} ({self.status_name})" if self.status_name else code
         # ``0`` is gRPC's OK, so there is no error number to name — it reads
         # the same as no code at all rather than claiming "error 0".
         suffix = f" with error {named}" if code else ""
-        message = (
-            f"Google Flights declined the request{suffix} and returned no data. "
-            "Its API now requires a browser-signed x-goog-batchexecute-bgr header, "
-            "which this client cannot produce. See github.com/punitarani/fli#223."
-        )
+        if hint is None:
+            if code == 3:
+                # INVALID_ARGUMENT is Google refusing the request itself, not
+                # the header gate, so the bgr explanation would mislead.
+                hint = (
+                    "Google rejected the request as invalid (INVALID_ARGUMENT), so the "
+                    "request parameters need to change."
+                )
+            else:
+                hint = (
+                    "Its API now requires a browser-signed x-goog-batchexecute-bgr header, "
+                    "which this client cannot produce. See github.com/punitarani/fli#223."
+                )
+        message = f"Google Flights declined the request{suffix} and returned no data. {hint}"
         if detail:
             message = f"{message} Details: {detail}"
         super().__init__(message)

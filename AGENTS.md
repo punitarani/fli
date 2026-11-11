@@ -22,8 +22,9 @@ All standard commands are in the `Makefile` and `CLAUDE.md`. Key ones:
 - Almost all tests, including most of `tests/search/`, run entirely offline against captured
   fixtures/stubs — no network access is required and none of them are rate-limited.
 - A small number of tests are marked `live` because they call the real Google Flights API:
-  `test_search_flights_new_filters_live.py`, the parametrized case in
-  `test_search_flights_fuzz.py`, the four search tests in
+  `test_search_flights_new_filters_live.py`, `test_search_explore_live.py` (xfails, rather than
+  fails, when Google refuses every Explore attempt with its intermittent error 13), the
+  parametrized case in `test_search_flights_fuzz.py`, the four search tests in
   `tests/mcp/test_mcp_server.py::TestMCPServer`, and a handful of previously-unmocked cases in
   `test_search_flights.py` / `test_search_dates.py`. These are skipped unless `--live` is passed
   (`--all` does **not** enable them), so `make test` / `make test-all` never hit the network.

@@ -8,18 +8,22 @@ importing this package will **not** raise an error.
 try:
     from fli.mcp.server import (
         DateSearchParams,
+        ExploreSearchParams,
         FlightSearchParams,
         mcp,
         run,
         run_http,
         search_dates,
+        search_explore,
         search_flights,
     )
 
     __all__ = [
         "DateSearchParams",
+        "ExploreSearchParams",
         "FlightSearchParams",
         "search_dates",
+        "search_explore",
         "search_flights",
         "mcp",
         "run",

@@ -23,6 +23,14 @@ from .base import (
     WifiTier,
 )
 from .dates import DateSearchFilters
+from .explore import (
+    ExploreDestination,
+    ExplorePlace,
+    ExplorePlaceType,
+    ExploreRegion,
+    ExploreResult,
+    ExploreSearchFilters,
+)
 from .flights import FlightSearchFilters
 
 __all__ = [
@@ -35,6 +43,12 @@ __all__ = [
     "Currency",
     "DateSearchFilters",
     "EmissionsFilter",
+    "ExploreDestination",
+    "ExplorePlace",
+    "ExplorePlaceType",
+    "ExploreRegion",
+    "ExploreResult",
+    "ExploreSearchFilters",
     "FlightLeg",
     "FlightResult",
     "FlightSearchFilters",
