@@ -464,6 +464,26 @@ describe("DateSearchFilters.format() snapshots", () => {
     expect(formatted[4]).toEqual([7, 7]);
   });
 
+  test("bags filter is [carry_on, checked_bags]", () => {
+    const fromD = travelDate(10);
+    const toD = travelDate(30);
+    const filters = new DateSearchFilters({
+      passenger_info: { adults: 1, children: 0, infants_in_seat: 0, infants_on_lap: 0 },
+      flight_segments: [
+        new FlightSegment({
+          departure_airport: [[[Airport.JFK, 0]]],
+          arrival_airport: [[[Airport.LAX, 0]]],
+          travel_date: fromD,
+        }),
+      ],
+      from_date: fromD,
+      to_date: toD,
+      bags: { checked_bags: 2, carry_on: true },
+    });
+    const out = filters.format() as unknown[];
+    expect((out[1] as unknown[])[10]).toEqual([1, 2]);
+  });
+
   test("encode() returns a URL-safe string", () => {
     const fromD = travelDate(10);
     const toD = travelDate(30);
