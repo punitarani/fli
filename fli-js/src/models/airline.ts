@@ -341,7 +341,7 @@ export const AIRLINE_NAMES: Record<string, string> = {
   JU: "Air Serbia",
   JV: "Bearskin Airlines",
   JW: "Vanilla Air",
-  JX: "DAC East Africa",
+  JX: "STARLUX Airlines",
   JY: "InterCaribbean Airways",
   K3: "Taquan Air Services",
   K4: "ALS",
