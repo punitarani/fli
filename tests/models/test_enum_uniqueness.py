@@ -55,8 +55,6 @@ def test_w4_is_wizz_air():
 
 def test_jx_is_starlux():
     """IATA reassigned JX from DAC East Africa to STARLUX Airlines."""
-    from fli.models import Airline, display_name
-
     assert display_name(Airline.JX) == "STARLUX Airlines"
 
 
