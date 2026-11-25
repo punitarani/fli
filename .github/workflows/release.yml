@@ -234,6 +234,13 @@ jobs:
   test:
     needs: release
     if: ${{ needs.release.outputs.did_release == 'true' }}
+    # A called workflow can't get more permissions than its caller grants, and
+    # GitHub checks this at startup: without these, every Release run (dry runs
+    # included) fails with startup_failure because ci.yml asks for them.
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
     uses: ./.github/workflows/ci.yml
     with:
       ref: ${{ needs.release.outputs.tag }}
