@@ -218,8 +218,7 @@ _ERROR_RESPONSE = "error_response"
 
 _NO_PAYLOAD_MESSAGES = {
     _VERIFICATION: (
-        'Google served its "Verifying..." bot check instead of results on every '
-        "attempt, even with fresh cookies"
+        'Google served its "Verifying..." bot check instead of results on every attempt'
     ),
     _UNSUPPORTED_REDIRECT: (
         "Google redirected to /travel/flights/unsupported: it is treating this client "
@@ -277,7 +276,12 @@ def fetch_payload(client: Any, url: str) -> Any | None:
 
     """
     reasons: list[str | None] = []
+    # Whether a later attempt actually ran on cookies reset after a
+    # "Verifying..." page: a client without the hook never gets fresh ones.
+    reset_pending = False
+    retried_with_fresh_cookies = False
     for attempt in range(PAGE_FETCH_ATTEMPTS):
+        retried_with_fresh_cookies = retried_with_fresh_cookies or reset_pending
         response = client.get(url, impersonate="chrome", allow_redirects=True)
         response.raise_for_status()
         payload = extract_payload(response.text)
@@ -293,12 +297,16 @@ def fetch_payload(client: Any, url: str) -> Any | None:
             reset_cookies = getattr(client, "_reset_cookies", None)
             if callable(reset_cookies):
                 reset_cookies()
+                reset_pending = True
         if attempt + 1 < PAGE_FETCH_ATTEMPTS:
             delay = PAGE_RETRY_BACKOFF[min(attempt, len(PAGE_RETRY_BACKOFF) - 1)]
+            # The shape goes here too: a mixed run is not named at WARNING
+            # below, so this is the only record of what each attempt hit.
             logger.debug(
-                "Search page carried no ds:1 payload (attempt %d/%d); retrying in %.1fs",
+                "Search page carried no ds:1 payload (attempt %d/%d, %s); retrying in %.1fs",
                 attempt + 1,
                 PAGE_FETCH_ATTEMPTS,
+                reason or "unrecognised page",
                 delay,
             )
             _sleep(delay)
@@ -306,7 +314,10 @@ def fetch_payload(client: Any, url: str) -> Any | None:
     # attempt hit it; ``/unsupported`` ends the loop, so it stands on its own.
     last = reasons[-1] if reasons else None
     if last is not None and (last == _UNSUPPORTED_REDIRECT or set(reasons) == {last}):
-        logger.warning("No ds:1 payload: %s", _NO_PAYLOAD_MESSAGES[last])
+        message = _NO_PAYLOAD_MESSAGES[last]
+        if last == _VERIFICATION and retried_with_fresh_cookies:
+            message += ", even with fresh cookies"
+        logger.warning("No ds:1 payload: %s", message)
     return None
 
 

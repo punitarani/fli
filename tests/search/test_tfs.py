@@ -658,6 +658,7 @@ class TestFetchPayloadBlockedPages:
         assert c.calls == 3
         assert c.resets == [1, 2, 3]
         assert "Verifying..." in caplog.text
+        assert "even with fresh cookies" in caplog.text
 
     def test_unsupported_redirect_is_not_retried(self, caplog):
         from fli.search._tfs import fetch_payload
@@ -677,7 +678,7 @@ class TestFetchPayloadBlockedPages:
 
         assert fetch_payload(Bare(), self.PAGE) is None
 
-    def test_verification_page_without_reset_method_still_retries(self):
+    def test_verification_page_without_reset_method_still_retries(self, caplog):
         from fli.search._tfs import fetch_payload
 
         sgsync = self.SGSYNC
@@ -690,8 +691,33 @@ class TestFetchPayloadBlockedPages:
                     "R", (), {"text": "", "url": sgsync, "raise_for_status": lambda self: None}
                 )()
 
-        assert fetch_payload(NoReset(), self.PAGE) is None
+        with caplog.at_level("WARNING", logger="fli.search._tfs"):
+            assert fetch_payload(NoReset(), self.PAGE) is None
         assert len(calls) == 3
+        # Named, but without claiming a cookie reset that never happened.
+        assert "Verifying..." in caplog.text
+        assert "fresh cookies" not in caplog.text
+
+    def test_real_client_cookies_are_reset_on_verification(self, monkeypatch):
+        """``fetch_payload`` finds the hook by name; pin it to the real ``Client``."""
+        from fli.search import client as client_module
+        from fli.search._tfs import fetch_payload
+
+        monkeypatch.setattr(client_module, "SOCS_COOKIE", "CAESEwgDEgk")
+        c = client_module.Client()
+        session = c._session()
+        session.cookies.set("NID", "flagged", domain=".google.com")
+        pages = iter([(self.VERIFYING, self.SGSYNC), (self.GOOD, self.PAGE)])
+        sent: list[set[str]] = []
+
+        def fake_get(url, **kwargs):  # noqa: ANN001
+            sent.append({ck.name for ck in session.cookies.jar})
+            body, final = next(pages)
+            return type("R", (), {"text": body, "url": final, "raise_for_status": lambda s: None})()
+
+        monkeypatch.setattr(c, "get", fake_get)
+        assert fetch_payload(c, self.PAGE) == [None, None, [[]], None]
+        assert sent == [{"SOCS", "NID"}, {"SOCS"}]
 
     def test_known_shape_only_on_the_last_attempt_is_not_named(self, caplog):
         """The messages claim "on every attempt"; a mixed run must not borrow them."""
@@ -708,7 +734,7 @@ class TestFetchPayloadBlockedPages:
             assert fetch_payload(c, self.PAGE) is None
         assert c.calls == 3
         assert c.resets == [3]
-        assert "Verifying..." not in caplog.text
+        assert "No ds:1 payload" not in caplog.text
 
     def test_unsupported_after_verification_is_still_named(self, caplog):
         from fli.search._tfs import fetch_payload
