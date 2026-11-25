@@ -171,6 +171,23 @@ class Client:
             self._sessions.session = session
         return session
 
+    def _reset_cookies(self) -> None:
+        """Drop this thread's cookies, keeping only the ``SOCS`` consent cookie.
+
+        Google sometimes answers a session with its "Verifying..." bot check
+        (a redirect to ``/sgsync``) and keeps doing so for every later request
+        on that session; the flag lives in the cookies it set (``NID``,
+        ``__Secure-STRP``). Measured 2026-11-25: retrying on the same session
+        failed for 14s+, while the same request with cleared cookies loaded at
+        once. See :func:`fli.search._tfs.fetch_payload`.
+        """
+        session = getattr(self._sessions, "session", None)
+        if session is None:
+            return
+        session.cookies.clear()
+        if SOCS_COOKIE:
+            session.cookies.set("SOCS", SOCS_COOKIE, domain=".google.com")
+
     def __del__(self):
         """Best-effort cleanup of the main-thread session (others die with their thread)."""
         session = getattr(self._sessions, "session", None) if hasattr(self, "_sessions") else None
