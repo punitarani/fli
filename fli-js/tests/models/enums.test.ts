@@ -68,6 +68,12 @@ describe("Airline enum", () => {
     expect(AIRLINE_NAMES.AA).toBe("American Airlines");
     expect(AIRLINE_NAMES.BA).toBe("British Airways");
   });
+  test("H4 is HiSky Europe", () => {
+    // Google returns H4 for HiSky Europe (e.g. Brussels-Bucharest). A code
+    // missing here makes parseLeg reject the leg, dropping the whole row.
+    expect(Airline.H4).toBe("H4");
+    expect(AIRLINE_NAMES.H4).toBe("HiSky Europe");
+  });
   test("CSV-quoted names with embedded commas are unquoted", () => {
     // These three rows in data/airlines.csv use RFC4180 quoting because the
     // name contains a comma. The CSV parser must strip the surrounding "..."
