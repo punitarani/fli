@@ -111,6 +111,17 @@ describe("Client", () => {
     expect((caught as Error).cause).toBe(boom);
   });
 
+  test("no global fetch and no fetchImpl fails at construction", () => {
+    const realFetch = globalThis.fetch;
+    // @ts-expect-error -- simulate a runtime without a global fetch
+    delete globalThis.fetch;
+    try {
+      expect(() => new Client({ proxy: null })).toThrow(ReferenceError);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
   test("GET sends an empty-body request", async () => {
     const captured: { init?: RequestInit } = {};
     const fake = async (_u: unknown, i?: RequestInit): Promise<Response> => {

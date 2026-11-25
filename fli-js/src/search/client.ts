@@ -251,11 +251,19 @@ export class Client {
     // Workers throw "Illegal invocation" when `fetch` runs with any `this`
     // other than the global (issue #259). That holds for a caller's own
     // `fetchImpl` too, since `fetchImpl: fetch` is the obvious thing to
-    // pass. The global `fetch` is read at call time.
+    // pass. The global `fetch` is read at call time. Only an absent
+    // `fetchImpl` falls back to it: a bogus one fails rather than quietly
+    // reaching the network through a test seam.
     const customFetch = options.fetchImpl;
-    this.fetchImpl = customFetch
-      ? (input, init) => customFetch(input, init)
-      : (input, init) => fetch(input, init);
+    if (customFetch == null && typeof fetch !== "function") {
+      // Fail at construction, as capturing `fetch` here used to, rather
+      // than on every request after the retry backoff.
+      throw new ReferenceError("fetch is not defined; pass `fetchImpl`");
+    }
+    this.fetchImpl =
+      customFetch != null
+        ? (input, init) => customFetch(input, init)
+        : (input, init) => fetch(input, init);
     const socs = options.socsCookie ?? resolveSocsCookie();
     this.cookieHeader = socs ? { cookie: `SOCS=${socs}` } : {};
   }
