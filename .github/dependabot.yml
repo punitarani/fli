@@ -12,6 +12,16 @@ updates:
     commit-message:
       prefix: "deps"
       include: "scope"
+    ignore:
+      # plotext 6 removed the module-level API fli/cli/utils.py uses (see the
+      # `<6` cap in pyproject.toml); don't propose lifting it. This must be a
+      # `versions` range, not `update-types`: a range requirement gives
+      # Dependabot no current version, so a semver-major ignore matches nothing.
+      # A `versions` ignore also holds back security updates: a plotext advisory
+      # fixed only in 6.x shows up as an alert with no PR. Delete this entry
+      # when the cap goes, or it silently blocks every later plotext release.
+      - dependency-name: "plotext"
+        versions: [">=6"]
     groups:
       dev-dependencies:
         patterns:

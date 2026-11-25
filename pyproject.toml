@@ -27,6 +27,7 @@ dependencies = [
     "curl-cffi>=0.15.0",
     "httpx>=0.28.1",
     # plotext 6 replaced the module-level plotting API that fli/cli/utils.py uses.
+    # Lifting this cap? Also drop the plotext ignore in .github/dependabot.yml.
     "plotext>=5.3.2,<6",
     "pydantic>=2.10.4",
     "python-dotenv>=1.0.1",
