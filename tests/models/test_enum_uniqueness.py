@@ -15,7 +15,7 @@ keeps every member distinct end to end, in the generated modules that ship.
 
 from __future__ import annotations
 
-from fli.models import Airline, Airport
+from fli.models import Airline, Airport, display_name
 
 
 class TestAirportNoAliases:
@@ -49,13 +49,14 @@ class TestAirlineNoAliases:
 
 def test_w4_is_wizz_air():
     """IATA reassigned W4 from the defunct LC Péru to Wizz Air (issue #127)."""
-    from fli.models import Airline, display_name
-
     assert display_name(Airline.W4) == "Wizz Air"
 
 
 def test_jx_is_starlux():
     """IATA reassigned JX from DAC East Africa to STARLUX Airlines."""
-    from fli.models import Airline, display_name
-
     assert display_name(Airline.JX) == "STARLUX Airlines"
+
+
+def test_h4_is_hisky_europe():
+    """Google returns H4 for HiSky Europe (e.g. Brussels-Bucharest); unknown codes drop the row."""
+    assert display_name(Airline.H4) == "HiSky Europe"

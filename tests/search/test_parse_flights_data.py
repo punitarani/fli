@@ -418,6 +418,35 @@ class TestParseFlightsDataDefensive:
         assert flight.legs[0].operating_airline is None
 
 
+class TestCarrierCodes:
+    """Carrier codes Google is known to return decode to an ``Airline`` member.
+
+    A leg whose code is missing from ``Airline`` decodes its airline to None,
+    ``FlightLeg`` rejects it, and the caller drops the whole row.
+    """
+
+    def test_h4_hisky_europe_row_is_kept(self):
+        # Google returns H4 for HiSky Europe (e.g. HiSky 245 OTP-BRU). Before H4
+        # was catalogued the leg's airline decoded to None, FlightLeg rejected
+        # it, and every HiSky row was dropped from the results.
+        row = _row(
+            legs=[
+                _leg(
+                    dep_iata="OTP",
+                    arr_iata="BRU",
+                    airline_code="H4",
+                    flight_number="245",
+                    airline_name="HiSky Europe",
+                )
+            ],
+            primary_airline_code="H4",
+            primary_airline_name="HiSky Europe",
+        )
+        flight = SearchFlights._parse_flights_data(row)
+        assert flight.legs[0].airline is Airline.H4
+        assert flight.primary_airline is Airline.H4
+
+
 class TestParseFlightsDataEmptyPriceHead:
     """Issue #165 regression: empty price head ``[[], "<token>"]``.
 
