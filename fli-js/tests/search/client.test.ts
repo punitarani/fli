@@ -56,6 +56,25 @@ describe("Client", () => {
     expect(captured.init?.body).toBe("x=1");
   });
 
+  test("default fetch is called unbound, so Workers don't throw Illegal invocation (#259)", async () => {
+    // Cloudflare Workers reject a `fetch` call whose `this` is anything but
+    // the global. Stand in for that runtime with a global fetch that checks.
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = asFetch(async function (this: unknown) {
+      if (this !== undefined && this !== globalThis) {
+        throw new TypeError("Illegal invocation");
+      }
+      return okResponse("worker ok");
+    });
+    try {
+      const c = new Client({ retries: 1 });
+      const res = await c.get("https://example.com/");
+      expect(res.text).toBe("worker ok");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
   test("GET sends an empty-body request", async () => {
     const captured: { init?: RequestInit } = {};
     const fake = async (_u: unknown, i?: RequestInit): Promise<Response> => {

@@ -224,7 +224,7 @@ export class Client {
   private readonly retries: number;
   private readonly backoffMs: number;
   private readonly proxy: string | undefined;
-  private readonly fetchImpl: typeof fetch;
+  private readonly fetchImpl: (input: string, init: RequestInit) => Promise<Response>;
   private readonly cookieHeader: Record<string, string>;
 
   constructor(options: ClientOptions = {}) {
@@ -236,7 +236,10 @@ export class Client {
     this.retries = options.retries ?? DEFAULT_RETRIES;
     this.backoffMs = options.backoffMs ?? DEFAULT_BACKOFF_MS;
     this.proxy = options.proxy === null ? undefined : (options.proxy ?? resolveProxy());
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    // Call the global `fetch` unbound, never as a method of this client:
+    // Cloudflare Workers throw "Illegal invocation" when `fetch` runs with
+    // any `this` other than the global (issue #259). Read at call time.
+    this.fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
     const socs = options.socsCookie ?? resolveSocsCookie();
     this.cookieHeader = socs ? { cookie: `SOCS=${socs}` } : {};
   }
