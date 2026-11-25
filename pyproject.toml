@@ -55,7 +55,7 @@ dev = [
     "pytest-xdist>=3.6.1",
     "pytest-cov>=6.0.0",
     "ruff>=0.8.4",
-    "twine>=6.0.0",
+    "twine>=7.0.0",
 ]
 
 [project.scripts]
