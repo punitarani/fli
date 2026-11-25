@@ -677,6 +677,58 @@ class TestFetchPayloadBlockedPages:
 
         assert fetch_payload(Bare(), self.PAGE) is None
 
+    def test_verification_page_without_reset_method_still_retries(self):
+        from fli.search._tfs import fetch_payload
+
+        sgsync = self.SGSYNC
+        calls = []
+
+        class NoReset:
+            def get(self, url, **kwargs):  # noqa: ANN001
+                calls.append(url)
+                return type(
+                    "R", (), {"text": "", "url": sgsync, "raise_for_status": lambda self: None}
+                )()
+
+        assert fetch_payload(NoReset(), self.PAGE) is None
+        assert len(calls) == 3
+
+    def test_known_shape_only_on_the_last_attempt_is_not_named(self, caplog):
+        """The messages claim "on every attempt"; a mixed run must not borrow them."""
+        from fli.search._tfs import fetch_payload
+
+        c = self._Client(
+            [
+                ("<html></html>", self.PAGE),
+                ("<html></html>", self.PAGE),
+                (self.VERIFYING, self.SGSYNC),
+            ]
+        )
+        with caplog.at_level("WARNING", logger="fli.search._tfs"):
+            assert fetch_payload(c, self.PAGE) is None
+        assert c.calls == 3
+        assert c.resets == [3]
+        assert "Verifying..." not in caplog.text
+
+    def test_unsupported_after_verification_is_still_named(self, caplog):
+        from fli.search._tfs import fetch_payload
+
+        c = self._Client([(self.VERIFYING, self.SGSYNC), ("<html></html>", self.UNSUPPORTED)])
+        with caplog.at_level("WARNING", logger="fli.search._tfs"):
+            assert fetch_payload(c, self.PAGE) is None
+        assert c.calls == 2
+        assert "/travel/flights/unsupported" in caplog.text
+
+    def test_shape_named_only_in_a_query_string_is_not_matched(self):
+        """A consent page's ``continue=`` can carry ``/sgsync``; only the path counts."""
+        from fli.search._tfs import fetch_payload
+
+        consent = "https://consent.google.com/ml?continue=https://www.google.com/sgsync?x=1"
+        c = self._Client([("<html></html>", consent)])
+        assert fetch_payload(c, self.PAGE) is None
+        assert c.calls == 3
+        assert c.resets == []
+
 
 class TestClientResetCookies:
     def test_keeps_only_socs(self, monkeypatch):
@@ -686,7 +738,7 @@ class TestClientResetCookies:
         c = client_module.Client()
         session = c._session()
         session.cookies.set("NID", "flagged", domain=".google.com")
-        session.cookies.set("__Secure-STRP", "x", domain=".google.com")
+        session.cookies.set("__Secure-STRP", "x", domain=".google.com", secure=True)
         c._reset_cookies()
         assert {ck.name: ck.value for ck in session.cookies.jar} == {"SOCS": "CAESEwgDEgk"}
 

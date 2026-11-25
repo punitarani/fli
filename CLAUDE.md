@@ -189,7 +189,8 @@ Consequences to keep in mind when changing search code:
   clears it), and a redirect to the "Verifying..." bot check (`/sgsync`), which
   sticks to the session's cookies, so `Client._reset_cookies()` (keeps `SOCS`)
   runs before the next attempt. A redirect to `/travel/flights/unsupported` is
-  not retried. When every attempt fails on a known shape, one warning names it.
+  not retried. When every attempt fails on the same known shape (or the page
+  redirects to `/unsupported`), one warning names it.
 - `FLI_SOCS_COOKIE` overrides the pre-accepted `SOCS` consent cookie the client
   sends so EU/EEA IPs skip Google's consent interstitial; set it empty to send
   no cookie.

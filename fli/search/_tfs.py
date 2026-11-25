@@ -35,6 +35,7 @@ import logging
 import re
 import time
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 from fli.models.google_flights.base import TripType
 from fli.search._proto import LegSpec, encode_tfs_payload, encode_tfs_segment, passenger_codes
@@ -234,10 +235,15 @@ _NO_PAYLOAD_MESSAGES = {
 
 def _blocked_page_reason(response: Any) -> str | None:
     """Name why a page carried no ``ds:1`` payload, when it is a known shape."""
-    final_url = str(getattr(response, "url", "") or "")
-    if "/sgsync" in final_url:
+    # Match the final URL's path only: a query string (a consent page's
+    # ``continue=``, say) can carry another URL that names either path.
+    try:
+        final_path = urlsplit(str(getattr(response, "url", "") or "")).path
+    except ValueError:
+        final_path = ""
+    if "/sgsync" in final_path:
         return _VERIFICATION
-    if "/travel/flights/unsupported" in final_url:
+    if "/travel/flights/unsupported" in final_path:
         return _UNSUPPORTED_REDIRECT
     for match in _DS_BLOB.finditer(getattr(response, "text", "") or ""):
         blob = match.group(1)
@@ -252,11 +258,12 @@ def fetch_payload(client: Any, url: str) -> Any | None:
 
     The single entry point both the flight search and the date sweep use, so
     the transient-page retry described at :data:`PAGE_FETCH_ATTEMPTS` applies
-    identically to each. Only a 200 with no ``ds:1`` blob is retried; HTTP and
-    network errors propagate on the first attempt exactly as before. A
+    identically to each. Only a 200 with no usable ``ds:1`` payload is retried;
+    HTTP and network errors propagate on the first attempt exactly as before. A
     "Verifying..." page resets the client's cookies before the next attempt,
-    and an ``/unsupported`` redirect is not retried. When the last page was one
-    of those known shapes, one warning names it.
+    and an ``/unsupported`` redirect is not retried. When every attempt hit the
+    same known shape, or Google redirected to ``/unsupported``, one warning
+    names it.
 
     Args:
         client: Anything with a ``get(url, **kwargs)`` returning a response
@@ -269,7 +276,7 @@ def fetch_payload(client: Any, url: str) -> Any | None:
         caller decides whether that is fatal.
 
     """
-    reason = None
+    reasons: list[str | None] = []
     for attempt in range(PAGE_FETCH_ATTEMPTS):
         response = client.get(url, impersonate="chrome", allow_redirects=True)
         response.raise_for_status()
@@ -279,6 +286,7 @@ def fetch_payload(client: Any, url: str) -> Any | None:
                 logger.info("Search page carried ds:1 on attempt %d", attempt + 1)
             return payload
         reason = _blocked_page_reason(response)
+        reasons.append(reason)
         if reason == _UNSUPPORTED_REDIRECT:
             break
         if reason == _VERIFICATION:
@@ -294,8 +302,11 @@ def fetch_payload(client: Any, url: str) -> Any | None:
                 delay,
             )
             _sleep(delay)
-    if reason is not None:
-        logger.warning("No ds:1 payload: %s", _NO_PAYLOAD_MESSAGES[reason])
+    # The messages say "on every attempt", so name a shape only when every
+    # attempt hit it; ``/unsupported`` ends the loop, so it stands on its own.
+    last = reasons[-1] if reasons else None
+    if last is not None and (last == _UNSUPPORTED_REDIRECT or set(reasons) == {last}):
+        logger.warning("No ds:1 payload: %s", _NO_PAYLOAD_MESSAGES[last])
     return None
 
 
