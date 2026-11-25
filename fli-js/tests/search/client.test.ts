@@ -59,6 +59,8 @@ describe("Client", () => {
   test("default fetch is called unbound, so Workers don't throw Illegal invocation (#259)", async () => {
     // Cloudflare Workers reject a `fetch` call whose `this` is anything but
     // the global. Stand in for that runtime with a global fetch that checks.
+    // The client is built first: the global is read at call time.
+    const c = new Client({ retries: 1 });
     const realFetch = globalThis.fetch;
     globalThis.fetch = asFetch(async function (this: unknown) {
       if (this !== undefined && this !== globalThis) {
@@ -67,12 +69,41 @@ describe("Client", () => {
       return okResponse("worker ok");
     });
     try {
-      const c = new Client({ retries: 1 });
       const res = await c.get("https://example.com/");
       expect(res.text).toBe("worker ok");
     } finally {
       globalThis.fetch = realFetch;
     }
+  });
+
+  test("a custom fetchImpl is called unbound too, so `fetchImpl: fetch` works on Workers (#259)", async () => {
+    const workerFetch = asFetch(async function (this: unknown) {
+      if (this !== undefined && this !== globalThis) {
+        throw new TypeError("Illegal invocation");
+      }
+      return okResponse("custom ok");
+    });
+    const c = new Client({ fetchImpl: workerFetch, retries: 1 });
+    const res = await c.get("https://example.com/");
+    expect(res.text).toBe("custom ok");
+  });
+
+  test("a wrapped request error keeps the original as `cause`", async () => {
+    const boom = new TypeError("Illegal invocation");
+    const c = new Client({
+      fetchImpl: asFetch(async () => {
+        throw boom;
+      }),
+      retries: 1,
+    });
+    let caught: unknown;
+    try {
+      await c.get("https://example.com/");
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(SearchClientError);
+    expect((caught as Error).cause).toBe(boom);
   });
 
   test("GET sends an empty-body request", async () => {
