@@ -419,7 +419,11 @@ class TestParseFlightsDataDefensive:
 
 
 class TestCarrierCodes:
-    """A leg whose carrier code is missing from ``Airline`` is rejected with its row."""
+    """Carrier codes Google is known to return decode to an ``Airline`` member.
+
+    A leg whose code is missing from ``Airline`` decodes its airline to None,
+    ``FlightLeg`` rejects it, and the caller drops the whole row.
+    """
 
     def test_h4_hisky_europe_row_is_kept(self):
         # Google returns H4 for HiSky Europe (e.g. HiSky 245 OTP-BRU). Before H4

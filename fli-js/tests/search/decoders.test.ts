@@ -40,6 +40,10 @@ describe("_safeAirline", () => {
   test("digit-prefixed code (e.g. '3F') resolves with underscore lookup", () => {
     expect(_safeAirline("3F")).toBe(Airline._3F);
   });
+
+  test("H4 (HiSky Europe) resolves, so parseLeg keeps its legs", () => {
+    expect(_safeAirline("H4")).toBe(Airline.H4);
+  });
 });
 
 describe("_parseDateTime", () => {
