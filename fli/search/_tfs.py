@@ -298,10 +298,11 @@ def fetch_payload(client: Any, url: str) -> Any | None:
             if callable(reset_cookies):
                 reset_cookies()
                 reset_pending = True
+        # The shape goes here too, for every attempt including the last: a
+        # mixed run is not named at WARNING below, so this is the only record
+        # of what each attempt hit.
         if attempt + 1 < PAGE_FETCH_ATTEMPTS:
             delay = PAGE_RETRY_BACKOFF[min(attempt, len(PAGE_RETRY_BACKOFF) - 1)]
-            # The shape goes here too: a mixed run is not named at WARNING
-            # below, so this is the only record of what each attempt hit.
             logger.debug(
                 "Search page carried no ds:1 payload (attempt %d/%d, %s); retrying in %.1fs",
                 attempt + 1,
@@ -310,6 +311,13 @@ def fetch_payload(client: Any, url: str) -> Any | None:
                 delay,
             )
             _sleep(delay)
+        else:
+            logger.debug(
+                "Search page carried no ds:1 payload (attempt %d/%d, %s); giving up",
+                attempt + 1,
+                PAGE_FETCH_ATTEMPTS,
+                reason or "unrecognised page",
+            )
     # The messages say "on every attempt", so name a shape only when every
     # attempt hit it; ``/unsupported`` ends the loop, so it stands on its own.
     last = reasons[-1] if reasons else None

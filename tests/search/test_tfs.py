@@ -736,6 +736,21 @@ class TestFetchPayloadBlockedPages:
         assert c.resets == [3]
         assert "No ds:1 payload" not in caplog.text
 
+    def test_last_attempt_shape_is_logged_at_debug(self, caplog):
+        """A mixed run is not named at WARNING, so the final attempt's shape needs a record."""
+        from fli.search._tfs import fetch_payload
+
+        c = self._Client(
+            [
+                ("<html></html>", self.PAGE),
+                ("<html></html>", self.PAGE),
+                (self.VERIFYING, self.SGSYNC),
+            ]
+        )
+        with caplog.at_level("DEBUG", logger="fli.search._tfs"):
+            assert fetch_payload(c, self.PAGE) is None
+        assert "attempt 3/3, verification); giving up" in caplog.text
+
     def test_unsupported_after_verification_is_still_named(self, caplog):
         from fli.search._tfs import fetch_payload
 

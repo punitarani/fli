@@ -152,7 +152,8 @@ class Client:
         extends that across the whole process). Changing ``FLI_CA_BUNDLE``
         (or the other two) after a session already exists has no effect on
         it; only a new thread, or a fresh ``Client()``, picks up the
-        change.
+        change. The one exception is ``SOCS_COOKIE``, which
+        :meth:`_reset_cookies` sets again whenever it clears a session.
         """
         session = getattr(self._sessions, "session", None)
         if session is None:
