@@ -255,9 +255,11 @@ What that means in practice:
   results, or alongside a confirmed-empty range (`None`), still returns
   normally but logs one warning naming the counts.
 * **A page occasionally arrives without results.** Roughly one request in sixty
-  returns HTTP 200 with no `ds:1` blob; the client retries that case up to twice
-  (0.5s then 1.5s) before raising `SearchParseError`. A healthy search never
-  pays for it.
+  returns HTTP 200 with no usable `ds:1` blob; the client retries that case up to
+  twice (0.5s then 1.5s) before raising `SearchParseError`. A healthy search never
+  pays for it. When Google answers with its "Verifying..." bot check, the client
+  clears that thread's cookies (keeping `SOCS`) before retrying; a redirect to
+  `/travel/flights/unsupported` is not retried.
 * **`FLI_SOCS_COOKIE`.** EU/EEA IPs are redirected to Google's consent
   interstitial, which serves no `ds:1` blob. The client sends a pre-accepted
   `SOCS` consent cookie by default; set `FLI_SOCS_COOKIE` to change the value,

@@ -580,3 +580,220 @@ class TestAllianceAndLayoverEncoding:
         spec.alliances = [Alliance.SKYTEAM]
         spec.layover_restrictions = LayoverRestrictions(min_duration=90)
         assert unsupported_filters(spec) == []
+
+
+class TestFetchPayloadBlockedPages:
+    """The known no-``ds:1`` page shapes (measured live 2026-11-25)."""
+
+    GOOD = (
+        "<script>AF_initDataCallback({key: 'ds:1', hash: '1', data:"
+        "[null,null,[[]],null], sideChannel: {}});</script>"
+    )
+    # Google's throttling envelope inlined in the page: no `hash`, no
+    # `sideChannel`, so the payload regex skips it.
+    ERROR_RESPONSE = (
+        "<script>AF_initDataCallback({key: 'ds:0', hash: '1', data:[1], sideChannel: {}});"
+        "</script><script>AF_initDataCallback({key: 'ds:1',  data:[13,null,[["
+        '"type.googleapis.com/travel.frontend.flights.ErrorResponse",[[null,[[1,2,3]],0,"x"],0]]'
+        "]],errorHasStatus: true,});</script>"
+    )
+    VERIFYING = "<html><head><title>Verifying...</title></head></html>"
+    PAGE = "https://www.google.com/travel/flights?tfs=x&hl=en&gl=US"
+    SGSYNC = "https://www.google.com/sgsync?url=https://www.google.com/travel/flights&sig=s"
+    UNSUPPORTED = "https://www.google.com/travel/flights/unsupported?tfs=x"
+
+    class _Client:
+        def __init__(self, pages: list[tuple[str, str]]):
+            self.pages = pages
+            self.calls = 0
+            self.resets: list[int] = []
+
+        def get(self, url, **kwargs):  # noqa: ANN001
+            body, final = self.pages[min(self.calls, len(self.pages) - 1)]
+            self.calls += 1
+            return type(
+                "R", (), {"text": body, "url": final, "raise_for_status": lambda self: None}
+            )()
+
+        def _reset_cookies(self):
+            self.resets.append(self.calls)
+
+    @pytest.fixture(autouse=True)
+    def _no_sleep(self, monkeypatch):
+        from fli.search import _tfs as tfs_module
+
+        monkeypatch.setattr(tfs_module, "_sleep", lambda _s: None)
+
+    def test_error_response_is_retried_and_named(self, caplog):
+        from fli.search._tfs import fetch_payload
+
+        c = self._Client([(self.ERROR_RESPONSE, self.PAGE)])
+        with caplog.at_level("WARNING", logger="fli.search._tfs"):
+            assert fetch_payload(c, self.PAGE) is None
+        assert c.calls == 3
+        assert c.resets == []
+        assert "ErrorResponse" in caplog.text
+
+    def test_error_response_then_good_page_recovers(self):
+        from fli.search._tfs import fetch_payload
+
+        c = self._Client([(self.ERROR_RESPONSE, self.PAGE), (self.GOOD, self.PAGE)])
+        assert fetch_payload(c, self.PAGE) == [None, None, [[]], None]
+        assert c.calls == 2
+
+    def test_verification_page_resets_cookies_before_retrying(self):
+        from fli.search._tfs import fetch_payload
+
+        c = self._Client([(self.VERIFYING, self.SGSYNC), (self.GOOD, self.PAGE)])
+        assert fetch_payload(c, self.PAGE) == [None, None, [[]], None]
+        assert c.resets == [1]
+        assert c.calls == 2
+
+    def test_persistent_verification_page_is_named(self, caplog):
+        from fli.search._tfs import fetch_payload
+
+        c = self._Client([(self.VERIFYING, self.SGSYNC)])
+        with caplog.at_level("WARNING", logger="fli.search._tfs"):
+            assert fetch_payload(c, self.PAGE) is None
+        assert c.calls == 3
+        assert c.resets == [1, 2, 3]
+        assert "Verifying..." in caplog.text
+        assert "even with fresh cookies" in caplog.text
+
+    def test_unsupported_redirect_is_not_retried(self, caplog):
+        from fli.search._tfs import fetch_payload
+
+        c = self._Client([("<html></html>", self.UNSUPPORTED)])
+        with caplog.at_level("WARNING", logger="fli.search._tfs"):
+            assert fetch_payload(c, self.PAGE) is None
+        assert c.calls == 1
+        assert "/travel/flights/unsupported" in caplog.text
+
+    def test_client_without_url_or_reset_still_works(self):
+        from fli.search._tfs import fetch_payload
+
+        class Bare:
+            def get(self, url, **kwargs):  # noqa: ANN001
+                return type("R", (), {"text": "", "raise_for_status": lambda self: None})()
+
+        assert fetch_payload(Bare(), self.PAGE) is None
+
+    def test_verification_page_without_reset_method_still_retries(self, caplog):
+        from fli.search._tfs import fetch_payload
+
+        sgsync = self.SGSYNC
+        calls = []
+
+        class NoReset:
+            def get(self, url, **kwargs):  # noqa: ANN001
+                calls.append(url)
+                return type(
+                    "R", (), {"text": "", "url": sgsync, "raise_for_status": lambda self: None}
+                )()
+
+        with caplog.at_level("WARNING", logger="fli.search._tfs"):
+            assert fetch_payload(NoReset(), self.PAGE) is None
+        assert len(calls) == 3
+        # Named, but without claiming a cookie reset that never happened.
+        assert "Verifying..." in caplog.text
+        assert "fresh cookies" not in caplog.text
+
+    def test_real_client_cookies_are_reset_on_verification(self, monkeypatch):
+        """``fetch_payload`` finds the hook by name; pin it to the real ``Client``."""
+        from fli.search import client as client_module
+        from fli.search._tfs import fetch_payload
+
+        monkeypatch.setattr(client_module, "SOCS_COOKIE", "CAESEwgDEgk")
+        c = client_module.Client()
+        session = c._session()
+        session.cookies.set("NID", "flagged", domain=".google.com")
+        pages = iter([(self.VERIFYING, self.SGSYNC), (self.GOOD, self.PAGE)])
+        sent: list[set[str]] = []
+
+        def fake_get(url, **kwargs):  # noqa: ANN001
+            sent.append({ck.name for ck in session.cookies.jar})
+            body, final = next(pages)
+            return type("R", (), {"text": body, "url": final, "raise_for_status": lambda s: None})()
+
+        monkeypatch.setattr(c, "get", fake_get)
+        assert fetch_payload(c, self.PAGE) == [None, None, [[]], None]
+        assert sent == [{"SOCS", "NID"}, {"SOCS"}]
+
+    def test_known_shape_only_on_the_last_attempt_is_not_named(self, caplog):
+        """The messages claim "on every attempt"; a mixed run must not borrow them."""
+        from fli.search._tfs import fetch_payload
+
+        c = self._Client(
+            [
+                ("<html></html>", self.PAGE),
+                ("<html></html>", self.PAGE),
+                (self.VERIFYING, self.SGSYNC),
+            ]
+        )
+        with caplog.at_level("WARNING", logger="fli.search._tfs"):
+            assert fetch_payload(c, self.PAGE) is None
+        assert c.calls == 3
+        assert c.resets == [3]
+        assert "No ds:1 payload" not in caplog.text
+
+    def test_last_attempt_shape_is_logged_at_debug(self, caplog):
+        """A mixed run is not named at WARNING, so the final attempt's shape needs a record."""
+        from fli.search._tfs import fetch_payload
+
+        c = self._Client(
+            [
+                ("<html></html>", self.PAGE),
+                ("<html></html>", self.PAGE),
+                (self.VERIFYING, self.SGSYNC),
+            ]
+        )
+        with caplog.at_level("DEBUG", logger="fli.search._tfs"):
+            assert fetch_payload(c, self.PAGE) is None
+        assert "attempt 3/3, verification); giving up" in caplog.text
+
+    def test_unsupported_after_verification_is_still_named(self, caplog):
+        from fli.search._tfs import fetch_payload
+
+        c = self._Client([(self.VERIFYING, self.SGSYNC), ("<html></html>", self.UNSUPPORTED)])
+        with caplog.at_level("WARNING", logger="fli.search._tfs"):
+            assert fetch_payload(c, self.PAGE) is None
+        assert c.calls == 2
+        assert "/travel/flights/unsupported" in caplog.text
+
+    def test_shape_named_only_in_a_query_string_is_not_matched(self):
+        """A consent page's ``continue=`` can carry ``/sgsync``; only the path counts."""
+        from fli.search._tfs import fetch_payload
+
+        consent = "https://consent.google.com/ml?continue=https://www.google.com/sgsync?x=1"
+        c = self._Client([("<html></html>", consent)])
+        assert fetch_payload(c, self.PAGE) is None
+        assert c.calls == 3
+        assert c.resets == []
+
+
+class TestClientResetCookies:
+    def test_keeps_only_socs(self, monkeypatch):
+        from fli.search import client as client_module
+
+        monkeypatch.setattr(client_module, "SOCS_COOKIE", "CAESEwgDEgk")
+        c = client_module.Client()
+        session = c._session()
+        session.cookies.set("NID", "flagged", domain=".google.com")
+        session.cookies.set("__Secure-STRP", "x", domain=".google.com", secure=True)
+        c._reset_cookies()
+        assert {ck.name: ck.value for ck in session.cookies.jar} == {"SOCS": "CAESEwgDEgk"}
+
+    def test_empty_socs_leaves_no_cookies(self, monkeypatch):
+        from fli.search import client as client_module
+
+        monkeypatch.setattr(client_module, "SOCS_COOKIE", "")
+        c = client_module.Client()
+        session = c._session()
+        session.cookies.set("NID", "flagged", domain=".google.com")
+        c._reset_cookies()
+        assert list(session.cookies.jar) == []
+
+    def test_no_session_yet_is_a_no_op(self):
+        from fli.search.client import Client
+
+        Client()._reset_cookies()

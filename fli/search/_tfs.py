@@ -35,6 +35,7 @@ import logging
 import re
 import time
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 from fli.models.google_flights.base import TripType
 from fli.search._proto import LegSpec, encode_tfs_payload, encode_tfs_segment, passenger_codes
@@ -47,16 +48,22 @@ logger = logging.getLogger(__name__)
 
 PAGE_URL = "https://www.google.com/travel/flights"
 
-# Roughly one page in sixty comes back HTTP 200 with every other
-# ``AF_initDataCallback`` block present but no ``ds:1`` one — a transient
-# variant, not a block: the identical request succeeds seconds later. A round
+# Roughly one page in sixty comes back HTTP 200 with no usable ``ds:1``
+# payload, and the identical request usually succeeds seconds later. A round
 # trip fetches six pages and a date sweep one per date, so at that rate an
-# unretried search fails noticeably often.
+# unretried search fails noticeably often. Two shapes were seen (2026-11-25):
 #
-# Retry only this exact case. HTTP errors and error-13 rejections are already
-# handled (and retried, where appropriate) by the client, and re-fetching them
-# here would just multiply a hard failure. Worst case is 3 fetches per page,
-# so a healthy N-date sweep stays N requests.
+# - ``ds:1`` carries Google's ``ErrorResponse`` envelope (code 13, the
+#   throttling answer from #276) instead of results. A plain retry clears it.
+# - Google redirects to its "Verifying..." bot check (``/sgsync``). That one
+#   sticks to the session's cookies: retrying unchanged failed for 14s+, while
+#   the same request with cleared cookies loaded at once, so the cookies are
+#   reset (``Client._reset_cookies``) before the next attempt.
+#
+# A redirect to ``/travel/flights/unsupported`` (#270) is deterministic and is
+# not retried. HTTP errors are handled (and retried) by the client, and
+# re-fetching them here would just multiply a hard failure. Worst case is 3
+# fetches per page, so a healthy N-date sweep stays N requests.
 PAGE_FETCH_ATTEMPTS = 3
 PAGE_RETRY_BACKOFF = (0.5, 1.5)
 
@@ -205,25 +212,76 @@ def extract_payload(html: str) -> Any | None:
     return None
 
 
+_VERIFICATION = "verification"
+_UNSUPPORTED_REDIRECT = "unsupported"
+_ERROR_RESPONSE = "error_response"
+
+_NO_PAYLOAD_MESSAGES = {
+    _VERIFICATION: (
+        'Google served its "Verifying..." bot check instead of results on every attempt'
+    ),
+    _UNSUPPORTED_REDIRECT: (
+        "Google redirected to /travel/flights/unsupported: it is treating this client "
+        "as unsupported, so no retry can load results"
+    ),
+    _ERROR_RESPONSE: (
+        "Google answered with an ErrorResponse instead of results on every attempt, "
+        "which usually means this IP is being throttled; wait a few minutes or switch "
+        "networks"
+    ),
+}
+
+
+def _blocked_page_reason(response: Any) -> str | None:
+    """Name why a page carried no ``ds:1`` payload, when it is a known shape."""
+    # Match the final URL's path only: a query string (a consent page's
+    # ``continue=``, say) can carry another URL that names either path.
+    try:
+        final_path = urlsplit(str(getattr(response, "url", "") or "")).path
+    except ValueError:
+        final_path = ""
+    if "/sgsync" in final_path:
+        return _VERIFICATION
+    if "/travel/flights/unsupported" in final_path:
+        return _UNSUPPORTED_REDIRECT
+    for match in _DS_BLOB.finditer(getattr(response, "text", "") or ""):
+        blob = match.group(1)
+        key = _DS_KEY.search(blob)
+        if key and key.group(1) == "ds:1" and "ErrorResponse" in blob:
+            return _ERROR_RESPONSE
+    return None
+
+
 def fetch_payload(client: Any, url: str) -> Any | None:
     """Fetch a search page and return its ``ds:1`` payload, or ``None``.
 
     The single entry point both the flight search and the date sweep use, so
     the transient-page retry described at :data:`PAGE_FETCH_ATTEMPTS` applies
-    identically to each. Only a 200 with no ``ds:1`` blob is retried; HTTP and
-    network errors propagate on the first attempt exactly as before.
+    identically to each. Only a 200 with no usable ``ds:1`` payload is retried;
+    HTTP and network errors propagate on the first attempt exactly as before. A
+    "Verifying..." page resets the client's cookies before the next attempt,
+    and an ``/unsupported`` redirect is not retried. When every attempt hit the
+    same known shape, or Google redirected to ``/unsupported``, one warning
+    names it.
 
     Args:
         client: Anything with a ``get(url, **kwargs)`` returning a response
-            with ``.text`` and ``.raise_for_status()``.
+            with ``.text`` and ``.raise_for_status()`` (and optionally ``.url``
+            and a ``_reset_cookies()`` method, as :class:`Client` has).
         url: The fully built search-page URL.
 
     Returns:
-        The decoded payload, or ``None`` when every attempt came back without
-        one — the caller decides whether that is fatal.
+        The decoded payload, or ``None`` when no attempt carried one — the
+        caller decides whether that is fatal.
 
     """
+    reasons: list[str | None] = []
+    # Whether a later attempt actually ran on cookies reset after a
+    # "Verifying..." page: a client without the hook never gets fresh ones.
+    reset_pending = False
+    retried_with_fresh_cookies = False
     for attempt in range(PAGE_FETCH_ATTEMPTS):
+        retried_with_fresh_cookies = retried_with_fresh_cookies or reset_pending
         response = client.get(url, impersonate="chrome", allow_redirects=True)
         response.raise_for_status()
         payload = extract_payload(response.text)
@@ -231,15 +289,43 @@ def fetch_payload(client: Any, url: str) -> Any | None:
             if attempt:
                 logger.info("Search page carried ds:1 on attempt %d", attempt + 1)
             return payload
+        reason = _blocked_page_reason(response)
+        reasons.append(reason)
+        if reason == _UNSUPPORTED_REDIRECT:
+            break
+        if reason == _VERIFICATION:
+            reset_cookies = getattr(client, "_reset_cookies", None)
+            if callable(reset_cookies):
+                reset_cookies()
+                reset_pending = True
+        # The shape goes here too, for every attempt including the last: a
+        # mixed run is not named at WARNING below, so this is the only record
+        # of what each attempt hit.
         if attempt + 1 < PAGE_FETCH_ATTEMPTS:
             delay = PAGE_RETRY_BACKOFF[min(attempt, len(PAGE_RETRY_BACKOFF) - 1)]
             logger.debug(
-                "Search page carried no ds:1 payload (attempt %d/%d); retrying in %.1fs",
+                "Search page carried no ds:1 payload (attempt %d/%d, %s); retrying in %.1fs",
                 attempt + 1,
                 PAGE_FETCH_ATTEMPTS,
+                reason or "unrecognised page",
                 delay,
             )
             _sleep(delay)
+        else:
+            logger.debug(
+                "Search page carried no ds:1 payload (attempt %d/%d, %s); giving up",
+                attempt + 1,
+                PAGE_FETCH_ATTEMPTS,
+                reason or "unrecognised page",
+            )
+    # The messages say "on every attempt", so name a shape only when every
+    # attempt hit it; ``/unsupported`` ends the loop, so it stands on its own.
+    last = reasons[-1] if reasons else None
+    if last is not None and (last == _UNSUPPORTED_REDIRECT or set(reasons) == {last}):
+        message = _NO_PAYLOAD_MESSAGES[last]
+        if last == _VERIFICATION and retried_with_fresh_cookies:
+            message += ", even with fresh cookies"
+        logger.warning("No ds:1 payload: %s", message)
     return None
 
 

@@ -181,10 +181,16 @@ Consequences to keep in mind when changing search code:
   wall). A minority of load failures with 0 results still returns `None`;
   a minority alongside partial results still returns those results; both
   log exactly one summary warning naming the counts.
-- ~1 page in 60 arrives HTTP 200 with no `ds:1` blob. `fetch_payload` in
+- ~1 page in 60 arrives HTTP 200 with no usable `ds:1` blob. `fetch_payload` in
   `fli/search/_tfs.py` is the single fetch path for both flights and dates and
   retries exactly that case (`PAGE_FETCH_ATTEMPTS`, `PAGE_RETRY_BACKOFF`);
-  HTTP errors and error-13 rejections are not retried there.
+  HTTP errors are not retried there. Known shapes (measured 2026-11-25): `ds:1`
+  holding Google's `ErrorResponse` envelope (code 13, throttling; a plain retry
+  clears it), and a redirect to the "Verifying..." bot check (`/sgsync`), which
+  sticks to the session's cookies, so `Client._reset_cookies()` (keeps `SOCS`)
+  runs before the next attempt. A redirect to `/travel/flights/unsupported` is
+  not retried. When every attempt fails on the same known shape (or the page
+  redirects to `/unsupported`), one warning names it.
 - `FLI_SOCS_COOKIE` overrides the pre-accepted `SOCS` consent cookie the client
   sends so EU/EEA IPs skip Google's consent interstitial; set it empty to send
   no cookie.
