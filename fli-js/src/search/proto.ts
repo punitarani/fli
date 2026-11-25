@@ -72,7 +72,7 @@ function base64UrlsafeDecode(token: string): Uint8Array {
 }
 
 const utf8 = new TextEncoder();
-const utf8Decoder = new TextDecoder("utf-8", { fatal: false });
+const utf8Decoder = new TextDecoder("utf-8", { fatal: false, ignoreBOM: false });
 
 /**
  * Construct the GetBookingResults outer[0][1] token.

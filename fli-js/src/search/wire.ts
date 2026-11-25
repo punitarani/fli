@@ -13,7 +13,7 @@ import { SearchRejectedError } from "./exceptions.ts";
 const PREFIX = ")]}'";
 const PREFIX_BYTES = new TextEncoder().encode(PREFIX);
 
-const decoder = new TextDecoder("utf-8", { fatal: false });
+const decoder = new TextDecoder("utf-8", { fatal: false, ignoreBOM: false });
 
 function toBytes(body: string | Uint8Array): Uint8Array {
   if (body instanceof Uint8Array) return body;

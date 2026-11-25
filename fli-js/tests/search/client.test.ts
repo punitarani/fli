@@ -56,6 +56,72 @@ describe("Client", () => {
     expect(captured.init?.body).toBe("x=1");
   });
 
+  test("default fetch is called unbound, so Workers don't throw Illegal invocation (#259)", async () => {
+    // Cloudflare Workers reject a `fetch` call whose `this` is anything but
+    // the global. Stand in for that runtime with a global fetch that checks.
+    // The client is built first: the global is read at call time. A stub
+    // is in place even then, so a client that captured `fetch` at
+    // construction fails here instead of reaching the network.
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = asFetch(async () => {
+      throw new Error("fetch was captured at construction, not read at call time");
+    });
+    try {
+      const c = new Client({ retries: 1, proxy: null });
+      globalThis.fetch = asFetch(async function (this: unknown) {
+        if (this !== undefined && this !== globalThis) {
+          throw new TypeError("Illegal invocation");
+        }
+        return okResponse("worker ok");
+      });
+      const res = await c.get("https://example.com/");
+      expect(res.text).toBe("worker ok");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  test("a custom fetchImpl is called unbound too, so `fetchImpl: fetch` works on Workers (#259)", async () => {
+    const workerFetch = asFetch(async function (this: unknown) {
+      if (this !== undefined && this !== globalThis) {
+        throw new TypeError("Illegal invocation");
+      }
+      return okResponse("custom ok");
+    });
+    const c = new Client({ fetchImpl: workerFetch, retries: 1 });
+    const res = await c.get("https://example.com/");
+    expect(res.text).toBe("custom ok");
+  });
+
+  test("a wrapped request error keeps the original as `cause`", async () => {
+    const boom = new TypeError("Illegal invocation");
+    const c = new Client({
+      fetchImpl: asFetch(async () => {
+        throw boom;
+      }),
+      retries: 1,
+    });
+    let caught: unknown;
+    try {
+      await c.get("https://example.com/");
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(SearchClientError);
+    expect((caught as Error).cause).toBe(boom);
+  });
+
+  test("no global fetch and no fetchImpl fails at construction", () => {
+    const realFetch = globalThis.fetch;
+    // @ts-expect-error -- simulate a runtime without a global fetch
+    delete globalThis.fetch;
+    try {
+      expect(() => new Client({ proxy: null })).toThrow(ReferenceError);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
   test("GET sends an empty-body request", async () => {
     const captured: { init?: RequestInit } = {};
     const fake = async (_u: unknown, i?: RequestInit): Promise<Response> => {
@@ -95,8 +161,9 @@ describe("Client", () => {
   });
 
   test("connection error wraps to SearchConnectionError", async () => {
+    const boom = new TypeError("fetch failed");
     const fake = async (): Promise<Response> => {
-      throw new TypeError("fetch failed");
+      throw boom;
     };
     const c = new Client({ fetchImpl: asFetch(fake), retries: 1 });
     try {
@@ -104,19 +171,21 @@ describe("Client", () => {
       expect.unreachable();
     } catch (e) {
       expect(e).toBeInstanceOf(SearchConnectionError);
+      expect((e as Error).cause).toBe(boom);
     }
   });
 
   test("AbortError wraps to SearchTimeoutError", async () => {
+    const aborted = new DOMException("Aborted", "AbortError");
     const fake = async (_u: unknown, init?: RequestInit): Promise<Response> => {
       return new Promise<Response>((_, reject) => {
         const signal = init?.signal;
         if (signal?.aborted) {
-          reject(new DOMException("Aborted", "AbortError"));
+          reject(aborted);
           return;
         }
         signal?.addEventListener("abort", () => {
-          reject(new DOMException("Aborted", "AbortError"));
+          reject(aborted);
         });
       });
     };
@@ -126,6 +195,7 @@ describe("Client", () => {
       expect.unreachable();
     } catch (e) {
       expect(e).toBeInstanceOf(SearchTimeoutError);
+      expect((e as Error).cause).toBe(aborted);
     }
   });
 
@@ -235,12 +305,14 @@ describe("Client", () => {
       await c.post("https://example.com", { body: "" });
       expect(captured.init?.proxy).toBe("http://proxy.example.com:8080");
     } finally {
-      if (previous == null) process.env.HTTPS_PROXY = undefined;
+      // Not `= undefined`: that stores the string "undefined" (see afterEach).
+      if (previous == null) delete process.env.HTTPS_PROXY;
       else process.env.HTTPS_PROXY = previous;
     }
   });
 
   test("explicit proxy option overrides env", async () => {
+    const previous = process.env.HTTPS_PROXY;
     process.env.HTTPS_PROXY = "http://wrong.example.com";
     try {
       const captured: { init?: RequestInit & { proxy?: string } } = {};
@@ -255,7 +327,8 @@ describe("Client", () => {
       await c.post("https://example.com", { body: "" });
       expect(captured.init?.proxy).toBe("http://right.example.com");
     } finally {
-      process.env.HTTPS_PROXY = undefined;
+      if (previous == null) delete process.env.HTTPS_PROXY;
+      else process.env.HTTPS_PROXY = previous;
     }
   });
 

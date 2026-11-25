@@ -139,7 +139,13 @@ export interface ClientOptions {
   backoffMs?: number;
   /** Proxy URL (e.g. `http://user:pass@host:port`). Defaults to HTTPS_PROXY/HTTP_PROXY env. */
   proxy?: string | null;
-  /** Custom fetch implementation (test seam). */
+  /**
+   * Custom fetch implementation (test seam). Called as a plain function,
+   * never as a method of the client, so the global `fetch` can be passed
+   * as-is; bind any implementation that needs its own `this`. Without it
+   * the client uses the global `fetch`, looked up on every request, so a
+   * later stub or instrumentation of `globalThis.fetch` applies to it.
+   */
   fetchImpl?: typeof fetch;
   /**
    * `SOCS` consent cookie value. Defaults to `FLI_SOCS_COOKIE` if set,
@@ -204,6 +210,7 @@ function wrapRequestError(method: string, url: string, err: unknown): SearchClie
   if (isAbortError(err)) {
     return new SearchTimeoutError(
       `Timed out talking to Google Flights (${host}). The service may be slow or unreachable from your network — check your connection and try again.`,
+      { cause: err },
     );
   }
   const message = err instanceof Error ? err.message : String(err);
@@ -211,10 +218,14 @@ function wrapRequestError(method: string, url: string, err: unknown): SearchClie
   if (/(ECONNRESET|ENOTFOUND|ECONNREFUSED|EAI_AGAIN|fetch failed)/i.test(message)) {
     return new SearchConnectionError(
       `Could not reach Google Flights (${host}). Check your internet connection or DNS and try again.`,
+      { cause: err },
     );
   }
+  // Keep the message clean but preserve the original as `cause` (Python's
+  // `raise ... from e`), so e.g. "Illegal invocation" is not lost (#259).
   return new SearchClientError(
     `${method} request to Google Flights (${host}) failed: ${err instanceof Error ? err.name : "Error"}`,
+    { cause: err },
   );
 }
 
@@ -224,7 +235,7 @@ export class Client {
   private readonly retries: number;
   private readonly backoffMs: number;
   private readonly proxy: string | undefined;
-  private readonly fetchImpl: typeof fetch;
+  private readonly fetchImpl: (input: string, init: RequestInit) => Promise<Response>;
   private readonly cookieHeader: Record<string, string>;
 
   constructor(options: ClientOptions = {}) {
@@ -236,7 +247,23 @@ export class Client {
     this.retries = options.retries ?? DEFAULT_RETRIES;
     this.backoffMs = options.backoffMs ?? DEFAULT_BACKOFF_MS;
     this.proxy = options.proxy === null ? undefined : (options.proxy ?? resolveProxy());
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    // Call `fetch` unbound, never as a method of this client: Cloudflare
+    // Workers throw "Illegal invocation" when `fetch` runs with any `this`
+    // other than the global (issue #259). That holds for a caller's own
+    // `fetchImpl` too, since `fetchImpl: fetch` is the obvious thing to
+    // pass. The global `fetch` is read at call time. Only an absent
+    // `fetchImpl` falls back to it: a bogus one fails rather than quietly
+    // reaching the network through a test seam.
+    const customFetch = options.fetchImpl;
+    if (customFetch == null && typeof fetch !== "function") {
+      // Fail at construction, as capturing `fetch` here used to, rather
+      // than on every request after the retry backoff.
+      throw new ReferenceError("fetch is not defined; pass `fetchImpl`");
+    }
+    this.fetchImpl =
+      customFetch != null
+        ? (input, init) => customFetch(input, init)
+        : (input, init) => fetch(input, init);
     const socs = options.socsCookie ?? resolveSocsCookie();
     this.cookieHeader = socs ? { cookie: `SOCS=${socs}` } : {};
   }
