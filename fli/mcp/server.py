@@ -184,7 +184,7 @@ class FlightSearchParams(BaseModel):
     )
     carry_on: bool = Field(
         False,
-        description=f"Include carry-on bag fee in displayed price. {_IGNORED_BY_TRANSPORT}",
+        description="Include carry-on bag fee in displayed price.",
     )
     show_all_results: bool = Field(
         True, description="Return all available results instead of curated ~30"
@@ -1426,7 +1426,7 @@ def search_flights(
     ] = 0,
     carry_on: Annotated[
         bool,
-        Field(description=f"Include carry-on bag fee in displayed price. {_IGNORED_BY_TRANSPORT}"),
+        Field(description="Include carry-on bag fee in displayed price."),
     ] = False,
     show_all_results: Annotated[
         bool,
@@ -1956,7 +1956,7 @@ def get_booking_options(
     ] = 0,
     carry_on: Annotated[
         bool,
-        Field(description=f"Include carry-on bag fee in displayed price. {_IGNORED_BY_TRANSPORT}"),
+        Field(description="Include carry-on bag fee in displayed price."),
     ] = False,
     top_n: Annotated[
         int,

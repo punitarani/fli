@@ -15,6 +15,7 @@ from fli.models import (
     Airline,
     Airport,
     Alliance,
+    BagsFilter,
     FlightLeg,
     FlightResult,
     FlightSearchFilters,
@@ -87,6 +88,7 @@ def _filters(segments, **kwargs) -> FlightSearchFilters:
         airlines_exclude=kwargs.get("airlines_exclude"),
         max_duration=kwargs.get("max_duration"),
         price_limit=kwargs.get("price_limit"),
+        bags=kwargs.get("bags"),
     )
 
 
@@ -580,3 +582,72 @@ class TestAllianceAndLayoverEncoding:
         spec.alliances = [Alliance.SKYTEAM]
         spec.layover_restrictions = LayoverRestrictions(min_duration=90)
         assert unsupported_filters(spec) == []
+
+
+# Captured from Google's own search-page URLs (2026-10-26): fli's tfs for
+# MAD -> BER on 2027-01-12 (returning 2027-01-19) loaded in a browser, then
+# the Bags filter set to one carry-on bag. Google re-issued the token with
+# field 13 = {2: 1, 3: 0} plus the field 16 constant booking deep links carry
+# (which the search page does not need, see ``encode_tfs_payload``).
+# On that page Ryanair's fare rose from EUR 67 to 103 one-way and from
+# EUR 139 to 211 round-trip, while Iberia (bag already included) was unchanged.
+TFS_CARRY_ON_ONE_WAY = (
+    "CBwQAhogEgoyMDI3LTAxLTEyKABqBwgBEgNNQURyBwgBEgNCRVJAAUgBagQQARgAcAGCAQsI____________AZgBAg"
+)
+TFS_CARRY_ON_ROUND_TRIP = (
+    "CBwQAhogEgoyMDI3LTAxLTEyKABqBwgBEgNNQURyBwgBEgNCRVIaIBIKMjAyNy0wMS0xOSgAagcIARIDQkVScgcI"
+    "ARIDTUFEQAFIAWoEEAEYAHABggELCP___________wGYAQE"
+)
+# Field 16 (length-delimited) wrapping field 1 = 2**64 - 1, as Google writes it.
+_FIELD_16_MAX_U64 = bytes([0x82, 0x01, 0x0B, 0x08]) + b"\xff" * 9 + b"\x01"
+CARRY_ON_OUTBOUND = "2027-01-12"
+CARRY_ON_RETURN = "2027-01-19"
+
+
+def _without_field_16(tfs: str) -> bytes:
+    raw = _decode(tfs)
+    assert raw.count(_FIELD_16_MAX_U64) == 1
+    return raw.replace(_FIELD_16_MAX_U64, b"")
+
+
+class TestCarryOnEncoding:
+    """Carry-on bags ride in tfs field 13, exactly as Google's UI writes it."""
+
+    def test_one_way_matches_google_token(self):
+        spec = _filters(
+            [("MAD", "BER", CARRY_ON_OUTBOUND)],
+            stops=MaxStops.NON_STOP,
+            bags=BagsFilter(carry_on=True),
+        )
+        assert _decode(build_tfs(spec)) == _without_field_16(TFS_CARRY_ON_ONE_WAY)
+
+    def test_round_trip_matches_google_token(self):
+        spec = _filters(
+            [("MAD", "BER", CARRY_ON_OUTBOUND), ("BER", "MAD", CARRY_ON_RETURN)],
+            trip_type=TripType.ROUND_TRIP,
+            stops=MaxStops.NON_STOP,
+            bags=BagsFilter(carry_on=True),
+        )
+        assert _decode(build_tfs(spec)) == _without_field_16(TFS_CARRY_ON_ROUND_TRIP)
+
+    @pytest.mark.parametrize(
+        "bags",
+        [None, BagsFilter(), BagsFilter(checked_bags=1)],
+        ids=["no-bags", "empty-bags", "checked-only"],
+    )
+    def test_no_carry_on_leaves_token_unchanged(self, bags):
+        """Without carry-on the token is byte-identical to the no-bags search."""
+        segments = [("JFK", "LAX", OUTBOUND_DATE)]
+        assert build_tfs(_filters(segments, stops=MaxStops.NON_STOP, bags=bags)) == TFS_NON_STOP
+
+    def test_carry_on_is_not_reported_unsupported(self):
+        spec = _filters([("JFK", "LAX", OUTBOUND_DATE)], bags=BagsFilter(carry_on=True))
+        assert unsupported_filters(spec) == []
+
+    @pytest.mark.parametrize("carry_on", [False, True])
+    def test_checked_bags_are_still_reported_unsupported(self, carry_on):
+        spec = _filters(
+            [("JFK", "LAX", OUTBOUND_DATE)],
+            bags=BagsFilter(checked_bags=1, carry_on=carry_on),
+        )
+        assert unsupported_filters(spec) == ["bags"]

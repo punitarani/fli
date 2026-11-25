@@ -20,9 +20,11 @@ from fli.models import (
     Airline,
     Airport,
     Alliance,
+    BagsFilter,
     FlightSearchFilters,
     FlightSegment,
     LayoverRestrictions,
+    MaxStops,
     PassengerInfo,
     TripType,
 )
@@ -396,3 +398,51 @@ class TestLapInfantPricing:
             f"BA{number}: {adult_only[number]} -> {with_infant[number]} ({ratio:.2f}x) — "
             "a lap infant should add roughly 10%, not a second fare"
         )
+
+
+class TestCarryOn:
+    """``carry_on`` adds the bag fee to fares that exclude overhead-bin access.
+
+    MAD -> BER non-stop is served by Ryanair (no overhead bin in the base
+    fare) and Iberia (cabin bag included in every fare), so the same flights
+    should cost more with carry-on for Ryanair and the same for Iberia.
+    """
+
+    ROUTE = (Airport.MAD, Airport.BER)
+    # Ryanair does not fly every day (e.g. not on 25 December), so try a few.
+    DAYS_AHEAD = (45, 60, 75, 90)
+
+    def _prices(self, client, days_ahead: int, carry_on: bool) -> dict[tuple[str, str], float]:
+        filters = FlightSearchFilters(
+            trip_type=TripType.ONE_WAY,
+            passenger_info=PassengerInfo(adults=1),
+            flight_segments=_segments(*self.ROUTE, days_ahead=days_ahead),
+            stops=MaxStops.NON_STOP,
+            bags=BagsFilter(carry_on=True) if carry_on else None,
+        )
+        results = _search_with_retry(client, filters, currency="EUR")
+        return {
+            (f.legs[0].airline.name.lstrip("_"), f.legs[0].flight_number): f.price
+            for f in results
+            if len(f.legs) == 1 and f.price
+        }
+
+    def test_carry_on_prices_bag_into_ryanair_and_not_iberia(self, client):
+        for days_ahead in self.DAYS_AHEAD:
+            without = self._prices(client, days_ahead, carry_on=False)
+            if any(airline == "FR" for airline, _ in without):
+                break
+        else:
+            pytest.skip("no Ryanair MAD-BER non-stop on any probed date right now")
+        with_bag = self._prices(client, days_ahead, carry_on=True)
+        shared = set(without) & set(with_bag)
+        ryanair = sorted(k for k in shared if k[0] == "FR")
+        assert ryanair, "Ryanair flight missing from the carry-on search"
+
+        for key in shared:
+            assert with_bag[key] >= without[key], f"{key}: carry-on lowered the fare"
+        assert any(with_bag[k] > without[k] for k in ryanair), (
+            f"Ryanair fares unchanged by carry-on: {[(k, without[k]) for k in ryanair]}"
+        )
+        for key in (k for k in shared if k[0] == "IB"):
+            assert with_bag[key] == without[key], f"{key}: Iberia already includes a cabin bag"

@@ -412,6 +412,7 @@ def encode_tfs_payload(
     is_one_way: bool,
     passengers: Sequence[int] = (1,),
     seat: int = 1,
+    carry_on_bags: int = 0,
     pin_max_u64: bool = False,
 ) -> str:
     """Wrap encoded segments in the ``tfs`` envelope and base64 it.
@@ -429,6 +430,19 @@ def encode_tfs_payload(
             quote rather than an error. See ``_PASSENGER_FIELDS`` above (and
             :func:`passenger_codes`) for the live fare evidence.
         seat: Cabin class (1 = economy, 2 = premium, 3 = business, 4 = first).
+        carry_on_bags: Carry-on bags to include in the displayed price.
+            When non-zero, emits field 13 as ``{2: carry_on_bags, 3: 0}`` —
+            the exact bytes Google's UI writes when the Bags filter is set
+            to one carry-on bag (captured 2026-10-26). Google then adds the
+            bag fee for carriers whose fee it knows (seen: Ryanair, Vueling)
+            and leaves fares that include a cabin bag unchanged (seen:
+            Iberia). For some low-cost carriers Google adds nothing and its
+            own UI says the price "may not include overhead bin access"
+            (seen: easyJet, Wizz Air), so their fares stay base fares.
+            Sub-field 3 is always 0 in Google's own tokens; its meaning is
+            unknown, and checked bags are not encoded there (setting it to
+            1 left every price unchanged in a live test), so it is written
+            as captured.
         pin_max_u64: Emit the field 16 constant that booking deep links
             carry. The search page does not need it.
 
@@ -439,7 +453,11 @@ def encode_tfs_payload(
     payload = _varint_field(1, 28) + _varint_field(2, 2) + segments
     for kind in passengers:
         payload += _varint_field(8, kind)
-    payload += _varint_field(9, seat) + _varint_field(14, 1)
+    payload += _varint_field(9, seat)
+    if carry_on_bags:
+        # Google emits field 13 between the cabin (9) and field 14.
+        payload += _length_delim(13, _varint_field(2, carry_on_bags) + _varint_field(3, 0))
+    payload += _varint_field(14, 1)
     if pin_max_u64:
         payload += _length_delim(16, _varint_field(1, _MAX_U64))
     payload += _varint_field(19, 2 if is_one_way else 1)
