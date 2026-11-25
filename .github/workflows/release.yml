@@ -234,6 +234,13 @@ jobs:
   test:
     needs: release
     if: ${{ needs.release.outputs.did_release == 'true' }}
+    # A called workflow can't be granted more than its caller allows, and
+    # ci.yml requests checks/pull-requests write. Without this block GitHub
+    # rejects the whole run at startup (even a dry run, where this job skips).
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
     uses: ./.github/workflows/ci.yml
     with:
       ref: ${{ needs.release.outputs.tag }}
