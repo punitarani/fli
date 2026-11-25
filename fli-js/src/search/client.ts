@@ -142,7 +142,9 @@ export interface ClientOptions {
   /**
    * Custom fetch implementation (test seam). Called as a plain function,
    * never as a method of the client, so the global `fetch` can be passed
-   * as-is; bind any implementation that needs its own `this`.
+   * as-is; bind any implementation that needs its own `this`. Without it
+   * the client uses the global `fetch`, looked up on every request, so a
+   * later stub or instrumentation of `globalThis.fetch` applies to it.
    */
   fetchImpl?: typeof fetch;
   /**
