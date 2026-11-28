@@ -583,6 +583,22 @@ class SearchFlights:
         results: list[FlightResult] = list(flight) if isinstance(flight, tuple) else [flight]
         is_one_way = len(results) == 1
 
+        if len(results) > 2:
+            # field 19 only has a one-way/round-trip encoding here (see
+            # encode_tfs_payload); a 3+ segment itinerary tagged round-trip
+            # decodes on the booking page with a segment dropped and another
+            # rewritten (confirmed against a live 3-city capture on #212).
+            # The generic search URL is the safe link until this repo can
+            # capture what a true multi-city (field 19 = 3) token decodes to.
+            logger.debug(
+                "build_flight_booking_url: %d segments, no verified multi-city tfs encoding, "
+                "falling back to the generic URL",
+                len(results),
+            )
+            return with_locale_params(
+                "https://www.google.com/travel/flights", currency, language, country
+            )
+
         try:
             segments: list[list[LegSpec]] = []
             for result in results:

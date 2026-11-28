@@ -200,7 +200,19 @@ def multi(
             typer.echo("No flights found.")
             raise typer.Exit(1)
 
-        display_flight_results(results, trip_type=trip_type)
+        # Per-flight booking deep-links, same call flights.py already makes
+        # for one-way/round-trip (never raises); passing seat_type/passenger_info
+        # keeps the link's fare class and traveller count matching the search.
+        booking_urls = [
+            search_client.build_flight_booking_url(
+                result,
+                seat_type=seat_type,
+                passenger_info=filters.passenger_info,
+            )
+            for result in results
+        ]
+
+        display_flight_results(results, trip_type=trip_type, booking_urls=booking_urls)
 
     except ParseError as e:
         typer.echo(f"Error: {str(e)}")
