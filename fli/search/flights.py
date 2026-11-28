@@ -67,6 +67,16 @@ SPARSE_PASSENGER_MIX_WARNING = (
 )
 
 
+ROUND_TRIP_NOT_INLINED_WARNING = (
+    "Google did not inline any round-trip itineraries for this search, but the "
+    "outbound date does have flights: its one-way search returns them. On "
+    "lower-traffic routes the search page often ships the round-trip board "
+    "empty and loads it afterwards through the signed RPC, which this client "
+    "cannot call. This does not mean the route has no flights: search each "
+    "direction one-way instead."
+)
+
+
 def _has_children_or_infants(passenger_info: PassengerInfo) -> bool:
     """Whether the party includes anyone Google prices client-side.
 
@@ -182,6 +192,9 @@ class SearchFlights:
         # Set at the start of every search() call — see the
         # sparse_passenger_mix property.
         self._sparse_passenger_mix: bool = False
+        # Set at the start of every search() call — see the
+        # round_trip_not_inlined property.
+        self._round_trip_not_inlined: bool = False
 
     @property
     def sparse_passenger_mix(self) -> bool:
@@ -208,6 +221,28 @@ class SearchFlights:
         themselves.
         """
         return self._sparse_passenger_mix
+
+    @property
+    def round_trip_not_inlined(self) -> bool:
+        """Whether the last round-trip search() was empty only because Google inlined nothing.
+
+        ``True`` exactly when the round-trip results page decoded to zero
+        rows *and* a one-way probe of the outbound segment did return rows —
+        so the route flies that day, and the empty answer is the search
+        page's, not the schedule's. See ``ROUND_TRIP_NOT_INLINED_WARNING``.
+
+        On thinner routes (measured 2026-11-28: MAD-RIX on most dates, while
+        MAD-LHR, MAD-BCN and JFK-LAX inlined 15-28 rows for the same dates)
+        Google's server-rendered page carries no ``ds:1`` rows for the round
+        trip and fills the board in later through ``GetShoppingResults``,
+        which needs the page's own ``x-goog-batchexecute-bgr`` signature.
+        The probe costs one extra page fetch and runs only on that empty
+        path, never on a search that returned results.
+
+        Reset to ``False`` at the start of every :meth:`search` call, with
+        the same single-search scope as :attr:`sparse_passenger_mix`.
+        """
+        return self._round_trip_not_inlined
 
     # ------------------------------------------------------------------
     # Public search API
@@ -255,6 +290,7 @@ class SearchFlights:
         # Reset before any code below can raise, so a search that raises
         # never leaves a stale True from an earlier call on this instance.
         self._sparse_passenger_mix = False
+        self._round_trip_not_inlined = False
 
         if not isinstance(top_n, int) or isinstance(top_n, bool) or not 1 <= top_n <= 10:
             raise ValueError(
@@ -276,6 +312,10 @@ class SearchFlights:
         )
         if flights is None:
             self._warn_if_sparse_passenger_mix(filters, tracker)
+            if not self._sparse_passenger_mix:
+                self._check_round_trip_not_inlined(
+                    filters, tracker, currency=currency, language=language, country=country
+                )
             return None
         if filters.trip_type == TripType.ONE_WAY:
             return flights
@@ -313,6 +353,45 @@ class SearchFlights:
         if _has_children_or_infants(filters.passenger_info):
             self._sparse_passenger_mix = True
             logger.warning(SPARSE_PASSENGER_MIX_WARNING)
+
+    def _check_round_trip_not_inlined(
+        self,
+        filters: FlightSearchFilters,
+        tracker: _RowCountTracker,
+        *,
+        currency: str | None,
+        language: str | None,
+        country: str | None,
+    ) -> None:
+        """Tell an un-inlined round-trip board apart from a day with no flights.
+
+        Runs only when the round trip's first page came back with zero rows
+        before client-side filtering. One one-way fetch of the outbound
+        segment settles it: rows there mean the route flies that day. A
+        failed probe changes nothing, so the original empty result stands.
+        """
+        if filters.trip_type != TripType.ROUND_TRIP or not tracker.any_zero_rows:
+            return
+        probe = deepcopy(filters)
+        probe.trip_type = TripType.ONE_WAY
+        probe.flight_segments = probe.flight_segments[:1]
+        probe_tracker = _RowCountTracker()
+        try:
+            self._fetch_flights(
+                probe,
+                currency=currency,
+                language=language,
+                country=country,
+                capture_session=False,
+                tracker=probe_tracker,
+            )
+        except Exception:  # noqa: BLE001 — a diagnostic probe must never mask the real result
+            logger.debug("round-trip inlining probe failed", exc_info=True)
+            return
+        if probe_tracker.any_zero_rows:
+            return
+        self._round_trip_not_inlined = True
+        logger.warning(ROUND_TRIP_NOT_INLINED_WARNING)
 
     def _fetch_flights(
         self,

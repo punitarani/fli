@@ -54,7 +54,7 @@ from fli.models.google_flights.explore import KG_MID_PREFIXES
 from fli.search import SearchDates, SearchExplore, SearchFlights
 from fli.search.dates import MAX_DATES_PER_SEARCH
 from fli.search.exceptions import SearchParseError
-from fli.search.flights import SPARSE_PASSENGER_MIX_WARNING
+from fli.search.flights import ROUND_TRIP_NOT_INLINED_WARNING, SPARSE_PASSENGER_MIX_WARNING
 
 
 class FlightSearchConfig(BaseSettings):
@@ -827,6 +827,8 @@ def _execute_flight_search(params: FlightSearchParams) -> dict[str, Any]:
             # only be answered correctly once, there.
             if search_client.sparse_passenger_mix:
                 response["note"] = SPARSE_PASSENGER_MIX_WARNING
+            elif search_client.round_trip_not_inlined:
+                response["note"] = ROUND_TRIP_NOT_INLINED_WARNING
             return response
 
         # Serialize results; attach per-flight deep-link booking URL.
