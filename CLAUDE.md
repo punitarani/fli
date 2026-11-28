@@ -158,6 +158,20 @@ Consequences to keep in mind when changing search code:
   condition. The CLI's text mode prints no copy of its own: the library's
   warning already reaches the terminal on stderr, and echoing it showed the
   same paragraph twice — an adults-only search shows the schedule.
+- **Round trips on thinner routes often come back empty.** Google's page
+  inlines the round-trip board only for some routes and dates and fills the
+  rest in afterwards through the signed RPC (measured 2026-11-28: MAD-RIX
+  20/01-02/02/2027 inlined 0 rows on every locale tried, while MAD-LHR,
+  MAD-BCN and JFK-LAX inlined 15-28 for the same dates, and the MAD-RIX
+  one-way pages for both directions were full). Seeding the return page with
+  a one-way outbound (`selected_flight`) does not help: it inlines nothing
+  either. So when a round trip's first page decodes to zero rows,
+  `SearchFlights.search` makes one one-way fetch of the outbound segment; if
+  that page has rows it sets `SearchFlights.round_trip_not_inlined` and logs
+  `ROUND_TRIP_NOT_INLINED_WARNING`. The probe never runs when the round trip
+  returned rows, when the caller's own filter emptied it, or when the
+  sparse-passenger-mix warning already explains it. The MCP empty response
+  and the CLI's `--format json` empty payload carry the same text as `note`.
 - Date searches have no calendar grid: one page fetch per date, capped at
   `fli.search.dates.MAX_DATES_PER_SEARCH` (93) per `SearchDates.search`. At the
   cap that is several hundred MB of pages and parsed JSON at peak.

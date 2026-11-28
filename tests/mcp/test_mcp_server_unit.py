@@ -24,7 +24,7 @@ from fli.mcp.server import (
     _serialize_flight_leg,
     _serialize_layover,
 )
-from fli.search.flights import SPARSE_PASSENGER_MIX_WARNING
+from fli.search.flights import ROUND_TRIP_NOT_INLINED_WARNING, SPARSE_PASSENGER_MIX_WARNING
 from tests.search._pages import as_search_page
 from tests.search.test_parse_flights_data import _leg, _row
 
@@ -1069,3 +1069,50 @@ class TestTrippedSweepErrorIsRecognised:
                     results_key="dates",
                     trip_type="ONE_WAY",
                 )
+
+
+class TestEmptyRoundTripNotInlinedNote:
+    """End-to-end (stubbed pages, real ``SearchFlights.search``).
+
+    An empty round-trip board whose outbound one-way page does carry rows is
+    Google's page, not the schedule — the MCP response says so in ``note``.
+    """
+
+    def _page(self, rows: list) -> str:
+        payload = [[None, None, None, None, "FAKE_SESSION"], None, [rows], None]
+        return as_search_page(payload)
+
+    def _stub_pages(self, monkeypatch, bodies: list[str]) -> None:
+        calls: list[str] = []
+
+        def _fake_get(self, url, **kwargs):  # noqa: ANN001
+            body = bodies[min(len(calls), len(bodies) - 1)]
+            calls.append(url)
+            return type("R", (), {"text": body, "raise_for_status": lambda self: None})()
+
+        monkeypatch.setattr("fli.search.client.Client.get", _fake_get)
+
+    def test_empty_round_trip_with_flying_outbound_carries_a_note(self, monkeypatch):
+        row = _row(legs=[_leg(dep_iata="JFK", arr_iata="LHR", airline_code="DL")])
+        self._stub_pages(monkeypatch, [self._page([]), self._page([row])])
+        params = FlightSearchParams(
+            origin="JFK",
+            destination="LHR",
+            departure_date="2026-12-01",
+            return_date="2026-12-10",
+        )
+        result = _execute_flight_search(params)
+        assert result["count"] == 0
+        assert result["note"] == ROUND_TRIP_NOT_INLINED_WARNING
+
+    def test_empty_round_trip_with_empty_outbound_has_no_note_key(self, monkeypatch):
+        self._stub_pages(monkeypatch, [self._page([])])
+        params = FlightSearchParams(
+            origin="JFK",
+            destination="LHR",
+            departure_date="2026-12-01",
+            return_date="2026-12-10",
+        )
+        result = _execute_flight_search(params)
+        assert result["count"] == 0
+        assert "note" not in result

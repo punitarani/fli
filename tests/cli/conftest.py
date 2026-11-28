@@ -106,6 +106,7 @@ def mock_search_flights(monkeypatch):
     # way so tests that don't care about it don't pick up a truthy MagicMock
     # attribute by accident. Tests that exercise the hint/note set it True.
     mock.sparse_passenger_mix = False
+    mock.round_trip_not_inlined = False
     monkeypatch.setattr("fli.search.flights.SearchFlights.__new__", lambda cls: mock)
     monkeypatch.setattr("fli.search.SearchFlights.__new__", lambda cls: mock)
     return mock

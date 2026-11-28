@@ -40,7 +40,7 @@ from fli.models import (
     TripType,
 )
 from fli.search import SearchClientError, SearchFlights
-from fli.search.flights import SPARSE_PASSENGER_MIX_WARNING
+from fli.search.flights import ROUND_TRIP_NOT_INLINED_WARNING, SPARSE_PASSENGER_MIX_WARNING
 
 
 def _search_flights_core(
@@ -233,7 +233,11 @@ def _search_flights_core(
             # distinction lives in the fetch path, not in these arguments,
             # so it can only be answered correctly once, there.
             sparse_note = (
-                SPARSE_PASSENGER_MIX_WARNING if search_client.sparse_passenger_mix else None
+                SPARSE_PASSENGER_MIX_WARNING
+                if search_client.sparse_passenger_mix
+                else ROUND_TRIP_NOT_INLINED_WARNING
+                if search_client.round_trip_not_inlined
+                else None
             )
             if output_format == OutputFormat.JSON:
                 emit_json(
