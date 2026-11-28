@@ -18,6 +18,7 @@ from fli.search.exceptions import (
     SearchParseError,
     SearchTimeoutError,
 )
+from fli.search.flights import ROUND_TRIP_NOT_INLINED_WARNING, SPARSE_PASSENGER_MIX_WARNING
 from tests.search._pages import as_search_page
 from tests.search.test_parse_flights_data import _leg, _row
 
@@ -858,6 +859,55 @@ def test_flights_json_no_results_with_child_carries_a_note(
     assert payload["success"] is True
     assert payload["count"] == 0
     assert "client-side" in payload["note"]
+
+
+def test_flights_json_empty_round_trip_not_inlined_carries_a_note(
+    runner, mock_search_flights, mock_console
+):
+    """An empty round trip Google didn't inline gets the round-trip note in JSON."""
+    mock_search_flights.search.return_value = []
+    mock_search_flights.round_trip_not_inlined = True
+    departure = datetime.now().strftime("%Y-%m-%d")
+    result = runner.invoke(
+        app,
+        ["flights", "MAD", "RIX", departure, "--return", departure, "--format", "json"],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["count"] == 0
+    assert payload["note"] == ROUND_TRIP_NOT_INLINED_WARNING
+
+
+def test_flights_json_sparse_note_wins_over_round_trip_note(
+    runner, mock_search_flights, mock_console
+):
+    """With both flags set, the passenger-mix explanation is the one reported."""
+    mock_search_flights.search.return_value = []
+    mock_search_flights.sparse_passenger_mix = True
+    mock_search_flights.round_trip_not_inlined = True
+    departure = datetime.now().strftime("%Y-%m-%d")
+    result = runner.invoke(
+        app,
+        [
+            "flights",
+            "MAD",
+            "RIX",
+            departure,
+            "--return",
+            departure,
+            "--children",
+            "1",
+            "--passengers",
+            "2",
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["note"] == SPARSE_PASSENGER_MIX_WARNING
 
 
 def test_given_comma_separated_origin_list_then_returns_flights_from_all(

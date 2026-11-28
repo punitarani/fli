@@ -367,7 +367,8 @@ class SearchFlights:
 
         Runs only when the round trip's first page came back with zero rows
         before client-side filtering. One one-way fetch of the outbound
-        segment settles it: rows there mean the route flies that day. A
+        segment settles it: rows there that also pass the caller's own
+        client-side filters mean the route flies that day for this search. A
         failed probe changes nothing, so the original empty result stands.
         """
         if filters.trip_type != TripType.ROUND_TRIP or not tracker.any_zero_rows:
@@ -377,7 +378,7 @@ class SearchFlights:
         probe.flight_segments = probe.flight_segments[:1]
         probe_tracker = _RowCountTracker()
         try:
-            self._fetch_flights(
+            probe_flights = self._fetch_flights(
                 probe,
                 currency=currency,
                 language=language,
@@ -388,7 +389,10 @@ class SearchFlights:
         except Exception:  # noqa: BLE001 — a diagnostic probe must never mask the real result
             logger.debug("round-trip inlining probe failed", exc_info=True)
             return
-        if probe_tracker.any_zero_rows:
+        # Rows must survive the caller's own client-side filters too: an outbound
+        # that only flies an excluded airline (or over the price cap) is no
+        # evidence that the round trip the caller asked for exists.
+        if probe_tracker.any_zero_rows or not probe_flights:
             return
         self._round_trip_not_inlined = True
         logger.warning(ROUND_TRIP_NOT_INLINED_WARNING)

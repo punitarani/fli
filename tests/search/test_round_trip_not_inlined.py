@@ -92,6 +92,17 @@ class TestRoundTripNotInlined:
         assert sf.round_trip_not_inlined is False
         assert len(calls) == 1
 
+    def test_probe_rows_removed_by_callers_filter_stay_silent(self, monkeypatch, caplog):
+        # Round-trip board empty; the outbound one-way page only has DL, which the
+        # caller's airline filter (AA only) removes: no evidence for this search.
+        sf, calls = _client_serving_counted(monkeypatch, [_empty_page(), _row_page("DL")])
+        filters = _round_trip_filters(PassengerInfo(adults=1), airlines=[Airline.AA])
+        with caplog.at_level(logging.WARNING, logger="fli.search.flights"):
+            assert sf.search(filters) is None
+        assert sf.round_trip_not_inlined is False
+        assert ROUND_TRIP_NOT_INLINED_WARNING not in [w.getMessage() for w in _warnings(caplog)]
+        assert len(calls) == 2
+
     def test_sparse_passenger_mix_takes_precedence(self, monkeypatch, caplog):
         sf, calls = _client_serving_counted(monkeypatch, [_empty_page(), _row_page()])
         with caplog.at_level(logging.WARNING, logger="fli.search.flights"):
