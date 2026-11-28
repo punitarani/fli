@@ -5,6 +5,7 @@ import pytest
 from fli.models import (
     Airline,
     Airport,
+    BagsFilter,
     DateSearchFilters,
     FlightSegment,
     LayoverRestrictions,
@@ -264,3 +265,21 @@ def test_date_search_filters(test_case):
     # Test conversion to DateSearchFilters
     formatted_filters = DateSearchFilters.format(search_filters)
     assert formatted_filters == expected_formatted
+
+
+def test_date_search_bags_filter_order():
+    """Slot [1][10] is [carry_on, checked_bags]. Asymmetric values catch a swap."""
+    search = DateSearchFilters(
+        passenger_info=PassengerInfo(adults=1),
+        flight_segments=[
+            FlightSegment(
+                departure_airport=[[Airport.JFK, 0]],
+                arrival_airport=[[Airport.LAX, 0]],
+                travel_date=TRAVEL_DATE,
+            )
+        ],
+        from_date=FROM_DATE_1,
+        to_date=TO_DATE_1,
+        bags=BagsFilter(checked_bags=2, carry_on=True),
+    )
+    assert search.format()[1][10] == [1, 2]

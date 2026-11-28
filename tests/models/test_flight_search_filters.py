@@ -447,7 +447,7 @@ TEST_CASES = [
             stops=MaxStops.ANY,
             seat_type=SeatType.ECONOMY,
             sort_by=SortBy.CHEAPEST,
-            bags=BagsFilter(checked_bags=1, carry_on=True),
+            bags=BagsFilter(checked_bags=2, carry_on=True),
         ),
         "formatted": [
             [],
@@ -462,7 +462,7 @@ TEST_CASES = [
                 None,
                 None,
                 None,
-                [1, 1],
+                [1, 2],  # [carry_on, checked_bags]
                 None,
                 None,
                 [

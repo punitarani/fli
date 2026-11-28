@@ -229,7 +229,7 @@ class FlightSearchFilters(BaseModel):
             formatted_segments.append(segment_formatted)
 
         # Bags filter
-        bags_filter = [self.bags.checked_bags, int(self.bags.carry_on)] if self.bags else None
+        bags_filter = [int(self.bags.carry_on), self.bags.checked_bags] if self.bags else None
 
         # The browser uses a wrapper nesting where outer[1] = [[], [main], ...fields...]
         # with self-transfer at wrapper[6] and basic economy at wrapper[15].
@@ -249,7 +249,7 @@ class FlightSearchFilters(BaseModel):
         #   7:  price limit [None, max_price]
         #   8:  unknown - seemingly no effect (tested 0-3, arrays)
         #   9:  unknown - seemingly no effect (tested 0-3, arrays)
-        #   10: bags filter [checked_bags, carry_on]
+        #   10: bags filter [carry_on, checked_bags]
         #   11: unknown - seemingly no effect (tested 0-3, arrays)
         #   12: unknown - seemingly no effect (tested 0-3, arrays)
         #   13: flight segments
@@ -276,7 +276,7 @@ class FlightSearchFilters(BaseModel):
                 [None, self.price_limit.max_price] if self.price_limit else None,
                 None,  # [8] seemingly no effect
                 None,  # [9] seemingly no effect
-                bags_filter,  # [10] bags filter [checked_bags, carry_on]
+                bags_filter,  # [10] bags filter [carry_on, checked_bags]
                 None,  # [11] seemingly no effect
                 None,  # [12] seemingly no effect
                 formatted_segments,
