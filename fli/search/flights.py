@@ -227,9 +227,10 @@ class SearchFlights:
         """Whether the last round-trip search() was empty only because Google inlined nothing.
 
         ``True`` exactly when the round-trip results page decoded to zero
-        rows *and* a one-way probe of the outbound segment did return rows —
-        so the route flies that day, and the empty answer is the search
-        page's, not the schedule's. See ``ROUND_TRIP_NOT_INLINED_WARNING``.
+        rows *and* a one-way probe of the outbound segment returned rows that
+        also pass the caller's own client-side filters — so the route flies
+        that day for this search, and the empty answer is the search page's,
+        not the schedule's. See ``ROUND_TRIP_NOT_INLINED_WARNING``.
 
         On thinner routes (measured 2026-11-28: MAD-RIX on most dates, while
         MAD-LHR, MAD-BCN and JFK-LAX inlined 15-28 rows for the same dates)
